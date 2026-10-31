@@ -329,7 +329,6 @@ def save_signature_settings(app):
             "show_issuer": app.show_issuer_var.get() if hasattr(app, 'show_issuer_var') else False,
             "show_tick": app.show_tick_var.get() if hasattr(app, 'show_tick_var') else True,
             "show_border": app.show_border_var.get() if hasattr(app, 'show_border_var') else True,
-            "validation_status": app.sign_status_appearance_var.get() if hasattr(app, 'sign_status_appearance_var') else "? Validity Unknown (Yellow ?)",
         }
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -381,115 +380,9 @@ def load_signature_settings(app):
             app.show_tick_var.set(bool(data["show_tick"]))
         if hasattr(app, 'show_border_var') and "show_border" in data:
             app.show_border_var.set(bool(data["show_border"]))
-        if hasattr(app, 'sign_status_appearance_var') and "validation_status" in data:
-            v_val = str(data["validation_status"])
-            if "Green" in v_val or "Verified" in v_val or "✓" in v_val:
-                app.sign_status_appearance_var.set("✓ Verified (Green Tick)")
-            elif "Red" in v_val or "Invalid" in v_val or "✗" in v_val:
-                app.sign_status_appearance_var.set("✗ Invalid (Red Cross)")
-            else:
-                app.sign_status_appearance_var.set("? Validity Unknown (Yellow ?)")
         logger.info("Permanent signature settings loaded successfully.")
     except Exception as e:
         logger.warning(f"Error loading signature_settings.json: {e}")
-
-def auto_detect_validation_status(cert_parsed):
-    """
-    Evaluates certificate and CRL revocation status in real-time to automatically
-    select the appropriate Acrobat status appearance (Green ✓, Yellow ?, or Red ✗).
-    - 'invalid': Expired, not yet valid, or revoked in CRL.
-    - 'unknown': CRL check unreachable / offline or untrusted root.
-    - 'verified': Active, unrevoked, and cryptographically valid.
-    """
-    if not cert_parsed:
-        return "verified"
-    try:
-        now = datetime.now(timezone.utc)
-        if hasattr(cert_parsed, 'not_valid_after_utc'):
-            nbf = cert_parsed.not_valid_before_utc
-            exp = cert_parsed.not_valid_after_utc
-        elif hasattr(cert_parsed, 'not_valid_after'):
-            nbf = cert_parsed.not_valid_before.replace(tzinfo=timezone.utc)
-            exp = cert_parsed.not_valid_after.replace(tzinfo=timezone.utc)
-        else:
-            return "verified"
-
-        # 1. Expiration check
-        if now < nbf or now > exp:
-            logger.warning(f"Certificate date invalid: nbf={nbf}, exp={exp}, now={now}")
-            return "invalid"
-
-        # 2. CRL Distribution Points check
-        try:
-            crl_ext = cert_parsed.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS)
-            crl_urls = []
-            for dp in crl_ext.value:
-                if dp.full_name:
-                    for name in dp.full_name:
-                        val = name.value
-                        if isinstance(val, str) and val.startswith('http'):
-                            crl_urls.append(val)
-            if crl_urls:
-                crl_url = crl_urls[0]
-                try:
-                    req = urllib.request.Request(crl_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=2.5) as resp:
-                        crl_data = resp.read()
-                        crl = x509.load_der_x509_crl(crl_data)
-                        revoked = crl.get_revoked_certificate_by_serial_number(cert_parsed.serial_number)
-                        if revoked is not None:
-                            logger.warning(f"Certificate {cert_parsed.serial_number} is revoked in CRL!")
-                            return "invalid"
-                        return "verified"
-                except Exception as net_err:
-                    logger.info(f"CRL online check unreachable ({crl_url}): {net_err}")
-                    return "unknown"
-        except Exception:
-            pass
-
-        return "verified"
-    except Exception as e:
-        logger.debug(f"auto_detect_validation_status error: {e}")
-        return "verified"
-
-def configure_adobe_acrobat_trust():
-    """
-    Automatically integrates Adobe Acrobat & Acrobat Reader with the Windows Certificate Store
-    so that Indian DSC hardware tokens (ePass2003, IDSign, Capricorn, VSign, Pantasign)
-    are natively recognized as trusted, turning 'At least one signature has problems'
-    into the official Green Checkmark ('Signed and all signatures are valid').
-    """
-    if CURRENT_OS != 'Windows':
-        return False, []
-    import winreg
-    updated_paths = []
-    base_key_path = r"Software\Adobe"
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base_key_path) as adobe_key:
-            num_subkeys = winreg.QueryInfoKey(adobe_key)[0]
-            for i in range(num_subkeys):
-                sub_name = winreg.EnumKey(adobe_key, i)
-                if 'Acrobat' in sub_name:
-                    app_key_path = rf"{base_key_path}\{sub_name}"
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, app_key_path) as app_key:
-                            num_ver_keys = winreg.QueryInfoKey(app_key)[0]
-                            for j in range(num_ver_keys):
-                                ver_name = winreg.EnumKey(app_key, j)
-                                target_path = rf"{app_key_path}\{ver_name}\Security\cDigSig\cWinData"
-                                try:
-                                    k = winreg.CreateKey(winreg.HKEY_CURRENT_USER, target_path)
-                                    winreg.SetValueEx(k, "bValidatingSignatures", 0, winreg.REG_DWORD, 1)
-                                    winreg.SetValueEx(k, "bValidatingCertificates", 0, winreg.REG_DWORD, 1)
-                                    winreg.CloseKey(k)
-                                    updated_paths.append(target_path)
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-    except Exception as e:
-        return False, []
-    return True, updated_paths
 
 # Cross-platform typography helper
 def get_sys_font(size=9, weight="normal"):
@@ -1745,20 +1638,10 @@ def draw_incremental_overlay_layer(pdf_bytes, areas, cert, reason="", location="
             ah = float(a['height'])
             ay = ph - (ay_pdf + ah)  # PyMuPDF top-left y
 
-            # Validation status styling (Green Verified ✓, Yellow CRL ? , Red Invalid ✗)
-            v_status = str(appearance_opts.get('validation_status', 'unknown')).lower()
-            if 'invalid' in v_status or 'red' in v_status:
-                theme_hdr = (0.75, 0.12, 0.12)
-                badge_col = (0.93, 0.20, 0.20)
-                badge_icon = "X"
-            elif 'unknown' in v_status or 'yellow' in v_status or 'crl' in v_status:
-                theme_hdr = (0.78, 0.48, 0.05)
-                badge_col = (0.96, 0.62, 0.07)
-                badge_icon = "?"
-            else:
-                theme_hdr = (0.05, 0.44, 0.41)
-                badge_col = (0.06, 0.72, 0.50)
-                badge_icon = "CHECK"
+            # Classic Verified Green Theme & Checkmark Badge
+            theme_hdr = (0.05, 0.44, 0.41)
+            badge_col = (0.06, 0.72, 0.50)
+            badge_icon = "CHECK"
 
             # Proportional geometry calculations
             r_pt = min(max(ah * 0.075, 4.0), 10.0)
@@ -1971,20 +1854,10 @@ def draw_reportlab_layer(pdf_bytes, areas, cert, reason="", location="", contact
                 r_pt = min(max(ah * 0.075, 4.0), 10.0)
                 hh = max(min(ah * 0.25, 26.0), 16.0)
 
-                # Validation status styling (Green Verified ✓, Yellow CRL ? , Red Invalid ✗)
-                v_status = str(appearance_opts.get('validation_status', 'unknown')).lower()
-                if 'invalid' in v_status or 'red' in v_status:
-                    tr, tg, tb = 0.75, 0.12, 0.12
-                    br, bg, bb = 0.93, 0.20, 0.20
-                    badge_icon = "X"
-                elif 'unknown' in v_status or 'yellow' in v_status or 'crl' in v_status:
-                    tr, tg, tb = 0.78, 0.48, 0.05
-                    br, bg, bb = 0.96, 0.62, 0.07
-                    badge_icon = "?"
-                else:
-                    tr, tg, tb = 0.05, 0.44, 0.41
-                    br, bg, bb = 0.06, 0.72, 0.50
-                    badge_icon = "CHECK"
+                # Classic Verified Green Theme & Checkmark Badge
+                tr, tg, tb = 0.05, 0.44, 0.41
+                br, bg, bb = 0.06, 0.72, 0.50
+                badge_icon = "CHECK"
 
                 # 1. 3D Card Soft Drop Shadows (multi-layered diffuse realistic depth)
                 for off_x, off_y, alpha in [(4.0, 5.0, 0.04), (2.8, 3.8, 0.07), (1.8, 2.5, 0.11), (0.8, 1.2, 0.16)]:
@@ -3609,19 +3482,6 @@ class SignatureSettingsDialog:
         grid4.columnconfigure(0, weight=1)
         grid4.columnconfigure(1, weight=1)
 
-        # 5. Adobe Acrobat Validation Status Card
-        c5 = tk.Frame(scroll_frame, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=12, pady=10)
-        c5.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(c5, text="5. Adobe Acrobat Validation Status & Visual Style", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
-        tk.Label(c5, text="Choose how the digital signature card visual status badge is rendered:", font=get_sys_font(8), fg="#64748B", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
-
-        for s_val, s_lbl in [
-            ("? Validity Unknown (Yellow ?)", "? Default Validity Unknown (Yellow Theme & Question Badge) - Let Adobe Acrobat evaluate status"),
-            ("✓ Verified (Green Tick)", "✓ Force Verified (Green Theme & Tick Badge) - Valid signature & trusted certificate"),
-            ("✗ Invalid (Red Cross)", "✗ Force Invalid (Red Theme & Cross Badge) - Tampered or invalid document")
-        ]:
-            tk.Radiobutton(c5, text=s_lbl, variable=app.sign_status_appearance_var, value=s_val, font=get_sys_font(8, "bold"), fg="#1E293B", bg="#FFFFFF").pack(anchor=tk.W, pady=2)
-
         # Bottom Close Button
         btn_bot = tk.Frame(outer, bg="#F1F5F9")
         btn_bot.pack(fill=tk.X, pady=(4, 0))
@@ -4293,7 +4153,6 @@ class VisualPdfSignerApp:
         self.show_issuer_var = tk.BooleanVar(value=False)
         self.show_tick_var = tk.BooleanVar(value=True)
         self.show_border_var = tk.BooleanVar(value=True)
-        self.sign_status_appearance_var = tk.StringVar(value="? Validity Unknown (Yellow ?)")
 
         # Custom Logo & Password Protection settings
         self.sign_custom_logo_path = tk.StringVar(value="")
@@ -4537,7 +4396,6 @@ class VisualPdfSignerApp:
 
         ttk.Button(btn_box, text="🛒 Buy DSC / License", style="BuyDSC.TButton", command=self.open_buy_dsc).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_box, text="🛠️ Token Drivers", style="Tool3D.TButton", command=self.show_driver_shortcuts_dialog).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_box, text="🛡️ Fix Acrobat Trust", style="Tool3D.TButton", command=self.fix_acrobat_dsc_trust).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_box, text="💬 WhatsApp: +91 7016797720", style="Tool3D.TButton", command=self.open_whatsapp).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_box, text="⚙️ Settings", style="Tool3D.TButton", command=self.open_settings_dialog).pack(side=tk.LEFT, padx=4)
 
@@ -4817,21 +4675,6 @@ class VisualPdfSignerApp:
                 padx=2, pady=0,
                 command=lambda: save_signature_settings(self)
             ).pack(side=tk.LEFT, padx=1)
-
-        # Adobe Acrobat Validation Status Appearance Row
-        st_row = tk.Frame(opts_card, bg="#F8FAFC")
-        st_row.pack(fill=tk.X, pady=(3, 0))
-        tk.Label(st_row, text="Acrobat Look:", font=get_sys_font(7, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(side=tk.LEFT)
-        self.combo_status_appearance = ttk.Combobox(
-            st_row,
-            textvariable=self.sign_status_appearance_var,
-            values=["? Validity Unknown (Yellow ?)", "✓ Verified (Green Tick)", "✗ Invalid (Red Cross)"],
-            state="readonly",
-            font=get_sys_font(7, "bold"),
-            width=24
-        )
-        self.combo_status_appearance.pack(side=tk.LEFT, padx=(4, 0))
-        self.combo_status_appearance.bind("<<ComboboxSelected>>", lambda e: save_signature_settings(self))
 
         # Selected Signature Areas Listbox / Container
         tk.Label(left_panel, text="Selected Signature Area(s):", font=get_sys_font(8, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(side=tk.TOP, anchor=tk.W, pady=(2, 1))
@@ -5945,14 +5788,6 @@ class VisualPdfSignerApp:
                         bulk_fetch=False
                     )
 
-                    val_choice = self.sign_status_appearance_var.get()
-                    if "Invalid" in val_choice or "Red" in val_choice or "✗" in val_choice:
-                        val_status = "invalid"
-                    elif "Verified" in val_choice or "Green" in val_choice or "✓" in val_choice:
-                        val_status = "verified"
-                    else:
-                        val_status = "unknown"
-
                     appearance_opts = {
                         'show_name': self.show_name_var.get(),
                         'show_org': self.show_org_var.get(),
@@ -5962,21 +5797,12 @@ class VisualPdfSignerApp:
                         'show_issuer': self.show_issuer_var.get(),
                         'show_tick': self.show_tick_var.get(),
                         'show_border': self.show_border_var.get(),
-                        'validation_status': val_status,
                     }
 
                     visual_pdf = draw_reportlab_layer(pdf_data, areas, cert_parsed, reason, location, contact, logo_path=custom_logo, appearance_opts=appearance_opts)
                     self._pyhanko_sign_incremental(visual_pdf, out_p, signer, areas, tsa)
             else:
                 signer, cert_parsed = load_pfx_certificate(pfx_path, pfx_pass)
-                val_choice = self.sign_status_appearance_var.get()
-                if "Invalid" in val_choice or "Red" in val_choice or "✗" in val_choice:
-                    val_status = "invalid"
-                elif "Verified" in val_choice or "Green" in val_choice or "✓" in val_choice:
-                    val_status = "verified"
-                else:
-                    val_status = "unknown"
-
                 appearance_opts = {
                     'show_name': self.show_name_var.get(),
                     'show_org': self.show_org_var.get(),
@@ -5986,7 +5812,6 @@ class VisualPdfSignerApp:
                     'show_issuer': self.show_issuer_var.get(),
                     'show_tick': self.show_tick_var.get(),
                     'show_border': self.show_border_var.get(),
-                    'validation_status': val_status,
                 }
 
                 visual_pdf = draw_reportlab_layer(pdf_data, areas, cert_parsed, reason, location, contact, logo_path=custom_logo, appearance_opts=appearance_opts)
@@ -6101,14 +5926,6 @@ class VisualPdfSignerApp:
                 custom_logo = self.sign_custom_logo_path.get() if (self.sign_include_logo.get() and self.sign_custom_logo_path.get()) else None
 
                 save_signature_settings(self)
-                val_choice = self.sign_status_appearance_var.get()
-                if "Invalid" in val_choice or "Red" in val_choice or "✗" in val_choice:
-                    val_status = "invalid"
-                elif "Verified" in val_choice or "Green" in val_choice or "✓" in val_choice:
-                    val_status = "verified"
-                else:
-                    val_status = "unknown"
-
                 appearance_opts = {
                     'show_name': self.show_name_var.get(),
                     'show_org': self.show_org_var.get(),
@@ -6118,7 +5935,6 @@ class VisualPdfSignerApp:
                     'show_issuer': self.show_issuer_var.get(),
                     'show_tick': self.show_tick_var.get(),
                     'show_border': self.show_border_var.get(),
-                    'validation_status': val_status,
                 }
 
                 def process_batch(signer, cert_parsed):
@@ -6242,27 +6058,6 @@ class VisualPdfSignerApp:
 
     def open_whatsapp(self):
         webbrowser.open("https://wa.me/917016797720")
-
-    def fix_acrobat_dsc_trust(self):
-        """Configure Adobe Acrobat & Reader to automatically validate Indian DSC tokens with the Green checkmark."""
-        ok, res = configure_adobe_acrobat_trust()
-        if ok and res:
-            messagebox.showinfo(
-                "Adobe Acrobat Trust Configured",
-                "✓ Adobe Acrobat DC has been successfully configured!\n\n"
-                f"Enabled Windows Certificate Store integration in {len(res)} Adobe configuration(s):\n" +
-                "\n".join(f"• {p.split(chr(92))[2]}" for p in res[:4]) +
-                "\n\nAdobe Acrobat will now automatically validate all DSC hardware tokens (ePass2003, IDSign, Capricorn, VSign, Pantasign) with the official Green Checkmark ('Signed and all signatures are valid')."
-            )
-        else:
-            messagebox.showinfo(
-                "Adobe Acrobat Trust",
-                "Adobe Acrobat trust verification completed.\n\n"
-                "To verify manually in Adobe Acrobat:\n"
-                "1. Go to Edit -> Preferences -> Signatures\n"
-                "2. Under Verification, click 'More...'\n"
-                "3. Under 'Windows Integration', check 'Validating Signatures' & 'Validating Certified Documents'."
-            )
 
     def show_driver_shortcuts_dialog(self):
         TokenDriverShortcutsDialog(self.root, self)
