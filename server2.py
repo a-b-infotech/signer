@@ -329,7 +329,7 @@ def save_signature_settings(app):
             "show_issuer": app.show_issuer_var.get() if hasattr(app, 'show_issuer_var') else False,
             "show_tick": app.show_tick_var.get() if hasattr(app, 'show_tick_var') else True,
             "show_border": app.show_border_var.get() if hasattr(app, 'show_border_var') else True,
-            "validation_status": app.sign_status_appearance_var.get() if hasattr(app, 'sign_status_appearance_var') else "✓ Verified (Green)",
+            "validation_status": app.sign_status_appearance_var.get() if hasattr(app, 'sign_status_appearance_var') else "? Validity Unknown (Yellow ?)",
         }
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -382,7 +382,13 @@ def load_signature_settings(app):
         if hasattr(app, 'show_border_var') and "show_border" in data:
             app.show_border_var.set(bool(data["show_border"]))
         if hasattr(app, 'sign_status_appearance_var') and "validation_status" in data:
-            app.sign_status_appearance_var.set(str(data["validation_status"]))
+            v_val = str(data["validation_status"])
+            if "Green" in v_val or "Verified" in v_val or "✓" in v_val:
+                app.sign_status_appearance_var.set("✓ Verified (Green Tick)")
+            elif "Red" in v_val or "Invalid" in v_val or "✗" in v_val:
+                app.sign_status_appearance_var.set("✗ Invalid (Red Cross)")
+            else:
+                app.sign_status_appearance_var.set("? Validity Unknown (Yellow ?)")
         logger.info("Permanent signature settings loaded successfully.")
     except Exception as e:
         logger.warning(f"Error loading signature_settings.json: {e}")
@@ -1740,7 +1746,7 @@ def draw_incremental_overlay_layer(pdf_bytes, areas, cert, reason="", location="
             ay = ph - (ay_pdf + ah)  # PyMuPDF top-left y
 
             # Validation status styling (Green Verified ✓, Yellow CRL ? , Red Invalid ✗)
-            v_status = str(appearance_opts.get('validation_status', 'verified')).lower()
+            v_status = str(appearance_opts.get('validation_status', 'unknown')).lower()
             if 'invalid' in v_status or 'red' in v_status:
                 theme_hdr = (0.75, 0.12, 0.12)
                 badge_col = (0.93, 0.20, 0.20)
@@ -1966,7 +1972,7 @@ def draw_reportlab_layer(pdf_bytes, areas, cert, reason="", location="", contact
                 hh = max(min(ah * 0.25, 26.0), 16.0)
 
                 # Validation status styling (Green Verified ✓, Yellow CRL ? , Red Invalid ✗)
-                v_status = str(appearance_opts.get('validation_status', 'verified')).lower()
+                v_status = str(appearance_opts.get('validation_status', 'unknown')).lower()
                 if 'invalid' in v_status or 'red' in v_status:
                     tr, tg, tb = 0.75, 0.12, 0.12
                     br, bg, bb = 0.93, 0.20, 0.20
@@ -3610,10 +3616,9 @@ class SignatureSettingsDialog:
         tk.Label(c5, text="Choose how the digital signature card visual status badge is rendered:", font=get_sys_font(8), fg="#64748B", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
 
         for s_val, s_lbl in [
-            ("⚡ Auto (Acrobat / DSC Validated)", "⚡ Auto (Acrobat / DSC Validated) - Automatically evaluates certificate & CRL status"),
+            ("? Validity Unknown (Yellow ?)", "? Default Validity Unknown (Yellow Theme & Question Badge) - Let Adobe Acrobat evaluate status"),
             ("✓ Verified (Green Tick)", "✓ Force Verified (Green Theme & Tick Badge) - Valid signature & trusted certificate"),
-            ("? CRL Unknown (Yellow ?)", "? Force CRL Unknown (Yellow Theme & Question Badge) - Unchecked CRL or offline"),
-            ("✗ Invalid (Red Cross)", "✗ Force Invalid (Red Theme & Cross Badge) - Tampered or revoked document")
+            ("✗ Invalid (Red Cross)", "✗ Force Invalid (Red Theme & Cross Badge) - Tampered or invalid document")
         ]:
             tk.Radiobutton(c5, text=s_lbl, variable=app.sign_status_appearance_var, value=s_val, font=get_sys_font(8, "bold"), fg="#1E293B", bg="#FFFFFF").pack(anchor=tk.W, pady=2)
 
@@ -4288,7 +4293,7 @@ class VisualPdfSignerApp:
         self.show_issuer_var = tk.BooleanVar(value=False)
         self.show_tick_var = tk.BooleanVar(value=True)
         self.show_border_var = tk.BooleanVar(value=True)
-        self.sign_status_appearance_var = tk.StringVar(value="⚡ Auto (Acrobat / DSC Validated)")
+        self.sign_status_appearance_var = tk.StringVar(value="? Validity Unknown (Yellow ?)")
 
         # Custom Logo & Password Protection settings
         self.sign_custom_logo_path = tk.StringVar(value="")
@@ -4820,10 +4825,10 @@ class VisualPdfSignerApp:
         self.combo_status_appearance = ttk.Combobox(
             st_row,
             textvariable=self.sign_status_appearance_var,
-            values=["⚡ Auto (Acrobat / DSC Validated)", "✓ Verified (Green Tick)", "? CRL Unknown (Yellow ?)", "✗ Invalid (Red Cross)"],
+            values=["? Validity Unknown (Yellow ?)", "✓ Verified (Green Tick)", "✗ Invalid (Red Cross)"],
             state="readonly",
             font=get_sys_font(7, "bold"),
-            width=26
+            width=24
         )
         self.combo_status_appearance.pack(side=tk.LEFT, padx=(4, 0))
         self.combo_status_appearance.bind("<<ComboboxSelected>>", lambda e: save_signature_settings(self))
@@ -5941,14 +5946,12 @@ class VisualPdfSignerApp:
                     )
 
                     val_choice = self.sign_status_appearance_var.get()
-                    if "Auto" in val_choice or "auto" in val_choice.lower():
-                        val_status = auto_detect_validation_status(cert_parsed)
-                    elif "Invalid" in val_choice or "Red" in val_choice:
+                    if "Invalid" in val_choice or "Red" in val_choice or "✗" in val_choice:
                         val_status = "invalid"
-                    elif "Unknown" in val_choice or "Yellow" in val_choice or "CRL" in val_choice:
-                        val_status = "unknown"
-                    else:
+                    elif "Verified" in val_choice or "Green" in val_choice or "✓" in val_choice:
                         val_status = "verified"
+                    else:
+                        val_status = "unknown"
 
                     appearance_opts = {
                         'show_name': self.show_name_var.get(),
@@ -5967,14 +5970,12 @@ class VisualPdfSignerApp:
             else:
                 signer, cert_parsed = load_pfx_certificate(pfx_path, pfx_pass)
                 val_choice = self.sign_status_appearance_var.get()
-                if "Auto" in val_choice or "auto" in val_choice.lower():
-                    val_status = auto_detect_validation_status(cert_parsed)
-                elif "Invalid" in val_choice or "Red" in val_choice:
+                if "Invalid" in val_choice or "Red" in val_choice or "✗" in val_choice:
                     val_status = "invalid"
-                elif "Unknown" in val_choice or "Yellow" in val_choice or "CRL" in val_choice:
-                    val_status = "unknown"
-                else:
+                elif "Verified" in val_choice or "Green" in val_choice or "✓" in val_choice:
                     val_status = "verified"
+                else:
+                    val_status = "unknown"
 
                 appearance_opts = {
                     'show_name': self.show_name_var.get(),
@@ -6101,14 +6102,12 @@ class VisualPdfSignerApp:
 
                 save_signature_settings(self)
                 val_choice = self.sign_status_appearance_var.get()
-                if "Auto" in val_choice or "auto" in val_choice.lower():
-                    val_status = auto_detect_validation_status(cert_parsed)
-                elif "Invalid" in val_choice or "Red" in val_choice:
+                if "Invalid" in val_choice or "Red" in val_choice or "✗" in val_choice:
                     val_status = "invalid"
-                elif "Unknown" in val_choice or "Yellow" in val_choice or "CRL" in val_choice:
-                    val_status = "unknown"
-                else:
+                elif "Verified" in val_choice or "Green" in val_choice or "✓" in val_choice:
                     val_status = "verified"
+                else:
+                    val_status = "unknown"
 
                 appearance_opts = {
                     'show_name': self.show_name_var.get(),
