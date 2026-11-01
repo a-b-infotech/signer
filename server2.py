@@ -2682,7 +2682,7 @@ def health():
     return jsonify({
         'status': 'healthy', 
         'server_status': server_config.get('status', 'running'),
-        'version': '2.0',
+        'version': APP_VERSION,
         'demo': is_demo,
         'expired': is_expired,
         'key': active_key,
@@ -6287,7 +6287,7 @@ class VisualPdfSignerApp:
 
         b_text = tk.Frame(top_brand, bg="#FFFFFF"); b_text.pack(side=tk.LEFT)
         tk.Label(b_text, text="A B INFOTECH", font=get_sys_font(14, "bold"), fg="#1E3A8A", bg="#FFFFFF").pack(anchor=tk.W)
-        tk.Label(b_text, text="Unified Digital Signer & All-in-One PDF Power Suite v2.0", font=get_sys_font(9, "bold"), fg="#059669", bg="#FFFFFF").pack(anchor=tk.W)
+        tk.Label(b_text, text=f"Unified Digital Signer & All-in-One PDF Power Suite v{APP_VERSION}", font=get_sys_font(9, "bold"), fg="#059669", bg="#FFFFFF").pack(anchor=tk.W)
 
         tk.Label(
             card1,
