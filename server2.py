@@ -108,11 +108,44 @@ try:
     from cryptography.x509.oid import NameOID, ExtensionOID
     from pyhanko_certvalidator.registry import SimpleCertificateStore
 
-    # Patch 1: asn1crypto DirectoryString to accept UTF8String (tag 12) without tag mismatch on Indian DSC certs
+    # Patch 1: asn1crypto DirectoryString & robust Name.native fallback to accept UTF8String (tag 12) without tag mismatch on Indian DSC certs
     try:
+        for oid_name, spec in list(a509.NameTypeAndValue._oid_specs.items()):
+            if spec == a509.PrintableString or getattr(spec, '__name__', '') == 'PrintableString':
+                a509.NameTypeAndValue._oid_specs[oid_name] = a509.DirectoryString
         a509.NameTypeAndValue._oid_specs['telephone_number'] = a509.DirectoryString
+        a509.NameTypeAndValue._oid_specs['2.5.4.20'] = a509.DirectoryString
         a509.ExtensionAttribute._oid_specs['common_name'] = a509.DirectoryString
         a509.ExtensionAttribute._oid_specs['pds_name'] = a509.DirectoryString
+
+        from collections import OrderedDict
+        _orig_name_native_fget = a509.Name.native.fget
+        def _safe_name_native(self):
+            if getattr(self, '_native', None) is not None and len(self._native) > 0:
+                return self._native
+            try:
+                return _orig_name_native_fget(self)
+            except Exception:
+                out = OrderedDict()
+                try:
+                    for rdn in self.chosen:
+                        for type_val in rdn:
+                            try:
+                                k = type_val['type'].native
+                                v = type_val['value'].native
+                                out[k] = v
+                            except Exception:
+                                try:
+                                    k = str(type_val['type'].native)
+                                    raw_val = type_val['value'].contents
+                                    out[k] = raw_val.decode('utf-8', errors='replace')
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+                self._native = out
+                return out
+        a509.Name.native = property(_safe_name_native)
     except Exception:
         pass
 
@@ -152,6 +185,12 @@ try:
                 pass
             return "Digital Signature"
         pdf_cms.Signer.subject_name = property(_safe_subject_name)
+        if hasattr(pdf_cms, 'SimpleSigner'):
+            pdf_cms.SimpleSigner.subject_name = property(_safe_subject_name)
+        if 'signers' in locals() and hasattr(signers, 'SimpleSigner'):
+            signers.SimpleSigner.subject_name = property(_safe_subject_name)
+        if 'PKCS11Signer' in locals() and hasattr(PKCS11Signer, 'subject_name'):
+            PKCS11Signer.subject_name = property(_safe_subject_name)
     except Exception:
         pass
 
@@ -1187,24 +1226,36 @@ def clean_pdf_signatures_completely(doc, keep_visual=False):
 
 def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=True):
     """
-    Intelligently compresses PDF files to achieve up to 70% to 92% size reduction.
-    Downsamples large embedded images, recompresses to optimized JPEG,
-    and applies deep garbage collection and flate deflation.
-    Guarantees that 10-20 MB files shrink to under 2 MB on extreme preset,
-    and ensures existing digital signatures and visual stamps are never removed.
+    Intelligently compresses PDF files to achieve substantial size reduction without
+    corrupting images or invalidating/stripping digital signatures.
+    - Preserves all /Sig signature widgets, appearances, and forms.
+    - Only recompresses standard standalone DeviceRGB/DeviceGray images without masks.
+    - Never corrupts /Indexed, /CalRGB, or masked images (eliminates Acrobat 'Insufficient data for an image').
     """
     orig_file_size = os.path.getsize(input_path)
     doc = fitz.open(input_path)
     total_pages = len(doc)
 
-    # 1. Preserve visual appearance of any existing signatures without deleting signature fields
-    if preserve_sigs:
+    # 1. Check if the document has any digital signatures
+    has_sigs = False
+    for page in doc:
+        for w in page.widgets():
+            ft = getattr(w, 'field_type', None)
+            fts = str(getattr(w, 'field_type_string', '')).lower()
+            if ft == fitz.PDF_WIDGET_TYPE_SIGNATURE or fts == 'signature' or getattr(w, 'is_signed', False):
+                has_sigs = True
+                break
+        if has_sigs:
+            break
+
+    # 2. Preserve visual appearance of any existing signatures without deleting signature fields
+    if preserve_sigs and has_sigs:
         try:
             preserve_signature_appearances_on_doc(doc, remove_broken_fields=False)
         except Exception as e:
             logger.debug(f"Compress sig preservation notice: {e}")
 
-    # 2. Dynamic downsample thresholds based on compression level and page count
+    # 3. Dynamic downsample thresholds based on compression level and page count
     if level == "extreme":
         if total_pages <= 5:
             max_dim, quality = 1000, 50
@@ -1224,43 +1275,43 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
     else:  # lossless
         max_dim, quality = None, None
 
-    # 3. Compress embedded image objects across all valid xrefs
+    # 4. Safely downsample embedded image objects without touching complex/indexed/masked images
     if max_dim and quality:
         for xref in range(1, doc.xref_length()):
             try:
                 if not doc.xref_is_image(xref):
                     continue
+
+                # Skip images with soft masks or masks to avoid viewer decode failures
+                smask = doc.xref_get_key(xref, "SMask")
+                mask = doc.xref_get_key(xref, "Mask")
+                if (smask and smask[0] != "null") or (mask and mask[0] != "null"):
+                    continue
+
+                # Skip Indexed, CalRGB, or Lab color spaces that fail with raw DCTDecode
+                cs = doc.xref_get_key(xref, "ColorSpace")
+                if cs and any(forbidden in cs[1] for forbidden in ("/Indexed", "/CalRGB", "/Lab", "/ICCBased")):
+                    continue
+
                 base_img = doc.extract_image(xref)
                 if not base_img:
                     continue
-                orig_bytes = base_img["image"]
+
+                orig_bytes = base_img.get("image")
+                if not orig_bytes or len(orig_bytes) < 4096:
+                    continue
+
                 im = Image.open(io.BytesIO(orig_bytes))
-
-                is_gray = (im.mode == "L" or base_img.get("colorspace") == 1)
-
-                if im.mode in ("RGBA", "LA", "P"):
-                    bg = Image.new("L" if is_gray else "RGB", im.size, 255)
-                    if im.mode in ("RGBA", "LA"):
-                        bg.paste(im, mask=im.split()[-1])
-                    else:
-                        bg.paste(im.convert("L" if is_gray else "RGB"))
-                    im = bg
-                    # Remove soft mask to avoid dimension mismatch in viewers
-                    try:
-                        doc.xref_set_key(xref, "SMask", "null")
-                        doc.xref_set_key(xref, "Mask", "null")
-                    except Exception:
-                        pass
-                elif is_gray and im.mode != "L":
-                    im = im.convert("L")
-                elif not is_gray and im.mode != "RGB":
-                    im = im.convert("RGB")
+                if im.mode not in ("RGB", "L"):
+                    continue
 
                 w, h = im.size
+                if max(w, h) <= max_dim:
+                    continue
+
                 scale = min(1.0, max_dim / float(max(w, h)))
                 nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
-                if nw != w or nh != h:
-                    im = im.resize((nw, nh), Image.Resampling.LANCZOS)
+                im = im.resize((nw, nh), Image.Resampling.LANCZOS)
 
                 out_buf = io.BytesIO()
                 im.save(out_buf, format="JPEG", quality=quality, optimize=True)
@@ -1268,7 +1319,7 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
 
                 if len(new_bytes) < len(orig_bytes):
                     doc.xref_set_key(xref, "Filter", "/DCTDecode")
-                    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if is_gray else "/DeviceRGB")
+                    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if im.mode == "L" else "/DeviceRGB")
                     doc.xref_set_key(xref, "BitsPerComponent", "8")
                     doc.xref_set_key(xref, "Width", str(nw))
                     doc.xref_set_key(xref, "Height", str(nh))
@@ -1277,17 +1328,18 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
             except Exception as img_err:
                 logger.debug(f"Image compress skipped for xref {xref}: {img_err}")
 
-    # Rebuild and save with deep garbage collection and flate deflation
-    clean_doc = fitz.open()
-    clean_doc.insert_pdf(doc)
+    # 5. Save document in-place with deep garbage collection and flate deflation
+    # If signed, preserve indirect xrefs to prevent 'cannot find object in xref' errors
+    if has_sigs:
+        doc.save(output_path, garbage=3, deflate=True, clean=False)
+    else:
+        doc.save(output_path, garbage=4, deflate=True)
     doc.close()
-    clean_doc.save(output_path, garbage=4, deflate=True)
-    clean_doc.close()
 
     inter_size = os.path.getsize(output_path)
 
-    # 4. Secondary Adaptive Raster Pass for extreme preset if output is still > 2 MB
-    if level == "extreme" and inter_size > 2.0 * 1024 * 1024:
+    # 6. Secondary Adaptive Raster Pass ONLY for non-signed documents on extreme preset if still > 2 MB
+    if not has_sigs and level == "extreme" and inter_size > 2.0 * 1024 * 1024:
         try:
             logger.info(f"Targeting < 2 MB: applying dynamic adaptive page optimization (current size: {inter_size//1024} KB)...")
             budget_kb = 1900 / max(1, total_pages)
@@ -1305,37 +1357,28 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
             for p in src_doc:
                 pix = p.get_pixmap(dpi=dyn_dpi)
                 buf = io.BytesIO()
-                im = Image.open(io.BytesIO(pix.tobytes("jpeg")))
-                im.save(buf, format="JPEG", quality=dyn_q, optimize=True)
-                new_page = raster_doc.new_page(width=p.rect.width, height=p.rect.height)
-                new_page.insert_image(new_page.rect, stream=buf.getvalue())
+                pix_pil = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                pix_pil.save(buf, format="JPEG", quality=dyn_q, optimize=True)
+                buf.seek(0)
+                r_page = raster_doc.new_page(width=p.rect.width, height=p.rect.height)
+                r_page.insert_image(r_page.rect, stream=buf.getvalue())
             src_doc.close()
-            tmp_target = output_path + ".raster.pdf"
-            raster_doc.save(tmp_target, garbage=4, deflate=True)
-            raster_doc.close()
-            if os.path.exists(tmp_target) and os.path.getsize(tmp_target) < inter_size:
-                os.replace(tmp_target, output_path)
-                logger.info(f"Successfully reduced file size to {os.path.getsize(output_path)//1024} KB (< 2 MB)!")
-            elif os.path.exists(tmp_target):
-                os.remove(tmp_target)
-        except Exception as re_err:
-            logger.error(f"High-efficiency page raster optimization notice: {re_err}")
 
-    # 5. Guarantee file size never increases
+            tmp_opt = output_path + ".opt.pdf"
+            raster_doc.save(tmp_opt, garbage=4, deflate=True)
+            raster_doc.close()
+
+            if os.path.exists(tmp_opt) and os.path.getsize(tmp_opt) < inter_size:
+                os.replace(tmp_opt, output_path)
+            elif os.path.exists(tmp_opt):
+                os.remove(tmp_opt)
+        except Exception as opt_err:
+            logger.warning(f"Secondary compression pass skipped: {opt_err}")
+
     final_size = os.path.getsize(output_path)
-    if final_size >= orig_file_size:
-        try:
-            import shutil
-            fallback_doc = fitz.open(input_path)
-            fallback_path = output_path + ".fallback.pdf"
-            fallback_doc.save(fallback_path, garbage=4, deflate=True)
-            fallback_doc.close()
-            if os.path.exists(fallback_path) and os.path.getsize(fallback_path) < orig_file_size:
-                os.replace(fallback_path, output_path)
-            elif os.path.exists(fallback_path):
-                os.remove(fallback_path)
-        except Exception:
-            pass
+    pct = round((1.0 - (final_size / max(orig_file_size, 1))) * 100.0, 1)
+    logger.info(f"Smart compress finished: {orig_file_size//1024} KB -> {final_size//1024} KB ({pct}% saved)")
+    return final_size
 
 
 def extract_cert_email_and_address(cert):
@@ -1756,12 +1799,20 @@ def draw_incremental_overlay_layer(pdf_bytes, areas, cert, reason="", location="
             eff_logo = logo_path if (logo_path and os.path.exists(logo_path)) else None
             if eff_logo:
                 try:
-                    logo_dim = min(aw * 0.22, body_h * 0.80)
-                    logo_w = logo_dim
+                    from PIL import Image as PIL_Image
+                    try:
+                        im_w, im_h = PIL_Image.open(eff_logo).size
+                        aspect = im_w / float(im_h)
+                    except Exception:
+                        aspect = 1.0
+                    target_h = body_h * 0.82
+                    target_w = min(target_h * aspect, aw * 0.28)
+                    target_h = target_w / aspect
+                    logo_w = target_w
                     logo_x = ax + 10
-                    logo_y = body_top + (body_h - logo_dim) / 2
+                    logo_y = body_top + (body_h - target_h) / 2
                     page.insert_image(
-                        fitz.Rect(logo_x, logo_y, logo_x + logo_dim, logo_y + logo_dim),
+                        fitz.Rect(logo_x, logo_y, logo_x + target_w, logo_y + target_h),
                         filename=eff_logo
                     )
                     has_logo = True
@@ -1769,7 +1820,7 @@ def draw_incremental_overlay_layer(pdf_bytes, areas, cert, reason="", location="
                     logger.warning(f"PyMuPDF custom logo overlay error: {e}")
 
             # 7. Body Text Typography (Dynamic Scaling & Strict Anti-Overlap)
-            left_pad = (logo_w + 14) if has_logo else 12
+            left_pad = (logo_w + 16) if has_logo else 12
             right_pad = 8
             avail_w = max(aw - left_pad - right_pad, 20.0)
             body_avail_h = max(body_h - 10, 10.0)
@@ -1846,10 +1897,17 @@ def draw_reportlab_layer(pdf_bytes, areas, cert, reason="", location="", contact
 
             c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
             for area in page_areas:
-                ax = float(area['x']) + offset_x
-                ay = float(area['y']) + offset_y
-                aw = float(area['width'])
-                ah = float(area['height'])
+                rect = area.get('rect')
+                if rect and len(rect) >= 4:
+                    ax = float(rect[0]) + offset_x
+                    ay = float(rect[1]) + offset_y
+                    aw = float(rect[2] - rect[0])
+                    ah = float(rect[3] - rect[1])
+                else:
+                    ax = float(area.get('x', 0)) + offset_x
+                    ay = float(area.get('y', 0)) + offset_y
+                    aw = float(area.get('width', area.get('w', 140)))
+                    ah = float(area.get('height', area.get('h', 60)))
 
                 r_pt = min(max(ah * 0.075, 4.0), 10.0)
                 hh = max(min(ah * 0.25, 26.0), 16.0)
@@ -1956,17 +2014,29 @@ def draw_reportlab_layer(pdf_bytes, areas, cert, reason="", location="", contact
                 eff_logo = logo_path if (logo_path and os.path.exists(logo_path)) else None
                 if eff_logo:
                     try:
-                        logo_dim = min(aw * 0.22, body_h * 0.80)
-                        logo_w = logo_dim
+                        from PIL import Image as PIL_Image
+                        try:
+                            im_w, im_h = PIL_Image.open(eff_logo).size
+                            aspect = im_w / float(im_h)
+                        except Exception:
+                            aspect = 1.0
+                        target_h = body_h * 0.82
+                        target_w = min(target_h * aspect, aw * 0.28)
+                        target_h = target_w / aspect
+                        logo_w = target_w
                         logo_x = ax + 10
-                        logo_y = ay + (body_h - logo_dim) / 2
-                        c.drawImage(eff_logo, logo_x, logo_y, width=logo_dim, height=logo_dim, mask='auto', preserveAspectRatio=True)
+                        logo_y = ay + (body_h - target_h) / 2
+                        # Reset graphics state opacity to 1.0 to eliminate alpha leak from watermark
+                        c.setFillAlpha(1.0)
+                        c.setStrokeAlpha(1.0)
+                        c.setFillColor(Color(1, 1, 1))
+                        c.drawImage(eff_logo, logo_x, logo_y, width=target_w, height=target_h, mask='auto', preserveAspectRatio=True)
                         has_logo = True
                     except Exception as e:
                         logger.warning(f"ReportLab custom logo overlay error: {e}")
 
                 # 7. Body Text Typography (Dynamic Scaling & Strict Anti-Overlap)
-                left_pad = (logo_w + 14) if has_logo else 12
+                left_pad = (logo_w + 16) if has_logo else 12
                 right_pad = 8
                 avail_w = max(aw - left_pad - right_pad, 20.0)
                 body_avail_h = max(body_h - 10, 10.0)
@@ -1993,6 +2063,8 @@ def draw_reportlab_layer(pdf_bytes, areas, cert, reason="", location="", contact
 
                 # 8. Crisp Outer Border Stroke
                 if appearance_opts.get('show_border', True):
+                    c.setFillAlpha(1.0)
+                    c.setStrokeAlpha(1.0)
                     c.setStrokeColor(Color(tr, tg, tb))
                     c.setLineWidth(1.6)
                     c.roundRect(ax, ay, aw, ah, r_pt, fill=0, stroke=1)
@@ -4662,14 +4734,15 @@ class VisualPdfSignerApp:
 
         chk_bar2 = tk.Frame(opts_card, bg="#F8FAFC")
         chk_bar2.pack(fill=tk.X, pady=(0, 0))
-        for text, var in [
+        for text_lbl, var in [
             ("Address", self.show_address_var),
             ("Issuer", self.show_issuer_var),
             ("Green tick", self.show_tick_var),
             ("Border", self.show_border_var),
+            ("Logo", self.sign_include_logo),
         ]:
             tk.Checkbutton(
-                chk_bar2, text=text, variable=var,
+                chk_bar2, text=text_lbl, variable=var,
                 font=get_sys_font(7, "bold"),
                 fg="#1E293B", bg="#F8FAFC",
                 padx=2, pady=0,
@@ -5012,8 +5085,8 @@ class VisualPdfSignerApp:
                 sub_doc = fitz.open("pdf", pdf_bytes)
                 # Bake any existing digital signature appearance onto the pages
                 # so the visual signature stamp is 100% preserved in the merged output!
-                preserve_signature_appearances_on_doc(sub_doc, remove_broken_fields=True)
-                merged.insert_pdf(sub_doc)
+                preserve_signature_appearances_on_doc(sub_doc, remove_broken_fields=False)
+                merged.insert_pdf(sub_doc, annots=True)
                 sub_doc.close()
             merged.save(out_p, garbage=3, deflate=True)
             total_pages = len(merged)
