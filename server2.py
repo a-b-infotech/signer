@@ -44,7 +44,7 @@ if CURRENT_OS == 'Windows':
 
 # GUI & Visual Components
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, colorchooser
+from tkinter import ttk, filedialog, messagebox, colorchooser, scrolledtext, simpledialog
 
 # Prevent PyMuPDF layout/LLM modules from causing issues
 sys.modules['pymupdf4llm'] = None
@@ -3114,6 +3114,10 @@ class PdfVirtualEditor(tk.Frame):
         self.editor_mode = "edit"  # "view" or "edit"
         self.add_text_mode = False
         self.undo_stack = []
+        self.drag_start_x = None
+        self.drag_start_y = None
+        self.temp_add_box = None
+        self.is_dragging_box = False
 
         # Formatting properties
         self.font_family_var = tk.StringVar(value="Helvetica")
@@ -3291,7 +3295,9 @@ class PdfVirtualEditor(tk.Frame):
         self.v_scroll.config(command=self.canvas.yview)
         self.h_scroll.config(command=self.canvas.xview)
 
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<ButtonPress-1>", self._on_canvas_mouse_down)
+        self.canvas.bind("<B1-Motion>", self._on_canvas_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_canvas_mouse_up)
         self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
         self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
@@ -3309,7 +3315,7 @@ class PdfVirtualEditor(tk.Frame):
         # Top Action Row in Sidebar
         sb_act_row = tk.Frame(sidebar, bg="#FFFFFF")
         sb_act_row.pack(fill=tk.X, pady=(0, 6))
-        ttk.Button(sb_act_row, text="➕ Add Text / Tax", style="Tool3D.TButton", command=self.add_textbox_at_center).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        ttk.Button(sb_act_row, text="➕ Add Text / Tax", style="Tool3D.TButton", command=self.toggle_add_text_mode).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
         ttk.Button(sb_act_row, text="💾 SAVE PDF (Ctrl+S)", style="Primary3D.TButton", command=self.save_edited_pdf).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(2, 0))
 
         # Detected text list
@@ -3410,11 +3416,18 @@ class PdfVirtualEditor(tk.Frame):
         if self.add_text_mode:
             self.set_editor_mode("edit")
             self.canvas.config(cursor="crosshair")
-            self.btn_add_text.config(text="✖ Cancel Add")
-            self.lbl_ribbon_status.config(text="Click anywhere on the PDF page to place new text.", fg="#D97706")
+            self.btn_add_text.config(text="❌ Cancel Add")
+            self.lbl_ribbon_status.config(
+                text="🖱️ Select Area: Click and drag on the PDF page to draw a text/tax box, or click to place text.",
+                fg="#2563EB"
+            )
         else:
-            self.canvas.config(cursor="arrow")
-            self.btn_add_text.config(text="➕ Add Text")
+            self.canvas.config(cursor="")
+            self.btn_add_text.config(text="➕ Add Text / Tax")
+            if hasattr(self, 'temp_add_box') and self.temp_add_box:
+                self.canvas.delete("temp_add_box")
+                self.temp_add_box = None
+            self.is_dragging_box = False
             self.lbl_ribbon_status.config(text="Edit Mode: Click any text box to edit.", fg="#047857")
 
     def zoom_in(self):
@@ -3748,93 +3761,313 @@ class PdfVirtualEditor(tk.Frame):
                     outline="#38BDF8", width=1.5, tags=("hover_box",)
                 )
 
-    def _on_canvas_click(self, event):
-        cur_x = self.canvas.canvasx(event.x) / self.scale
-        cur_y = self.canvas.canvasy(event.y) / self.scale
+    def _on_canvas_mouse_down(self, event):
+        if not self.doc:
+            return
+        self.drag_start_x = self.canvas.canvasx(event.x)
+        self.drag_start_y = self.canvas.canvasy(event.y)
+        self.is_dragging_box = False
 
         if self.add_text_mode:
-            self._handle_add_text_at(cur_x, cur_y)
+            self.canvas.delete("temp_add_box")
+            self.temp_add_box = self.canvas.create_rectangle(
+                self.drag_start_x, self.drag_start_y, self.drag_start_x, self.drag_start_y,
+                outline="#2563EB", width=2, dash=(4, 4), fill="#DBEAFE", stipple="gray25",
+                tags=("temp_add_box",)
+            )
+
+    def _on_canvas_mouse_drag(self, event):
+        if not self.doc or self.drag_start_x is None:
+            return
+        cur_x = self.canvas.canvasx(event.x)
+        cur_y = self.canvas.canvasy(event.y)
+
+        if self.add_text_mode and self.temp_add_box:
+            self.is_dragging_box = True
+            self.canvas.coords(self.temp_add_box, self.drag_start_x, self.drag_start_y, cur_x, cur_y)
+            w_pt = abs(cur_x - self.drag_start_x) / self.scale
+            h_pt = abs(cur_y - self.drag_start_y) / self.scale
+            self.lbl_ribbon_status.config(
+                text=f"Selected Area: Width={int(w_pt)} pt, Height={int(h_pt)} pt (Release to insert)",
+                fg="#2563EB"
+            )
+
+    def _on_canvas_mouse_up(self, event):
+        if not self.doc or self.drag_start_x is None:
+            return
+        cur_x = self.canvas.canvasx(event.x)
+        cur_y = self.canvas.canvasy(event.y)
+
+        start_x = self.drag_start_x
+        start_y = self.drag_start_y
+        self.drag_start_x = None
+        self.drag_start_y = None
+
+        if self.add_text_mode:
+            self.canvas.delete("temp_add_box")
+            self.temp_add_box = None
+            self.is_dragging_box = False
+
+            c_x1, c_x2 = sorted([start_x, cur_x])
+            c_y1, c_y2 = sorted([start_y, cur_y])
+            drag_w = c_x2 - c_x1
+            drag_h = c_y2 - c_y1
+
+            if drag_w >= 10 and drag_h >= 10:
+                # User drew a selection box area
+                pdf_x1 = c_x1 / self.scale
+                pdf_y1 = c_y1 / self.scale
+                pdf_x2 = c_x2 / self.scale
+                pdf_y2 = c_y2 / self.scale
+                target_rect = fitz.Rect(pdf_x1, pdf_y1, pdf_x2, pdf_y2)
+            else:
+                # Single click point fallback with comfortable box dimensions
+                pdf_x1 = c_x1 / self.scale
+                pdf_y1 = c_y1 / self.scale
+                target_rect = fitz.Rect(pdf_x1, pdf_y1, pdf_x1 + 180, pdf_y1 + 40)
+
+            self.prompt_add_text_dialog(target_rect)
             return
 
-        if self.editor_mode != "edit":
-            return
+        # Normal Edit Mode: click to select block if not dragged
+        if abs(cur_x - start_x) < 5 and abs(cur_y - start_y) < 5:
+            if self.editor_mode != "edit":
+                return
+            pdf_click_x = cur_x / self.scale
+            pdf_click_y = cur_y / self.scale
 
-        clicked_idx = None
-        for idx, s in enumerate(self.spans):
-            bbox = s.get("bbox", (0, 0, 0, 0))
-            if bbox[0] <= cur_x <= bbox[2] and bbox[1] <= cur_y <= bbox[3]:
-                clicked_idx = idx
-                break
+            clicked_idx = None
+            for idx, s in enumerate(self.spans):
+                bbox = s.get("bbox", (0, 0, 0, 0))
+                if bbox[0] <= pdf_click_x <= bbox[2] and bbox[1] <= pdf_click_y <= bbox[3]:
+                    clicked_idx = idx
+                    break
 
-        if clicked_idx is not None:
-            self.tree_spans.selection_set(str(clicked_idx))
-            self.tree_spans.see(str(clicked_idx))
-            self._select_span(clicked_idx)
-        else:
-            self.selected_span_idx = None
-            self.canvas.delete("active_box")
-            self.canvas.delete("active_handle")
+            if clicked_idx is not None:
+                self.tree_spans.selection_set(str(clicked_idx))
+                self.tree_spans.see(str(clicked_idx))
+                self._select_span(clicked_idx)
+            else:
+                self.selected_span_idx = None
+                self.canvas.delete("active_box")
+                self.canvas.delete("active_handle")
 
     def _on_canvas_double_click(self, event):
         if self.editor_mode != "edit":
             return
-        self._on_canvas_click(event)
         if self.selected_span_idx is not None:
             self.txt_editor.focus_set()
             self.txt_editor.tag_add(tk.SEL, "1.0", tk.END)
 
     def add_textbox_at_center(self):
-        """Adds a new text element right in the visible center of the active page."""
-        if not self.doc:
-            messagebox.showwarning("Warning", "Please open a PDF document first.")
-            return
-        page = self.doc[self.current_page]
-        cx = page.rect.width / 2.0 - 60
-        cy = page.rect.height / 2.0 - 20
-        self._handle_add_text_at(cx, cy, prompt_dialog=True)
+        """Activates interactive area selection mode."""
+        self.toggle_add_text_mode()
 
-    def _handle_add_text_at(self, x, y, prompt_dialog=False):
+    def prompt_add_text_dialog(self, target_rect):
         if not self.doc:
             return
-        self._save_undo_state()
         if self.add_text_mode:
             self.toggle_add_text_mode()
 
+        dlg = tk.Toplevel(self)
+        dlg.title("➕ Add Text / Tax Box")
+        dlg.geometry("540x510")
+        dlg.transient(self)
+        dlg.grab_set()
+        dlg.configure(bg="#F8FAFC")
+        dlg.resizable(False, False)
+
+        # Center dialog relative to main window
+        dlg.update_idletasks()
+        try:
+            pw = self.winfo_toplevel()
+            px = pw.winfo_rootx() + max(10, (pw.winfo_width() // 2) - 270)
+            py = pw.winfo_rooty() + max(10, (pw.winfo_height() // 2) - 255)
+            dlg.geometry(f"+{px}+{py}")
+        except Exception:
+            pass
+
+        # 1. Header Frame
+        hdr = tk.Frame(dlg, bg="#EFF6FF", padx=16, pady=10, relief=tk.GROOVE, bd=1)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text="➕ Insert Text / Tax Box into Selected Area", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#EFF6FF").pack(anchor=tk.W)
+        w_val = int(target_rect.width)
+        h_val = int(target_rect.height)
+        tk.Label(hdr, text=f"Selected Area: X={int(target_rect.x0)}, Y={int(target_rect.y0)} | Width={w_val} pt, Height={h_val} pt (Page {self.current_page + 1})",
+                 font=get_sys_font(8), fg="#475569", bg="#EFF6FF").pack(anchor=tk.W, pady=(2, 0))
+
+        content_f = tk.Frame(dlg, bg="#F8FAFC", padx=16, pady=12)
+        content_f.pack(fill=tk.BOTH, expand=True)
+
+        # 2. Quick Preset Templates
+        tk.Label(content_f, text="Quick Presets / Templates:", font=get_sys_font(8, "bold"), fg="#334155", bg="#F8FAFC").pack(anchor=tk.W)
+        preset_bar = tk.Frame(content_f, bg="#F8FAFC")
+        preset_bar.pack(fill=tk.X, pady=(2, 8))
+
+        presets = [
+            ("Tax Invoice", "TAX INVOICE"),
+            ("GSTIN", "GSTIN: "),
+            ("Signatory", "Authorized Signatory"),
+            ("Date", f"Date: {datetime.now().strftime('%d/%m/%Y')}"),
+            ("Amount", "Total Amount: ₹ ")
+        ]
+
+        def insert_preset(val):
+            curr = txt_input.get("1.0", tk.END).strip()
+            if not curr or curr == "New Text Box":
+                txt_input.delete("1.0", tk.END)
+                txt_input.insert(tk.END, val)
+            else:
+                txt_input.insert(tk.END, "\n" + val)
+            txt_input.focus_set()
+
+        for label_text, val_text in presets:
+            btn = tk.Button(preset_bar, text=label_text, font=get_sys_font(7, "bold"),
+                            bg="#E2E8F0", fg="#1E293B", relief=tk.RAISED, bd=1, padx=4, pady=1,
+                            command=lambda v=val_text: insert_preset(v))
+            btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        # 3. Multi-line Text Input
+        tk.Label(content_f, text="Text Content (supports multi-line):", font=get_sys_font(8, "bold"), fg="#334155", bg="#F8FAFC").pack(anchor=tk.W)
+        txt_input = scrolledtext.ScrolledText(content_f, wrap=tk.WORD, height=5, font=get_sys_font(9), bd=1, relief=tk.SOLID)
+        txt_input.pack(fill=tk.X, pady=(2, 10))
+
         pending = self.txt_editor.get("1.0", tk.END).strip()
-        default_val = pending if pending and pending != "Type text here" and pending != "New Text Box" else "New Text Box"
-        
-        entered = simpledialog.askstring("Add Text / Tax Box", "Enter text to insert on page:", initialvalue=default_val, parent=self)
-        if not entered:
-            return
-        new_text = entered
+        default_val = pending if pending and pending != "Type text here" and pending != "New Text Box" else "TAX INVOICE"
+        txt_input.insert(tk.END, default_val)
+        txt_input.focus_set()
+        txt_input.tag_add(tk.SEL, "1.0", tk.END)
 
-        try:
-            f_size = float(self.font_size_var.get())
-        except ValueError:
-            f_size = 11.0
-        color_rgb = self._get_target_color_rgb()
+        # 4. Typography & Appearance Grid
+        style_box = tk.LabelFrame(content_f, text=" Typography & Appearance ", font=get_sys_font(8, "bold"), fg="#1E40AF", bg="#F8FAFC", padx=8, pady=8)
+        style_box.pack(fill=tk.X, pady=(0, 10))
 
-        page = self.doc[self.current_page]
-        try:
-            safe_insert_pdf_text(
-                page,
-                fitz.Point(x, y + f_size),
-                new_text,
-                font_family=self.font_family_var.get(),
-                fontsize=f_size,
-                color=color_rgb,
-                bold=self.bold_var.get(),
-                italic=self.italic_var.get()
-            )
-            self.render_page()
-            self.scan_and_detect_text()
-            if self.spans:
-                self._select_span(len(self.spans) - 1)
-                self.txt_editor.focus_set()
-                self.txt_editor.tag_add(tk.SEL, "1.0", tk.END)
-            self.lbl_ribbon_status.config(text=f"✓ Added text: '{new_text[:30]}'", fg="#047857")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to add text: {e}")
+        row1 = tk.Frame(style_box, bg="#F8FAFC")
+        row1.pack(fill=tk.X, pady=(0, 4))
+
+        tk.Label(row1, text="Font:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 2))
+        combo_font = ttk.Combobox(row1, values=["Helvetica", "Times-Roman", "Courier", "Arial", "Calibri"], width=12, state="readonly", font=get_sys_font(8))
+        combo_font.set(self.font_family_var.get())
+        combo_font.pack(side=tk.LEFT, padx=(0, 8))
+
+        tk.Label(row1, text="Size:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 2))
+        combo_size = ttk.Combobox(row1, values=["6", "7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32"], width=4, state="readonly", font=get_sys_font(8))
+        combo_size.set(self.font_size_var.get())
+        combo_size.pack(side=tk.LEFT, padx=(0, 8))
+
+        var_bold = tk.BooleanVar(value=self.bold_var.get())
+        var_italic = tk.BooleanVar(value=self.italic_var.get())
+        tk.Checkbutton(row1, text="B", variable=var_bold, font=get_sys_font(8, "bold"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD").pack(side=tk.LEFT, padx=1)
+        tk.Checkbutton(row1, text="I", variable=var_italic, font=get_sys_font(8, "italic"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD").pack(side=tk.LEFT, padx=(1, 8))
+
+        # Color in dialog
+        selected_color_hex = [self.text_color_hex]
+        lbl_swatch = tk.Label(row1, text="   ", bg=selected_color_hex[0], relief=tk.SOLID, bd=1)
+        lbl_swatch.pack(side=tk.LEFT, padx=(0, 4))
+
+        def pick_dlg_color():
+            c = colorchooser.askcolor(color=selected_color_hex[0], parent=dlg)
+            if c and c[1]:
+                selected_color_hex[0] = c[1]
+                lbl_swatch.config(bg=c[1])
+
+        ttk.Button(row1, text="🎨 Color", style="Tool3D.TButton", command=pick_dlg_color).pack(side=tk.LEFT)
+
+        # 5. Box / Background Options
+        row2 = tk.Frame(style_box, bg="#F8FAFC")
+        row2.pack(fill=tk.X, pady=(4, 0))
+
+        var_border = tk.BooleanVar(value=False)
+        var_fill_white = tk.BooleanVar(value=False)
+        tk.Checkbutton(row2, text="Draw solid border box around selected area", variable=var_border, font=get_sys_font(8), bg="#F8FAFC").pack(anchor=tk.W)
+        tk.Checkbutton(row2, text="Fill white background (covers / redacts underlying marks)", variable=var_fill_white, font=get_sys_font(8), bg="#F8FAFC").pack(anchor=tk.W)
+
+        # 6. Action Buttons
+        btn_bar = tk.Frame(dlg, bg="#E2E8F0", padx=16, pady=10, relief=tk.RAISED, bd=1)
+        btn_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        def do_insert():
+            raw_text = txt_input.get("1.0", tk.END).strip()
+            if not raw_text:
+                messagebox.showwarning("Warning", "Please enter text to insert.", parent=dlg)
+                return
+
+            self._save_undo_state()
+            page = self.doc[self.current_page]
+
+            try:
+                f_size = float(combo_size.get())
+            except ValueError:
+                f_size = 10.0
+
+            # Hex to RGB
+            hex_c = selected_color_hex[0].lstrip("#")
+            if len(hex_c) == 6:
+                color_rgb = (int(hex_c[0:2], 16)/255.0, int(hex_c[2:4], 16)/255.0, int(hex_c[4:6], 16)/255.0)
+            else:
+                color_rgb = (0.0, 0.0, 0.0)
+
+            f_fam = combo_font.get()
+            is_bold = var_bold.get()
+            is_italic = var_italic.get()
+            fill_white = var_fill_white.get()
+            draw_border = var_border.get()
+
+            try:
+                # 1. Fill white background if requested
+                if fill_white:
+                    page.draw_rect(target_rect, color=None, fill=(1, 1, 1))
+
+                # 2. Draw border if requested
+                if draw_border:
+                    page.draw_rect(target_rect, color=color_rgb, width=1.0)
+
+                # 3. Insert Text
+                if target_rect.height >= f_size * 1.4:
+                    safe_insert_pdf_text(
+                        page,
+                        target_rect,
+                        raw_text,
+                        font_family=f_fam,
+                        fontsize=f_size,
+                        color=color_rgb,
+                        bold=is_bold,
+                        italic=is_italic,
+                        is_box=True
+                    )
+                else:
+                    safe_insert_pdf_text(
+                        page,
+                        fitz.Point(target_rect.x0 + 2, target_rect.y0 + f_size),
+                        raw_text,
+                        font_family=f_fam,
+                        fontsize=f_size,
+                        color=color_rgb,
+                        bold=is_bold,
+                        italic=is_italic,
+                        is_box=False
+                    )
+
+                dlg.destroy()
+                self.render_page()
+                self.scan_and_detect_text()
+
+                if self.spans:
+                    self._select_span(len(self.spans) - 1)
+                    self.txt_editor.focus_set()
+
+                self.lbl_ribbon_status.config(
+                    text=f"✓ Inserted new text box in selected area ({int(target_rect.width)}x{int(target_rect.height)} pt)",
+                    fg="#047857"
+                )
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to insert text: {e}", parent=dlg)
+
+        ttk.Button(btn_bar, text="✅ Insert Text Now (Enter)", style="Primary3D.TButton", command=do_insert).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_bar, text="❌ Cancel (Esc)", style="Tool3D.TButton", command=dlg.destroy).pack(side=tk.RIGHT, padx=4)
+
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+        txt_input.bind("<Control-Return>", lambda e: do_insert())
 
     def _on_tree_select(self, event):
         sel = self.tree_spans.selection()
