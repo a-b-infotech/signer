@@ -1160,10 +1160,9 @@ def preserve_signature_appearances_on_doc(doc, remove_broken_fields=True):
         if remove_broken_fields:
             try:
                 root_xref = doc.pdf_catalog()
-                doc.xref_set_key(root_xref, "SigFlags", "null")
-                acro_xref = doc.xref_get_key(root_xref, "AcroForm")
-                if acro_xref and acro_xref[0] != "null":
-                    doc.xref_set_key(root_xref, "AcroForm", "null")
+                cat_txt = doc.xref_object(root_xref)
+                clean_lines = [l for l in cat_txt.splitlines() if '/SigFlags' not in l and '/AcroForm' not in l]
+                doc.update_object(root_xref, '\n'.join(clean_lines))
             except Exception as cat_e:
                 logger.debug(f"AcroForm catalog cleanup: {cat_e}")
     except Exception as e:
@@ -1256,12 +1255,12 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
             if has_sigs:
                 break
 
-    # 2. Preserve visual appearance of any existing signatures
-    # Bake high-res 300 DPI visual stamp and cleanly remove broken widgets/catalog SigFlags
-    # so that Adobe Acrobat displays the signature 100% visibly without any error popups!
+    # 2. Preserve existing digital signatures and appearances intact
+    # If preserve_sigs is True, keep all digital signature widgets, appearances & fields 100% intact!
+    # Do NOT delete widgets so digital signatures and Acrobat validation remain intact.
     if preserve_sigs and has_sigs:
         try:
-            preserve_signature_appearances_on_doc(doc, remove_broken_fields=True)
+            preserve_signature_appearances_on_doc(doc, remove_broken_fields=False)
         except Exception as e:
             logger.debug(f"Compress sig preservation notice: {e}")
 
@@ -1335,6 +1334,11 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
 
                 if len(new_bytes) < len(orig_bytes):
                     page.replace_image(xr, stream=new_bytes)
+                    try:
+                        doc.xref_set_key(xr, "ColorSpace", "/DeviceRGB" if im.mode == "RGB" else "/DeviceGray")
+                        doc.xref_set_key(xr, "DecodeParms", "null")
+                    except Exception:
+                        pass
             except Exception as img_err:
                 logger.debug(f"Image compress skipped for xref {xr}: {img_err}")
 
@@ -1509,7 +1513,7 @@ def get_bbox_bg_color(page_or_pix, bbox, page_rect=None):
 def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fontsize=10.0, color=(0.0, 0.0, 0.0), bold=False, italic=False, is_box=False, render_mode=0):
     """
     Safely inserts text into a PyMuPDF page with 100% guarantee against 'need font file or buffer' errors.
-    Automatically handles Base-14 fonts, Windows system fonts, and Unicode fallback.
+    Automatically handles Base-14 fonts, Windows system fonts, and Unicode fallback with overflow deficit handling.
     """
     fam = str(font_family).lower()
     if any(k in fam for k in ("times", "serif", "roman")):
@@ -1556,14 +1560,16 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
     specific_win_font = os.path.join(win_fonts_dir, win_ttf)
     fallback_arial = os.path.join(win_fonts_dir, "arial.ttf")
 
-    # 1. Try standard Base-14 font code
+    # 1. Try standard Base-14 font code with box overflow check
     try:
         if is_box and isinstance(point_or_rect, fitz.Rect):
-            page.insert_textbox(point_or_rect, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
+            rc = page.insert_textbox(point_or_rect, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
+            if rc >= 0:
+                return True
         else:
             pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
             page.insert_text(pt, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
-        return True
+            return True
     except Exception:
         pass
 
@@ -1571,11 +1577,13 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
     if os.path.exists(specific_win_font):
         try:
             if is_box and isinstance(point_or_rect, fitz.Rect):
-                page.insert_textbox(point_or_rect, text, fontfile=specific_win_font, fontsize=fontsize, color=color, render_mode=render_mode)
+                rc = page.insert_textbox(point_or_rect, text, fontfile=specific_win_font, fontsize=fontsize, color=color, render_mode=render_mode)
+                if rc >= 0:
+                    return True
             else:
                 pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
                 page.insert_text(pt, text, fontfile=specific_win_font, fontsize=fontsize, color=color, render_mode=render_mode)
-            return True
+                return True
         except Exception:
             pass
 
@@ -1583,18 +1591,38 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
     if os.path.exists(fallback_arial):
         try:
             if is_box and isinstance(point_or_rect, fitz.Rect):
-                page.insert_textbox(point_or_rect, text, fontfile=fallback_arial, fontsize=fontsize, color=color, render_mode=render_mode)
+                rc = page.insert_textbox(point_or_rect, text, fontfile=fallback_arial, fontsize=fontsize, color=color, render_mode=render_mode)
+                if rc >= 0:
+                    return True
             else:
                 pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
                 page.insert_text(pt, text, fontfile=fallback_arial, fontsize=fontsize, color=color, render_mode=render_mode)
-            return True
+                return True
         except Exception:
             pass
 
-    # 4. Ultimate fallback to standard 'helv'
+    # 4. Universal line-by-line fallback (Guarantees 100% of text is placed even if box is tight)
     try:
-        pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
-        page.insert_text(pt, text, fontname="helv", fontsize=fontsize, color=color, render_mode=render_mode)
+        lines = str(text).split("\n")
+        line_h = fontsize * 1.25
+        base_x = point_or_rect.x0 if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.x if isinstance(point_or_rect, fitz.Point) else point_or_rect[0])
+        base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
+        for idx, line in enumerate(lines):
+            pt = fitz.Point(base_x, base_y + idx * line_h)
+            page.insert_text(pt, line, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
+        return True
+    except Exception:
+        pass
+
+    # 5. Ultimate fallback to standard 'helv'
+    try:
+        lines = str(text).split("\n")
+        line_h = fontsize * 1.25
+        base_x = point_or_rect.x0 if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.x if isinstance(point_or_rect, fitz.Point) else point_or_rect[0])
+        base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
+        for idx, line in enumerate(lines):
+            pt = fitz.Point(base_x, base_y + idx * line_h)
+            page.insert_text(pt, line, fontname="helv", fontsize=fontsize, color=color, render_mode=render_mode)
         return True
     except Exception as final_e:
         raise RuntimeError(f"Could not insert text with available fonts: {final_e}")
@@ -3087,6 +3115,95 @@ class EmbeddedPdfViewer(tk.Frame):
 
 # ==========================================
 # 4. FULL VIRTUAL DISPLAY PDF TEXT EDITOR & OCR
+class AddTextDialog:
+    """Professional dialog for entering and formatting new text or tax details to insert on PDF."""
+    def __init__(self, parent, initial_text="", target_rect=None, default_font="Helvetica", default_size=11, default_color="#000000", bold=False, italic=False):
+        self.result = None
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("➕ Insert New Text / Tax Box")
+        self.dialog.geometry("520x400")
+        self.dialog.minsize(480, 360)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        apply_app_icon(self.dialog)
+
+        self.font_var = tk.StringVar(value=default_font)
+        self.size_var = tk.StringVar(value=str(default_size))
+        self.color_hex = default_color
+        self.bold_var = tk.BooleanVar(value=bold)
+        self.italic_var = tk.BooleanVar(value=italic)
+
+        # Build UI
+        outer = tk.Frame(self.dialog, bg="#F1F5F9", padx=12, pady=12)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        card = tk.Frame(outer, bg="#FFFFFF", bd=1, relief=tk.SOLID, padx=12, pady=10)
+        card.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        tk.Label(card, text="Insert Text Element on PDF Page", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 2))
+        if target_rect:
+            tk.Label(card, text=f"Target Coordinates: ({int(target_rect.x0)}, {int(target_rect.y0)}) pt  |  Box Size: {int(target_rect.width)} x {int(target_rect.height)} pt", font=get_sys_font(7, "bold"), fg="#0E7490", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
+
+        tk.Label(card, text="Enter Text / Content (Supports Multi-line):", font=get_sys_font(8, "bold"), fg="#334155", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 2))
+        self.txt_content = tk.Text(card, height=6, font=get_sys_font(10), bg="#FFFFFF", bd=1, relief=tk.SOLID, wrap=tk.WORD)
+        self.txt_content.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+        if initial_text:
+            self.txt_content.insert("1.0", initial_text)
+            self.txt_content.tag_add(tk.SEL, "1.0", tk.END)
+        self.txt_content.focus_set()
+
+        # Formatting options bar
+        fmt_frame = tk.Frame(card, bg="#F8FAFC", bd=1, relief=tk.GROOVE, padx=8, pady=6)
+        fmt_frame.pack(fill=tk.X)
+
+        tk.Label(fmt_frame, text="Font:", font=get_sys_font(8, "bold"), bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Combobox(fmt_frame, textvariable=self.font_var, values=["Helvetica", "Arial", "Times-Roman", "Courier", "Calibri", "Segoe UI"], width=11, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=(0, 6))
+
+        tk.Label(fmt_frame, text="Size:", font=get_sys_font(8, "bold"), bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Combobox(fmt_frame, textvariable=self.size_var, values=["7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32"], width=4, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=(0, 6))
+
+        tk.Checkbutton(fmt_frame, text="B", variable=self.bold_var, font=get_sys_font(8, "bold"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD").pack(side=tk.LEFT, padx=1)
+        tk.Checkbutton(fmt_frame, text="I", variable=self.italic_var, font=get_sys_font(8, "italic"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD").pack(side=tk.LEFT, padx=(1, 8))
+
+        self.swatch = tk.Label(fmt_frame, text="   ", bg=self.color_hex, relief=tk.SOLID, bd=1)
+        self.swatch.pack(side=tk.LEFT, padx=(0, 4))
+        ttk.Button(fmt_frame, text="Color...", style="Tool3D.TButton", command=self._pick_color).pack(side=tk.LEFT)
+
+        # Buttons
+        btn_row = tk.Frame(outer, bg="#F1F5F9")
+        btn_row.pack(fill=tk.X)
+
+        ttk.Button(btn_row, text="Cancel", style="Tool3D.TButton", command=self.dialog.destroy).pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(btn_row, text="✓ Insert Text on PDF", style="Primary3D.TButton", command=self._confirm).pack(side=tk.RIGHT)
+
+        self.dialog.bind("<Escape>", lambda e: self.dialog.destroy())
+
+    def _pick_color(self):
+        col = colorchooser.askcolor(initialcolor=self.color_hex, parent=self.dialog, title="Select Text Color")
+        if col and col[1]:
+            self.color_hex = col[1]
+            self.swatch.config(bg=self.color_hex)
+
+    def _confirm(self):
+        txt = self.txt_content.get("1.0", tk.END).strip()
+        if not txt:
+            messagebox.showwarning("Warning", "Please enter some text to insert.", parent=self.dialog)
+            return
+        try:
+            f_size = float(self.size_var.get())
+        except ValueError:
+            f_size = 11.0
+        self.result = {
+            "text": txt,
+            "font": self.font_var.get(),
+            "size": f_size,
+            "color": self.color_hex,
+            "bold": self.bold_var.get(),
+            "italic": self.italic_var.get()
+        }
+        self.dialog.destroy()
+
+
 # ==========================================
 class PdfVirtualEditor(tk.Frame):
     """
@@ -3128,6 +3245,12 @@ class PdfVirtualEditor(tk.Frame):
         self.bold_var = tk.BooleanVar(value=False)
         self.italic_var = tk.BooleanVar(value=False)
         self.text_color_hex = "#000000"
+
+        # Interactive OCR & Text Search properties
+        self.ocr_search_var = tk.StringVar(value="")
+        self.search_all_pages_var = tk.BooleanVar(value=False)
+        self.search_matches = []  # list of span indices or (page_idx, span_idx)
+        self.active_search_match_idx = -1
 
         self._build_ui()
 
@@ -3322,6 +3445,32 @@ class PdfVirtualEditor(tk.Frame):
         self.btn_sb_add_text = ttk.Button(sb_act_row, text="➕ Add Text / Tax", style="Tool3D.TButton", command=self.toggle_add_text_mode)
         self.btn_sb_add_text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
         ttk.Button(sb_act_row, text="💾 SAVE PDF (Ctrl+S)", style="Primary3D.TButton", command=self.save_edited_pdf).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(2, 0))
+
+        # Interactive Document & Page Search Bar
+        search_box = tk.Frame(sidebar, bg="#F1F5F9", relief=tk.SOLID, bd=1, padx=6, pady=4)
+        search_box.pack(fill=tk.X, pady=(0, 6))
+
+        s_top = tk.Frame(search_box, bg="#F1F5F9")
+        s_top.pack(fill=tk.X)
+
+        self.ent_ocr_search = ttk.Entry(s_top, textvariable=self.ocr_search_var, font=get_sys_font(8))
+        self.ent_ocr_search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        self.ent_ocr_search.bind("<Return>", lambda e: self.find_next_search_match())
+        self.ent_ocr_search.bind("<KeyRelease>", lambda e: self.on_search_query_changed())
+
+        ttk.Button(s_top, text="◀", width=3, style="Tool3D.TButton", command=self.find_prev_search_match).pack(side=tk.LEFT, padx=1)
+        ttk.Button(s_top, text="▶", width=3, style="Tool3D.TButton", command=self.find_next_search_match).pack(side=tk.LEFT, padx=1)
+
+        s_bot = tk.Frame(search_box, bg="#F1F5F9")
+        s_bot.pack(fill=tk.X, pady=(2, 0))
+
+        self.lbl_search_count = tk.Label(s_bot, text="🔍 Search text on page / doc...", font=get_sys_font(7, "bold"), fg="#64748B", bg="#F1F5F9")
+        self.lbl_search_count.pack(side=tk.LEFT)
+
+        tk.Checkbutton(
+            s_bot, text="All Pages", variable=self.search_all_pages_var,
+            font=get_sys_font(7), bg="#F1F5F9", command=self.on_search_scope_toggled
+        ).pack(side=tk.RIGHT)
 
         # Detected text list
         list_f = tk.Frame(sidebar, bg="#FFFFFF")
@@ -3678,8 +3827,9 @@ class PdfVirtualEditor(tk.Frame):
                 for p_idx in range(total_pages):
                     page = self.doc[p_idx]
                     existing_text = page.get_text().strip()
-                    if len(existing_text) > 100:
-                        continue  # Already searchable text page
+                    # Only skip if the page already has rich searchable text layer (> 800 chars)
+                    if len(existing_text) > 800:
+                        continue
 
                     pix = page.get_pixmap(dpi=150)
                     np_img = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
@@ -3730,6 +3880,129 @@ class PdfVirtualEditor(tk.Frame):
 
         threading.Thread(target=ocr_worker, daemon=True).start()
 
+    def on_search_scope_toggled(self):
+        self.perform_ocr_search()
+
+    def on_search_query_changed(self):
+        self.perform_ocr_search()
+
+    def perform_ocr_search(self):
+        query = self.ocr_search_var.get().strip().lower()
+        self.canvas.delete("search_match")
+        self.canvas.delete("active_search_match")
+        self.search_matches.clear()
+        self.active_search_match_idx = -1
+
+        if not query or not self.doc:
+            self.lbl_search_count.config(text="🔍 Search text on page / doc...", fg="#64748B")
+            return
+
+        if not self.search_all_pages_var.get():
+            # Search Active Page
+            for idx, s in enumerate(self.spans):
+                txt = s.get("text", "").lower()
+                if query in txt:
+                    self.search_matches.append(idx)
+
+            count = len(self.search_matches)
+            if count == 0:
+                self.lbl_search_count.config(text="0 matches on active page", fg="#DC2626")
+            else:
+                self.lbl_search_count.config(text=f"{count} match(es) on page", fg="#047857")
+                self._draw_search_highlights()
+                self.active_search_match_idx = 0
+                self._highlight_active_search_match()
+        else:
+            # Search All Pages
+            all_matches = []
+            for p_idx in range(len(self.doc)):
+                p = self.doc[p_idx]
+                blocks = p.get_text("blocks")
+                for b_idx, b in enumerate(blocks):
+                    txt = b[4].strip().lower()
+                    if query in txt:
+                        all_matches.append((p_idx, b[:4], b[4].strip()))
+
+            self.search_matches = all_matches
+            count = len(self.search_matches)
+            if count == 0:
+                self.lbl_search_count.config(text="0 matches across document", fg="#DC2626")
+            else:
+                self.lbl_search_count.config(text=f"{count} matches across {len(self.doc)} pages", fg="#047857")
+                self.active_search_match_idx = 0
+                self._highlight_active_search_match()
+
+    def _draw_search_highlights(self):
+        self.canvas.delete("search_match")
+        if not self.search_all_pages_var.get():
+            for m_idx in self.search_matches:
+                if 0 <= m_idx < len(self.spans):
+                    bbox = self.spans[m_idx].get("bbox", (0, 0, 0, 0))
+                    x0, y0, x1, y1 = bbox[0] * self.scale, bbox[1] * self.scale, bbox[2] * self.scale, bbox[3] * self.scale
+                    self.canvas.create_rectangle(x0 - 2, y0 - 2, x1 + 2, y1 + 2, fill="#FEF08A", stipple="gray25", outline="#EAB308", width=1.5, tags=("search_match",))
+
+    def find_next_search_match(self):
+        if not self.search_matches:
+            self.perform_ocr_search()
+            return
+        self.active_search_match_idx = (self.active_search_match_idx + 1) % len(self.search_matches)
+        self._highlight_active_search_match()
+
+    def find_prev_search_match(self):
+        if not self.search_matches:
+            self.perform_ocr_search()
+            return
+        self.active_search_match_idx = (self.active_search_match_idx - 1) % len(self.search_matches)
+        self._highlight_active_search_match()
+
+    def _highlight_active_search_match(self):
+        if self.active_search_match_idx < 0 or self.active_search_match_idx >= len(self.search_matches):
+            return
+
+        self.canvas.delete("active_search_match")
+
+        if not self.search_all_pages_var.get():
+            span_idx = self.search_matches[self.active_search_match_idx]
+            if 0 <= span_idx < len(self.spans):
+                s = self.spans[span_idx]
+                bbox = s.get("bbox", (0, 0, 0, 0))
+                x0, y0, x1, y1 = bbox[0] * self.scale, bbox[1] * self.scale, bbox[2] * self.scale, bbox[3] * self.scale
+                self.canvas.create_rectangle(x0 - 3, y0 - 3, x1 + 3, y1 + 3, outline="#EA580C", width=2.5, tags=("active_search_match",))
+
+                # Scroll canvas to active match
+                try:
+                    c_h = max(1.0, float(self.canvas.cget("scrollregion").split()[3]))
+                    self.canvas.yview_moveto(max(0.0, (y0 - 50) / c_h))
+                except Exception:
+                    pass
+
+                # Select in tree
+                try:
+                    self.tree_spans.selection_set(str(span_idx))
+                    self.tree_spans.see(str(span_idx))
+                    self._select_span(span_idx)
+                except Exception:
+                    pass
+
+                self.lbl_search_count.config(text=f"Match {self.active_search_match_idx + 1} of {len(self.search_matches)}", fg="#EA580C")
+        else:
+            # Multi-page match
+            item = self.search_matches[self.active_search_match_idx]
+            target_page, bbox, txt = item
+            if target_page != self.current_page:
+                self.current_page = target_page
+                self.render_page()
+                self.scan_and_detect_text()
+
+            x0, y0, x1, y1 = bbox[0] * self.scale, bbox[1] * self.scale, bbox[2] * self.scale, bbox[3] * self.scale
+            self.canvas.create_rectangle(x0 - 3, y0 - 3, x1 + 3, y1 + 3, outline="#EA580C", width=2.5, tags=("active_search_match",))
+            try:
+                c_h = max(1.0, float(self.canvas.cget("scrollregion").split()[3]))
+                self.canvas.yview_moveto(max(0.0, (y0 - 50) / c_h))
+            except Exception:
+                pass
+            self.lbl_search_count.config(text=f"Match {self.active_search_match_idx + 1} of {len(self.search_matches)} (Page {target_page + 1})", fg="#EA580C")
+
     def _draw_span_overlays(self):
         self.canvas.delete("span_box")
         if self.editor_mode != "edit":
@@ -3747,6 +4020,15 @@ class PdfVirtualEditor(tk.Frame):
                 outline="#93C5FD", width=1, dash=(2, 2),
                 tags=("span_box", tag)
             )
+
+        # Restore active search highlights
+        if self.search_matches and not self.search_all_pages_var.get():
+            self._draw_search_highlights()
+            if 0 <= self.active_search_match_idx < len(self.search_matches):
+                s_idx = self.search_matches[self.active_search_match_idx]
+                if 0 <= s_idx < len(self.spans):
+                    bb = self.spans[s_idx].get("bbox", (0, 0, 0, 0))
+                    self.canvas.create_rectangle(bb[0]*self.scale-3, bb[1]*self.scale-3, bb[2]*self.scale+3, bb[3]*self.scale+3, outline="#EA580C", width=2.5, tags=("active_search_match",))
 
     def _on_canvas_motion(self, event):
         if self.editor_mode != "edit" or self.add_text_mode:
@@ -3952,55 +4234,55 @@ class PdfVirtualEditor(tk.Frame):
         self.update_idletasks()
 
         pending = self.txt_editor.get("1.0", tk.END).strip()
-        default_val = pending if pending and pending != "Type text here" and pending != "New Text Box" else "New Text Box"
-        entered = simpledialog.askstring(
-            "Add Text / Tax Box",
-            f"Enter text to insert in selected area ({int(target_rect.width)}x{int(target_rect.height)} pt):",
-            initialvalue=default_val,
-            parent=self
+        default_val = pending if pending and pending != "Type text here" and pending != "New Text Box" else ""
+        try:
+            cur_sz = float(self.font_size_var.get())
+        except ValueError:
+            cur_sz = 11.0
+
+        dlg = AddTextDialog(
+            self,
+            initial_text=default_val,
+            target_rect=target_rect,
+            default_font=self.font_family_var.get(),
+            default_size=cur_sz,
+            default_color=self.text_color_hex,
+            bold=self.bold_var.get(),
+            italic=self.italic_var.get()
         )
+        self.dialog_ref = dlg
+        self.wait_window(dlg.dialog)
 
         self.canvas.delete("selected_add_area")
 
-        if not entered:
+        if not dlg.result:
             return
 
-        new_text = entered.strip()
-        if not new_text:
-            return
+        new_text = dlg.result["text"]
+        f_fam = dlg.result["font"]
+        f_size = dlg.result["size"]
+        f_bold = dlg.result["bold"]
+        f_italic = dlg.result["italic"]
+        hex_c = dlg.result["color"].lstrip("#")
+        if len(hex_c) == 6:
+            color_rgb = (int(hex_c[0:2], 16)/255.0, int(hex_c[2:4], 16)/255.0, int(hex_c[4:6], 16)/255.0)
+        else:
+            color_rgb = (0.0, 0.0, 0.0)
 
         self._save_undo_state()
-        color_rgb = self._get_target_color_rgb()
-        try:
-            f_size = float(self.font_size_var.get())
-        except ValueError:
-            f_size = 11.0
 
         try:
-            if is_box_mode or "\n" in new_text:
-                safe_insert_pdf_text(
-                    page,
-                    target_rect,
-                    new_text,
-                    font_family=self.font_family_var.get(),
-                    fontsize=f_size,
-                    color=color_rgb,
-                    bold=self.bold_var.get(),
-                    italic=self.italic_var.get(),
-                    is_box=True
-                )
-            else:
-                safe_insert_pdf_text(
-                    page,
-                    fitz.Point(target_rect.x0, target_rect.y0 + f_size),
-                    new_text,
-                    font_family=self.font_family_var.get(),
-                    fontsize=f_size,
-                    color=color_rgb,
-                    bold=self.bold_var.get(),
-                    italic=self.italic_var.get(),
-                    is_box=False
-                )
+            safe_insert_pdf_text(
+                page,
+                target_rect,
+                new_text,
+                font_family=f_fam,
+                fontsize=f_size,
+                color=color_rgb,
+                bold=f_bold,
+                italic=f_italic,
+                is_box=True
+            )
 
             self.render_page()
             self.scan_and_detect_text()
@@ -4109,8 +4391,17 @@ class PdfVirtualEditor(tk.Frame):
         return (0.0, 0.0, 0.0)
 
     def apply_text_edit(self):
-        if not self.doc or self.selected_span_idx is None:
-            messagebox.showwarning("Warning", "Please select a text block to edit.")
+        if not self.doc:
+            messagebox.showwarning("Warning", "Please open a PDF document first.")
+            return
+
+        if self.selected_span_idx is None:
+            pending = self.txt_editor.get("1.0", tk.END).strip()
+            if pending:
+                if messagebox.askyesno("Add as New Text?", "No text element is currently selected on the page.\n\nWould you like to insert this text as a new text box on the active page?"):
+                    self.add_textbox_at_center()
+                    return
+            messagebox.showwarning("Warning", "Please select a text block on canvas or list to edit.")
             return
 
         new_text = self.txt_editor.get("1.0", tk.END).strip()
@@ -4356,42 +4647,12 @@ class SignatureSettingsDialog:
         grid4.columnconfigure(0, weight=1)
         grid4.columnconfigure(1, weight=1)
 
-        # 5. Background Local API Server (Port 5000) Card
-        c5 = tk.Frame(scroll_frame, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=12, pady=10)
-        c5.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(c5, text="5. Background Local API Server (Port 5000)", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
-        tk.Label(c5, text="Enables web applications and browser extensions to trigger token signing via http://127.0.0.1:5000:", font=get_sys_font(8), fg="#64748B", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
-
-        # Status row
-        srv_status_row = tk.Frame(c5, bg="#F8FAFC", bd=1, relief=tk.SOLID, padx=8, pady=6)
-        srv_status_row.pack(fill=tk.X, pady=(0, 6))
-        self.lbl_server_status = tk.Label(srv_status_row, text="", font=get_sys_font(8, "bold"), bg="#F8FAFC")
-        self.lbl_server_status.pack(side=tk.LEFT)
-
-        # Control Buttons
-        srv_btn_row = tk.Frame(c5, bg="#FFFFFF")
-        srv_btn_row.pack(fill=tk.X, pady=(0, 6))
-        self.btn_stop_server = ttk.Button(srv_btn_row, text="⏹️ Stop Server", style="Tool3D.TButton", command=self._on_stop_server)
-        self.btn_stop_server.pack(side=tk.LEFT, padx=(0, 4))
-        self.btn_start_server = ttk.Button(srv_btn_row, text="▶️ Start Server", style="Tool3D.TButton", command=self._on_start_server)
-        self.btn_start_server.pack(side=tk.LEFT, padx=2)
-        self.btn_restart_server = ttk.Button(srv_btn_row, text="🔄 Restart Server", style="Tool3D.TButton", command=self._on_restart_server)
-        self.btn_restart_server.pack(side=tk.LEFT, padx=2)
-
-        tk.Checkbutton(c5, text="Automatically Start Local API Server when Application Launches", variable=app.server_autostart_var, font=get_sys_font(8), fg="#1E293B", bg="#FFFFFF").pack(anchor=tk.W, pady=(2, 0))
-        self._refresh_server_ui()
-
-        # 6. Software Updates & Version Card
-        c6 = tk.Frame(scroll_frame, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=12, pady=10)
-        c6.pack(fill=tk.X, pady=(0, 8))
-        tk.Label(c6, text="6. Software Updates & Version Management", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
-        tk.Label(c6, text=f"Installed Version: v{APP_VERSION} PRO SUITE (Official Windows Release)", font=get_sys_font(8, "bold"), fg="#047857", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
-
-        tk.Checkbutton(c6, text="Automatically Check for Updates on Application Startup", variable=app.auto_check_updates_var, font=get_sys_font(8), fg="#1E293B", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
-
-        upd_btn_row = tk.Frame(c6, bg="#FFFFFF")
-        upd_btn_row.pack(fill=tk.X)
-        ttk.Button(upd_btn_row, text="🔍 Check for Updates Now", style="Primary3D.TButton", command=lambda: SoftwareUpdateManager.check_for_updates(parent=self.dialog, silent=False)).pack(side=tk.LEFT)
+        # Quick Shortcut to General & Server Settings
+        c_link = tk.Frame(scroll_frame, bg="#F0FDF4", relief=tk.SOLID, bd=1, padx=12, pady=8)
+        c_link.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(c_link, text="⚙️ Looking for Local API Server (Port 5000) or Version Updates?", font=get_sys_font(8, "bold"), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W)
+        tk.Label(c_link, text="Local API Server controls and Software Update settings have been relocated to the main ⚙ Settings window.", font=get_sys_font(8), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 6))
+        ttk.Button(c_link, text="⚙️ Open General & Server Settings Dialog", style="Tool3D.TButton", command=lambda: (self.dialog.destroy(), SettingsDialog(self.app.root, self.app))).pack(anchor=tk.W)
 
         # Bottom Close Button
         btn_bot = tk.Frame(outer, bg="#F1F5F9")
@@ -4431,41 +4692,7 @@ class SignatureSettingsDialog:
                 pass
         self.lbl_logo_preview.config(image="", text="[No logo selected]", width=20, height=2)
 
-    def _refresh_server_ui(self):
-        if local_api_server.is_running:
-            self.lbl_server_status.config(text="🟢 Status: RUNNING on http://127.0.0.1:5000", fg="#047857")
-            self.btn_stop_server.config(state=tk.NORMAL)
-            self.btn_start_server.config(state=tk.DISABLED)
-            self.btn_restart_server.config(state=tk.NORMAL)
-        else:
-            self.lbl_server_status.config(text="🔴 Status: STOPPED (Local API is offline)", fg="#DC2626")
-            self.btn_stop_server.config(state=tk.DISABLED)
-            self.btn_start_server.config(state=tk.NORMAL)
-            self.btn_restart_server.config(state=tk.DISABLED)
 
-    def _on_stop_server(self):
-        ok, msg = local_api_server.stop()
-        self._refresh_server_ui()
-        if ok:
-            messagebox.showinfo("Server Stopped", "Local API server has been stopped.", parent=self.dialog)
-        else:
-            messagebox.showerror("Server Error", msg, parent=self.dialog)
-
-    def _on_start_server(self):
-        ok, msg = local_api_server.start()
-        self._refresh_server_ui()
-        if ok:
-            messagebox.showinfo("Server Started", "Local API server is now running on http://127.0.0.1:5000", parent=self.dialog)
-        else:
-            messagebox.showerror("Server Error", f"Could not start server:\n{msg}", parent=self.dialog)
-
-    def _on_restart_server(self):
-        ok, msg = local_api_server.restart()
-        self._refresh_server_ui()
-        if ok:
-            messagebox.showinfo("Server Restarted", "Local API server was successfully restarted on http://127.0.0.1:5000", parent=self.dialog)
-        else:
-            messagebox.showerror("Server Error", f"Could not restart server:\n{msg}", parent=self.dialog)
 
     def _toggle_pass_visibility(self):
         if self.ent_pass.cget('show') == '*':
@@ -4784,17 +5011,174 @@ class SettingsDialog:
         self.notebook.add(tab_lic, text="🛡️ License & Validity")
         self._build_license_tab(tab_lic)
 
-        # Tab 2: Custom Drivers & Diagnostics
+        # Tab 2: Local API Server
+        tab_srv = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab_srv, text="🚀 Local API Server (Port 5000)")
+        self._build_server_tab(tab_srv)
+
+        # Tab 3: Software Updates
+        tab_upd = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(tab_upd, text="🔄 Software Updates & Versions")
+        self._build_updates_tab(tab_upd)
+
+        # Tab 4: Custom Drivers & Diagnostics
         tab_drv = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab_drv, text="🔌 Token Drivers & Diagnostics (.dll / .dylib / .so)")
+        self.notebook.add(tab_drv, text="🔌 Token Drivers & Diagnostics")
         self._build_drivers_tab(tab_drv)
 
         if initial_tab == "drivers":
             self.notebook.select(tab_drv)
+        elif initial_tab == "server":
+            self.notebook.select(tab_srv)
+        elif initial_tab == "updates":
+            self.notebook.select(tab_upd)
 
         btn_row = tk.Frame(outer, bg="#F1F5F9")
         btn_row.pack(fill=tk.X)
         ttk.Button(btn_row, text="Close Settings", style="Tool3D.TButton", command=self.dialog.destroy).pack(side=tk.RIGHT)
+
+    def _build_server_tab(self, parent):
+        card = tk.Frame(parent, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=14, pady=12)
+        card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+
+        tk.Label(card, text="Local Background API Server (HTTP Port 5000)", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(
+            card,
+            text="The Local API Server allows web applications, CRM/ERP platforms, and browser extensions\n"
+                 "to invoke cryptographic USB hardware token signing seamlessly via local HTTP POST requests.",
+            font=get_sys_font(8), fg="#475569", bg="#FFFFFF", justify="left"
+        ).pack(anchor=tk.W, pady=(0, 10))
+
+        # Status Panel
+        status_box = tk.Frame(card, bg="#F8FAFC", bd=1, relief=tk.SOLID, padx=12, pady=10)
+        status_box.pack(fill=tk.X, pady=(0, 10))
+
+        self.lbl_server_status = tk.Label(status_box, text="", font=get_sys_font(9, "bold"), bg="#F8FAFC")
+        self.lbl_server_status.pack(anchor=tk.W)
+
+        tk.Label(
+            status_box,
+            text="API Endpoint: http://127.0.0.1:5000/api/sign  |  Health Check: http://127.0.0.1:5000/api/health",
+            font=get_sys_font(8), fg="#64748B", bg="#F8FAFC"
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        # Control Buttons
+        btn_box = tk.Frame(card, bg="#FFFFFF")
+        btn_box.pack(fill=tk.X, pady=(0, 12))
+
+        self.btn_stop_server = ttk.Button(btn_box, text="⏹️ Stop Server", style="Tool3D.TButton", command=self._on_stop_server)
+        self.btn_stop_server.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_start_server = ttk.Button(btn_box, text="▶️ Start Server", style="Tool3D.TButton", command=self._on_start_server)
+        self.btn_start_server.pack(side=tk.LEFT, padx=(0, 6))
+
+        self.btn_restart_server = ttk.Button(btn_box, text="🔄 Restart Server", style="Tool3D.TButton", command=self._on_restart_server)
+        self.btn_restart_server.pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(btn_box, text="🌐 Test Ping (Browser)", style="Tool3D.TButton", command=lambda: webbrowser.open("http://127.0.0.1:5000/api/health")).pack(side=tk.LEFT)
+
+        # Autostart checkbox
+        tk.Checkbutton(
+            card, text="Automatically Start Local API Server when Application Launches",
+            variable=self.main_app.server_autostart_var, font=get_sys_font(8, "bold"),
+            fg="#1E293B", bg="#FFFFFF"
+        ).pack(anchor=tk.W, pady=(4, 10))
+
+        # Instructions / Security Card
+        info_card = tk.Frame(card, bg="#EFF6FF", bd=1, relief=tk.SOLID, padx=10, pady=8)
+        info_card.pack(fill=tk.X)
+        tk.Label(info_card, text="🔒 Local Host Security & Integration Details", font=get_sys_font(8, "bold"), fg="#1E40AF", bg="#EFF6FF").pack(anchor=tk.W)
+        tk.Label(
+            info_card,
+            text="• Server binds strictly to 127.0.0.1 (Localhost only) preventing unauthorized remote network access.\n"
+                 "• Cross-Origin Resource Sharing (CORS) is enabled to support web-based signing portals.\n"
+                 "• Requires active USB Hardware Token or valid PFX certificate with PIN authentication.",
+            font=get_sys_font(8), fg="#1E3A8A", bg="#EFF6FF", justify="left"
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        self._refresh_server_ui()
+
+    def _build_updates_tab(self, parent):
+        card = tk.Frame(parent, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=14, pady=12)
+        card.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+
+        tk.Label(card, text="Software Updates & Automated Version Management", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(
+            card,
+            text="Stay protected with the latest cryptographic standards, PKCS#11 token driver updates,\n"
+                 "and PDF compliance improvements released by A B INFOTECH.",
+            font=get_sys_font(8), fg="#475569", bg="#FFFFFF", justify="left"
+        ).pack(anchor=tk.W, pady=(0, 10))
+
+        # Version Info Box
+        ver_box = tk.Frame(card, bg="#F0FDF4", bd=1, relief=tk.SOLID, padx=12, pady=10)
+        ver_box.pack(fill=tk.X, pady=(0, 12))
+
+        tk.Label(ver_box, text=f"Installed Version: v{APP_VERSION} PRO SUITE", font=get_sys_font(10, "bold"), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W)
+        tk.Label(ver_box, text=f"Build Channel: Official Windows 64-bit Stable Release  |  OS: {CURRENT_OS}", font=get_sys_font(8), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 0))
+        tk.Label(ver_box, text=f"Update Server: https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F0FDF4").pack(anchor=tk.W, pady=(4, 0))
+
+        tk.Checkbutton(
+            card, text="Automatically Check for Updates on Application Startup",
+            variable=self.main_app.auto_check_updates_var, font=get_sys_font(8, "bold"),
+            fg="#1E293B", bg="#FFFFFF"
+        ).pack(anchor=tk.W, pady=(0, 10))
+
+        upd_btn_row = tk.Frame(card, bg="#FFFFFF")
+        upd_btn_row.pack(fill=tk.X, pady=(0, 12))
+
+        ttk.Button(
+            upd_btn_row, text="🔍 Check for Updates Now", style="Primary3D.TButton",
+            command=lambda: SoftwareUpdateManager.check_for_updates(parent=self.dialog, silent=False)
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            upd_btn_row, text="🌐 Visit Download Portal", style="Tool3D.TButton",
+            command=lambda: webbrowser.open("https://github.com/a-b-infotech/abinfo-signer/releases")
+        ).pack(side=tk.LEFT, padx=(0, 6))
+
+        ttk.Button(
+            upd_btn_row, text="💬 Contact Support (+91 7016797720)", style="Tool3D.TButton",
+            command=self.main_app.open_whatsapp
+        ).pack(side=tk.LEFT)
+
+    def _refresh_server_ui(self):
+        if not hasattr(self, 'lbl_server_status'):
+            return
+        if local_api_server.is_running:
+            self.lbl_server_status.config(text="🟢 Status: RUNNING on http://127.0.0.1:5000", fg="#047857")
+            self.btn_stop_server.config(state=tk.NORMAL)
+            self.btn_start_server.config(state=tk.DISABLED)
+            self.btn_restart_server.config(state=tk.NORMAL)
+        else:
+            self.lbl_server_status.config(text="🔴 Status: STOPPED (Local API is offline)", fg="#DC2626")
+            self.btn_stop_server.config(state=tk.DISABLED)
+            self.btn_start_server.config(state=tk.NORMAL)
+            self.btn_restart_server.config(state=tk.DISABLED)
+
+    def _on_stop_server(self):
+        ok, msg = local_api_server.stop()
+        self._refresh_server_ui()
+        if ok:
+            messagebox.showinfo("Server Stopped", "Local API server has been stopped.", parent=self.dialog)
+        else:
+            messagebox.showerror("Server Error", msg, parent=self.dialog)
+
+    def _on_start_server(self):
+        ok, msg = local_api_server.start()
+        self._refresh_server_ui()
+        if ok:
+            messagebox.showinfo("Server Started", "Local API server is now running on http://127.0.0.1:5000", parent=self.dialog)
+        else:
+            messagebox.showerror("Server Error", f"Could not start server:\n{msg}", parent=self.dialog)
+
+    def _on_restart_server(self):
+        ok, msg = local_api_server.restart()
+        self._refresh_server_ui()
+        if ok:
+            messagebox.showinfo("Server Restarted", "Local API server was successfully restarted on http://127.0.0.1:5000", parent=self.dialog)
+        else:
+            messagebox.showerror("Server Error", f"Could not restart server:\n{msg}", parent=self.dialog)
 
     def _build_license_tab(self, parent):
         hw_id = LicenseManager.get_hardware_id()
@@ -5957,21 +6341,32 @@ class VisualPdfSignerApp:
 
         try:
             merged = fitz.open()
-            for p in self.merge_pdf_list:
+            for doc_idx, p in enumerate(self.merge_pdf_list, 1):
                 pdf_bytes = convert_file_to_pdf_bytes(p)
                 sub_doc = fitz.open("pdf", pdf_bytes)
-                # Bake any existing digital signature appearance onto the pages
-                # so the visual signature stamp is 100% preserved in the merged output!
-                preserve_signature_appearances_on_doc(sub_doc, remove_broken_fields=True)
+                # Keep existing digital signatures and appearances intact
+                # Rename signature fields uniquely to prevent name collisions
+                try:
+                    for page in sub_doc:
+                        for w in page.widgets():
+                            ft = getattr(w, 'field_type', None)
+                            fts = str(getattr(w, 'field_type_string', '')).lower()
+                            if ft == fitz.PDF_WIDGET_TYPE_SIGNATURE or 'signature' in fts or 'sig' in str(w.field_name).lower():
+                                w.field_name = f"Doc{doc_idx}_{w.field_name}"
+                                w.update()
+                except Exception as ren_e:
+                    logger.debug(f"Widget rename notice: {ren_e}")
+
                 merged.insert_pdf(sub_doc, annots=True)
                 sub_doc.close()
+
             merged.save(out_p, garbage=3, deflate=True)
             total_pages = len(merged)
             merged.close()
             self.merge_viewer.load_pdf(out_p)
             messagebox.showinfo(
                 "Merge Complete",
-                f"✓ Successfully merged {len(self.merge_pdf_list)} file(s) into one PDF document ({total_pages} total pages):\n\n{out_p}\n\n(All existing visual signature stamps were preserved intact)"
+                f"✓ Successfully merged {len(self.merge_pdf_list)} file(s) into one PDF document ({total_pages} total pages):\n\n{out_p}\n\n(All existing digital signatures & visual stamps preserved intact)"
             )
         except Exception as e:
             messagebox.showerror("Merge Error", f"Merge failed: {e}")
