@@ -1,0 +1,16 @@
+{
+  "version": "2.1.0",
+  "name": "A B INFOTECH - PDF Sign & All-in-One Power Suite",
+  "release_date": "2026-11-01",
+  "download_url": "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/downloads/Abinfo_Signer_Windows_Setup.exe",
+  "fallback_url": "https://invoice.a-b-infotech.in/downloads/Abinfo_Signer_Windows_Setup.exe",
+  "min_os": "Windows 10 / 11 (32-bit & 64-bit)",
+  "changelog": [
+    "Comprehensive OCR & Virtual PDF Text Editor with interactive 'Add Text / Tax' tool and instant 'Save PDF' options",
+    "Fixed PDF compression image errors ('Insufficient data for an image' and 'An error exists on this page') with mask protection",
+    "Preserve 100% of cryptographic digital signatures in compressed and merged PDF documents with high-res 300 DPI stamps",
+    "New Background Local API Server (Port 5000) controls in Settings and System Tray: Start, Stop, and Restart",
+    "Built-in Automatic Software Version Checker and One-Click Live Installer Updater"
+  ]
+}
+

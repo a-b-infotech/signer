@@ -2,7 +2,7 @@
 ; A B INFOTECH SIGNER OFFLINE - Official Windows Setup Installer
 
 #define MyAppName "A B INFOTECH SIGNER OFFLINE"
-#define MyAppVersion "1.1"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "A B INFOTECH"
 #define MyAppURL "https://www.a-b-infotech.in/"
 #define MyAppExeName "Abinfo_Signer_Offline.exe"
@@ -39,9 +39,11 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-; Ensure the exe and the icon are installed in the destination folder
+; Ensure the exe, icons, and metadata are installed in the destination folder
 Source: "dist\Abinfo_Signer_Offline.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
 
 ; Certificate to be installed (put in {tmp} so it deletes itself automatically after installation)
 Source: "ab_infotech_ca_cert.cer"; DestDir: "{tmp}"; Flags: deleteafterinstall
@@ -72,3 +74,13 @@ Filename: "{cmd}"; Parameters: "/C taskkill /F /IM {#MyAppExeName} /T"; Flags: r
 Type: filesandordirs; Name: "{%userprofile}\.abinfotech_signer"
 ; Delete the entire application directory and all its contents
 Type: filesandordirs; Name: "{app}"
+
+[Code]
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  // Forcefully terminate any running instances before overwriting files
+  Exec('taskkill.exe', '/F /IM Abinfo_Signer_Offline.exe /T', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;

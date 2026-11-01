@@ -368,6 +368,8 @@ def save_signature_settings(app):
             "show_issuer": app.show_issuer_var.get() if hasattr(app, 'show_issuer_var') else False,
             "show_tick": app.show_tick_var.get() if hasattr(app, 'show_tick_var') else True,
             "show_border": app.show_border_var.get() if hasattr(app, 'show_border_var') else True,
+            "server_autostart": app.server_autostart_var.get() if hasattr(app, 'server_autostart_var') else True,
+            "auto_check_updates": app.auto_check_updates_var.get() if hasattr(app, 'auto_check_updates_var') else True,
         }
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
@@ -419,6 +421,10 @@ def load_signature_settings(app):
             app.show_tick_var.set(bool(data["show_tick"]))
         if hasattr(app, 'show_border_var') and "show_border" in data:
             app.show_border_var.set(bool(data["show_border"]))
+        if hasattr(app, 'server_autostart_var') and "server_autostart" in data:
+            app.server_autostart_var.set(bool(data["server_autostart"]))
+        if hasattr(app, 'auto_check_updates_var') and "auto_check_updates" in data:
+            app.auto_check_updates_var.set(bool(data["auto_check_updates"]))
         logger.info("Permanent signature settings loaded successfully.")
     except Exception as e:
         logger.warning(f"Error loading signature_settings.json: {e}")
@@ -2268,6 +2274,299 @@ def sanitize_acroform_field_names(handler):
 # 2. FLASK BACKGROUND SERVER (WEB API)
 # ==========================================
 app = Flask(__name__)
+CORS(app)
+
+APP_VERSION = "2.1.0"
+APP_NAME = "A B INFOTECH - PDF Sign & All-in-One Power Suite"
+UPDATE_METADATA_URLS = [
+    "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json",
+    "https://invoice.a-b-infotech.in/version.json"
+]
+
+def parse_semver(ver_str):
+    nums = []
+    clean = str(ver_str).lower().lstrip("v").strip()
+    for part in clean.split("."):
+        try:
+            nums.append(int(part))
+        except ValueError:
+            nums.append(0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+def is_newer_version(remote_ver, local_ver=APP_VERSION):
+    return parse_semver(remote_ver) > parse_semver(local_ver)
+
+
+class LocalApiServerManager:
+    """
+    Thread-safe manager for the background local Flask API server (Port 5000).
+    Provides start, stop, restart, and live status inspection with socket-level cleanup.
+    """
+    def __init__(self, flask_app, host='127.0.0.1', port=5000):
+        self.flask_app = flask_app
+        self.host = host
+        self.port = port
+        self.server = None
+        self.thread = None
+        self.is_running = False
+        self.lock = threading.Lock()
+        self.status_listeners = []
+
+    def add_status_listener(self, callback):
+        if callback not in self.status_listeners:
+            self.status_listeners.append(callback)
+
+    def _notify_listeners(self):
+        for cb in self.status_listeners:
+            try:
+                cb(self.is_running)
+            except Exception:
+                pass
+
+    def start(self):
+        with self.lock:
+            if self.is_running:
+                return True, "Server is already running."
+            try:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.6)
+                res = sock.connect_ex((self.host, self.port))
+                sock.close()
+                if res == 0:
+                    return False, f"Port {self.port} is already in use by another program."
+
+                self.server = make_server(self.host, self.port, self.flask_app, threaded=True)
+                self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+                self.thread.start()
+                self.is_running = True
+                logger.info(f"Local API Server started on http://{self.host}:{self.port}")
+                self._notify_listeners()
+                return True, f"Server started on http://{self.host}:{self.port}"
+            except Exception as e:
+                self.is_running = False
+                logger.error(f"Failed to start local API server: {e}")
+                self._notify_listeners()
+                return False, str(e)
+
+    def stop(self):
+        with self.lock:
+            if not self.is_running or not self.server:
+                self.is_running = False
+                self._notify_listeners()
+                return True, "Server is already stopped."
+            try:
+                self.server.shutdown()
+                try:
+                    self.server.server_close()
+                except Exception:
+                    pass
+                self.server = None
+                self.is_running = False
+                logger.info("Local API Server stopped.")
+                self._notify_listeners()
+                return True, "Server stopped successfully."
+            except Exception as e:
+                self.is_running = False
+                logger.error(f"Error stopping local API server: {e}")
+                self._notify_listeners()
+                return False, str(e)
+
+    def restart(self):
+        self.stop()
+        time.sleep(0.5)
+        return self.start()
+
+
+class SoftwareUpdateManager:
+    """
+    Automated version checker, notification dialog, download progress tracker,
+    and one-click setup installer launcher for Windows.
+    """
+    @staticmethod
+    def fetch_remote_version_info():
+        for url in UPDATE_METADATA_URLS:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": f"ABInfoSigner/{APP_VERSION} (Windows)"}
+                )
+                with urllib.request.urlopen(req, timeout=6) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode('utf-8'))
+                        return data
+            except Exception as e:
+                logger.debug(f"Update check failed from {url}: {e}")
+        return None
+
+    @staticmethod
+    def check_for_updates(parent=None, silent=False):
+        def _worker():
+            info = SoftwareUpdateManager.fetch_remote_version_info()
+            if not info:
+                if not silent and parent:
+                    parent.after(0, lambda: messagebox.showwarning(
+                        "Update Check",
+                        "Unable to contact the update server.\n\nPlease ensure your internet connection is active.",
+                        parent=parent
+                    ))
+                return
+
+            remote_ver = info.get("version", "")
+            if is_newer_version(remote_ver, APP_VERSION):
+                if parent:
+                    parent.after(0, lambda: SoftwareUpdateManager.show_update_available_dialog(parent, info))
+            else:
+                if not silent and parent:
+                    parent.after(0, lambda: messagebox.showinfo(
+                        "Software Up-to-Date",
+                        f"✓ You are already running the latest version of {APP_NAME} (v{APP_VERSION})!\n\nNo updates are required.",
+                        parent=parent
+                    ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @staticmethod
+    def show_update_available_dialog(parent, info):
+        dlg = tk.Toplevel(parent)
+        dlg.title("🚀 Software Update Available - A B INFOTECH")
+        dlg.geometry("540x480")
+        dlg.minsize(500, 420)
+        dlg.transient(parent)
+        apply_app_icon(dlg)
+
+        # Header banner
+        hdr = tk.Frame(dlg, bg="#0F766E", padx=16, pady=12)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text="🎉 A NEW UPDATE IS AVAILABLE!", font=get_sys_font(12, "bold"), fg="#FFFFFF", bg="#0F766E").pack(anchor=tk.W)
+        tk.Label(hdr, text=f"Version {info.get('version')} is now ready to download and install.", font=get_sys_font(9), fg="#CCFBF1", bg="#0F766E").pack(anchor=tk.W, pady=(2, 0))
+
+        content = tk.Frame(dlg, bg="#F8FAFC", padx=16, pady=12)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        ver_card = tk.Frame(content, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=12, pady=8)
+        ver_card.pack(fill=tk.X, pady=(0, 10))
+        tk.Label(ver_card, text=f"• Current Installed Version: v{APP_VERSION}", font=get_sys_font(8), fg="#64748B", bg="#FFFFFF").pack(anchor=tk.W)
+        tk.Label(ver_card, text=f"• Latest Released Version: v{info.get('version')} ({info.get('release_date', 'Latest')})", font=get_sys_font(9, "bold"), fg="#047857", bg="#FFFFFF").pack(anchor=tk.W, pady=(2, 0))
+
+        tk.Label(content, text="What's New in this Release:", font=get_sys_font(9, "bold"), fg="#1E293B", bg="#F8FAFC").pack(anchor=tk.W, pady=(0, 4))
+        
+        txt_box = tk.Text(content, height=8, font=get_sys_font(8), bg="#FFFFFF", bd=1, relief=tk.SOLID, padx=6, pady=6)
+        txt_box.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        
+        changelog = info.get("changelog", [])
+        if isinstance(changelog, list):
+            cl_text = "\n".join(f"• {item}" for item in changelog)
+        else:
+            cl_text = str(changelog)
+        txt_box.insert("1.0", cl_text)
+        txt_box.config(state=tk.DISABLED)
+
+        # Buttons
+        btn_bar = tk.Frame(content, bg="#F8FAFC")
+        btn_bar.pack(fill=tk.X)
+
+        def start_download():
+            dlg.destroy()
+            SoftwareUpdateManager.download_and_install_update(parent, info)
+
+        ttk.Button(btn_bar, text="🚀 DOWNLOAD & INSTALL UPDATE NOW", style="Primary3D.TButton", command=start_download).pack(side=tk.LEFT, ipady=4, expand=True, fill=tk.X, padx=(0, 6))
+        ttk.Button(btn_bar, text="Remind Me Later", style="Tool3D.TButton", command=dlg.destroy).pack(side=tk.RIGHT, ipady=4)
+
+    @staticmethod
+    def download_and_install_update(parent, info):
+        prog_dlg = tk.Toplevel(parent)
+        prog_dlg.title("Downloading Update...")
+        prog_dlg.geometry("460x190")
+        prog_dlg.resizable(False, False)
+        prog_dlg.transient(parent)
+        apply_app_icon(prog_dlg)
+
+        frame = tk.Frame(prog_dlg, bg="#F8FAFC", padx=16, pady=14)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        lbl_status = tk.Label(frame, text=f"Connecting to download server for v{info.get('version')}...", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC")
+        lbl_status.pack(anchor=tk.W, pady=(0, 8))
+
+        pbar = ttk.Progressbar(frame, orient="horizontal", mode="determinate")
+        pbar.pack(fill=tk.X, pady=(0, 8))
+
+        lbl_detail = tk.Label(frame, text="0% downloaded", font=get_sys_font(8), fg="#64748B", bg="#F8FAFC")
+        lbl_detail.pack(anchor=tk.W)
+
+        download_urls = [info.get("download_url"), info.get("fallback_url")]
+
+        def _download_thread():
+            temp_dir = tempfile.gettempdir()
+            target_installer = os.path.join(temp_dir, "Abinfo_Signer_Windows_Setup.exe")
+            success = False
+
+            for durl in download_urls:
+                if not durl:
+                    continue
+                try:
+                    prog_dlg.after(0, lambda u=durl: lbl_status.config(text="Downloading update installer..."))
+                    req = urllib.request.Request(durl, headers={"User-Agent": f"ABInfoSigner/{APP_VERSION} (Windows)"})
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        total_bytes = int(resp.headers.get('content-length', 0))
+                        chunk_size = 64 * 1024
+                        downloaded = 0
+                        with open(target_installer, 'wb') as out_f:
+                            while True:
+                                chunk = resp.read(chunk_size)
+                                if not chunk:
+                                    break
+                                out_f.write(chunk)
+                                downloaded += len(chunk)
+                                if total_bytes > 0:
+                                    pct = int((downloaded / total_bytes) * 100)
+                                    mb_cur = downloaded / (1024 * 1024)
+                                    mb_tot = total_bytes / (1024 * 1024)
+                                    prog_dlg.after(0, lambda p=pct, c=mb_cur, t=mb_tot: (
+                                        pbar.config(value=p),
+                                        lbl_detail.config(text=f"{p}% ({c:.1f} MB / {t:.1f} MB)")
+                                    ))
+                        if os.path.exists(target_installer) and os.path.getsize(target_installer) > 500 * 1024:
+                            success = True
+                            break
+                except Exception as e:
+                    logger.debug(f"Download failed from {durl}: {e}")
+
+            if success:
+                def on_done():
+                    prog_dlg.destroy()
+                    if messagebox.askyesno(
+                        "Update Ready to Install",
+                        "✓ Update installer downloaded successfully!\n\n"
+                        "The application will now close and run the setup installer to update your PC.\n\n"
+                        "Click YES to install now.",
+                        parent=parent
+                    ):
+                        try:
+                            # Terminate existing background process tree
+                            subprocess.Popen([target_installer])
+                            os._exit(0)
+                        except Exception as run_err:
+                            messagebox.showerror("Install Error", f"Failed to launch installer:\n{run_err}")
+                prog_dlg.after(0, on_done)
+            else:
+                def on_fail():
+                    prog_dlg.destroy()
+                    messagebox.showerror(
+                        "Download Failed",
+                        "Could not download the update package from any available server.\n"
+                        "Please check your network connection or download manually from:\n"
+                        "https://www.a-b-infotech.in/",
+                        parent=parent
+                    )
+                prog_dlg.after(0, on_fail)
+
+        threading.Thread(target=_download_thread, daemon=True).start()
+
+local_api_server = LocalApiServerManager(app, host="127.0.0.1", port=5000)
+
 CORS(app, origins=['*'])
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 
@@ -3872,6 +4171,43 @@ class SignatureSettingsDialog:
         grid4.columnconfigure(0, weight=1)
         grid4.columnconfigure(1, weight=1)
 
+        # 5. Background Local API Server (Port 5000) Card
+        c5 = tk.Frame(scroll_frame, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=12, pady=10)
+        c5.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(c5, text="5. Background Local API Server (Port 5000)", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(c5, text="Enables web applications and browser extensions to trigger token signing via http://127.0.0.1:5000:", font=get_sys_font(8), fg="#64748B", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
+
+        # Status row
+        srv_status_row = tk.Frame(c5, bg="#F8FAFC", bd=1, relief=tk.SOLID, padx=8, pady=6)
+        srv_status_row.pack(fill=tk.X, pady=(0, 6))
+        self.lbl_server_status = tk.Label(srv_status_row, text="", font=get_sys_font(8, "bold"), bg="#F8FAFC")
+        self.lbl_server_status.pack(side=tk.LEFT)
+
+        # Control Buttons
+        srv_btn_row = tk.Frame(c5, bg="#FFFFFF")
+        srv_btn_row.pack(fill=tk.X, pady=(0, 6))
+        self.btn_stop_server = ttk.Button(srv_btn_row, text="⏹️ Stop Server", style="Tool3D.TButton", command=self._on_stop_server)
+        self.btn_stop_server.pack(side=tk.LEFT, padx=(0, 4))
+        self.btn_start_server = ttk.Button(srv_btn_row, text="▶️ Start Server", style="Tool3D.TButton", command=self._on_start_server)
+        self.btn_start_server.pack(side=tk.LEFT, padx=2)
+        self.btn_restart_server = ttk.Button(srv_btn_row, text="🔄 Restart Server", style="Tool3D.TButton", command=self._on_restart_server)
+        self.btn_restart_server.pack(side=tk.LEFT, padx=2)
+
+        tk.Checkbutton(c5, text="Automatically Start Local API Server when Application Launches", variable=app.server_autostart_var, font=get_sys_font(8), fg="#1E293B", bg="#FFFFFF").pack(anchor=tk.W, pady=(2, 0))
+        self._refresh_server_ui()
+
+        # 6. Software Updates & Version Card
+        c6 = tk.Frame(scroll_frame, bg="#FFFFFF", relief=tk.RAISED, bd=1, padx=12, pady=10)
+        c6.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(c6, text="6. Software Updates & Version Management", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(c6, text=f"Installed Version: v{APP_VERSION} PRO SUITE (Official Windows Release)", font=get_sys_font(8, "bold"), fg="#047857", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+
+        tk.Checkbutton(c6, text="Automatically Check for Updates on Application Startup", variable=app.auto_check_updates_var, font=get_sys_font(8), fg="#1E293B", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 6))
+
+        upd_btn_row = tk.Frame(c6, bg="#FFFFFF")
+        upd_btn_row.pack(fill=tk.X)
+        ttk.Button(upd_btn_row, text="🔍 Check for Updates Now", style="Primary3D.TButton", command=lambda: SoftwareUpdateManager.check_for_updates(parent=self.dialog, silent=False)).pack(side=tk.LEFT)
+
         # Bottom Close Button
         btn_bot = tk.Frame(outer, bg="#F1F5F9")
         btn_bot.pack(fill=tk.X, pady=(4, 0))
@@ -3909,6 +4245,42 @@ class SignatureSettingsDialog:
             except Exception:
                 pass
         self.lbl_logo_preview.config(image="", text="[No logo selected]", width=20, height=2)
+
+    def _refresh_server_ui(self):
+        if local_api_server.is_running:
+            self.lbl_server_status.config(text="🟢 Status: RUNNING on http://127.0.0.1:5000", fg="#047857")
+            self.btn_stop_server.config(state=tk.NORMAL)
+            self.btn_start_server.config(state=tk.DISABLED)
+            self.btn_restart_server.config(state=tk.NORMAL)
+        else:
+            self.lbl_server_status.config(text="🔴 Status: STOPPED (Local API is offline)", fg="#DC2626")
+            self.btn_stop_server.config(state=tk.DISABLED)
+            self.btn_start_server.config(state=tk.NORMAL)
+            self.btn_restart_server.config(state=tk.DISABLED)
+
+    def _on_stop_server(self):
+        ok, msg = local_api_server.stop()
+        self._refresh_server_ui()
+        if ok:
+            messagebox.showinfo("Server Stopped", "Local API server has been stopped.", parent=self.dialog)
+        else:
+            messagebox.showerror("Server Error", msg, parent=self.dialog)
+
+    def _on_start_server(self):
+        ok, msg = local_api_server.start()
+        self._refresh_server_ui()
+        if ok:
+            messagebox.showinfo("Server Started", "Local API server is now running on http://127.0.0.1:5000", parent=self.dialog)
+        else:
+            messagebox.showerror("Server Error", f"Could not start server:\n{msg}", parent=self.dialog)
+
+    def _on_restart_server(self):
+        ok, msg = local_api_server.restart()
+        self._refresh_server_ui()
+        if ok:
+            messagebox.showinfo("Server Restarted", "Local API server was successfully restarted on http://127.0.0.1:5000", parent=self.dialog)
+        else:
+            messagebox.showerror("Server Error", f"Could not restart server:\n{msg}", parent=self.dialog)
 
     def _toggle_pass_visibility(self):
         if self.ent_pass.cget('show') == '*':
@@ -4545,6 +4917,8 @@ class VisualPdfSignerApp:
         self.show_border_var = tk.BooleanVar(value=True)
 
         # Custom Logo & Password Protection settings
+        self.server_autostart_var = tk.BooleanVar(value=True)
+        self.auto_check_updates_var = tk.BooleanVar(value=True)
         self.sign_custom_logo_path = tk.StringVar(value="")
         self.sign_include_logo = tk.BooleanVar(value=False)
         self.sign_protect_pdf = tk.BooleanVar(value=False)
@@ -6526,15 +6900,13 @@ def main():
     gui_root = tk.Tk()
     gui_app = VisualPdfSignerApp(gui_root)
 
-    # Start Flask API daemon in background
-    def run_flask():
-        try:
-            app.run(host='127.0.0.1', port=5000, threaded=True, use_reloader=False)
-        except Exception as e:
-            logger.error(f"Flask daemon error: {e}")
+    # Start Local API Server if autostart enabled
+    if gui_app.server_autostart_var.get():
+        local_api_server.start()
 
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    # Automatic background update check (4 seconds after startup)
+    if gui_app.auto_check_updates_var.get():
+        gui_root.after(4000, lambda: SoftwareUpdateManager.check_for_updates(parent=gui_root, silent=True))
 
     # System Tray Integration
     if pystray:
@@ -6586,6 +6958,15 @@ def main():
                         except Exception: pass
                     gui_root.after(0, lambda: (gui_root.destroy(), os._exit(0)))
 
+                def _toggle_server(icon=None, itm=None):
+                    if local_api_server.is_running:
+                        local_api_server.stop()
+                    else:
+                        local_api_server.start()
+
+                def _check_upd(icon=None, itm=None):
+                    gui_root.after(0, lambda: SoftwareUpdateManager.check_for_updates(parent=gui_root, silent=False))
+
                 menu_items = [
                     item('🏠 Open A B INFOTECH Suite', _open_app, default=True),
                     pystray.Menu.SEPARATOR,
@@ -6594,6 +6975,10 @@ def main():
                     item('📑 Merge PDF', _nav('tab_merge')),
                     item('🛡️ Verify Signatures', _nav('tab_verify')),
                     item('🛠️ PDF Tools Suite', _nav('tab_tools')),
+                    item('📖 OCR & Edit PDF', _nav('tab_ocr_edit')),
+                    pystray.Menu.SEPARATOR,
+                    item(lambda itm: "⏹️ Stop Local API Server" if local_api_server.is_running else "▶️ Start Local API Server", _toggle_server),
+                    item('🔄 Check for Software Updates', _check_upd),
                 ]
                 if LicenseManager.is_pro():
                     menu_items.append(item('📖 OCR & Edit PDF (Pro)', _nav('tab_ocr_edit')))
