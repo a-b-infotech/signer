@@ -1,16 +1,16 @@
 {
-  "version": "2.1.0",
+  "version": "2.2.0",
   "name": "A B INFOTECH - PDF Sign & All-in-One Power Suite",
-  "release_date": "2026-11-01",
+  "release_date": "2026-11-02",
   "download_url": "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/downloads/Abinfo_Signer_Windows_Setup.exe",
   "fallback_url": "https://invoice.a-b-infotech.in/downloads/Abinfo_Signer_Windows_Setup.exe",
   "min_os": "Windows 10 / 11 (32-bit & 64-bit)",
   "changelog": [
-    "Comprehensive OCR & Virtual PDF Text Editor with interactive 'Add Text / Tax' tool and instant 'Save PDF' options",
-    "Fixed PDF compression image errors ('Insufficient data for an image' and 'An error exists on this page') with mask protection",
-    "Preserve 100% of cryptographic digital signatures in compressed and merged PDF documents with high-res 300 DPI stamps",
-    "New Background Local API Server (Port 5000) controls in Settings and System Tray: Start, Stop, and Restart",
-    "Built-in Automatic Software Version Checker and One-Click Live Installer Updater"
+    "Full-featured Web PDF Signer workspace (Token.php) with interactive signature placement, USB token PIN validation, and instant download",
+    "Completely resolved 'need font file or buffer' error in PDF Text Editor (TrueEdit / OCR & Edit) with resilient 5-tier font fallback engine",
+    "Added one-click 'Apply Edit' and 'Redact / Delete' action buttons directly inside the top formatting ribbon",
+    "Full typography support for Hindi/Devanagari, custom TrueType fonts, and Unicode symbols with overflow-protected box fitting",
+    "Seamless signature preservation across compression and merge tools with high-res 300 DPI stamps",
+    "Background Local API Server (Port 5000) controls and automated live update installer system"
   ]
 }
-

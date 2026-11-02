@@ -2,7 +2,7 @@
 ; A B INFOTECH SIGNER OFFLINE - Official Windows Setup Installer
 
 #define MyAppName "A B INFOTECH SIGNER OFFLINE"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "2.2.0"
 #define MyAppPublisher "A B INFOTECH"
 #define MyAppURL "https://www.a-b-infotech.in/"
 #define MyAppExeName "Abinfo_Signer_Offline.exe"

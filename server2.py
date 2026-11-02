@@ -505,7 +505,7 @@ def apply_app_icon(window):
 # ==========================================
 class LicenseManager:
     LICENSE_FILE = os.path.join(APP_DIR, "system_cache.ico")
-    WEBSITE_URL = "https://invoice.a-b-infotech.in/activate_web.php"
+    WEBSITE_URL = "https://sign.a-b-infotech.in/Token"
     MAGIC_DELIMITER = b"---ABI_SECRET_KEY---"
     activation_error = None
 
@@ -700,7 +700,7 @@ class LicenseManager:
             return {"status": "active", "tier": "pro"}
 
         urls_to_try = [
-            f"http://127.0.0.1/pdf/activate_web.php?action=verify_license&key={urllib.parse.quote(key)}",
+            f"http://127.0.0.1/abinfo_signer/Token.php?action=verify_license&key={urllib.parse.quote(key)}",
             f"{LicenseManager.WEBSITE_URL}?action=verify_license&key={urllib.parse.quote(key)}"
         ]
         for url in urls_to_try:
@@ -1513,46 +1513,28 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
     """
     fam = str(font_family).lower()
     if any(k in fam for k in ("times", "serif", "roman")):
-        if bold and italic:
-            fn = "tibi"
-            win_ttf = "timesbi.ttf"
-        elif bold:
-            fn = "tibo"
-            win_ttf = "timesbd.ttf"
-        elif italic:
-            fn = "tiit"
-            win_ttf = "timesi.ttf"
-        else:
-            fn = "tiro"
-            win_ttf = "times.ttf"
+        fn = "tibi" if (bold and italic) else ("tibo" if bold else ("tiit" if italic else "tiro"))
+        win_ttf = "timesbi.ttf" if (bold and italic) else ("timesbd.ttf" if bold else ("timesi.ttf" if italic else "times.ttf"))
     elif any(k in fam for k in ("courier", "mono", "typewriter", "consolas")):
-        if bold and italic:
-            fn = "cobi"
-            win_ttf = "courbi.ttf"
-        elif bold:
-            fn = "cobo"
-            win_ttf = "courbd.ttf"
-        elif italic:
-            fn = "coit"
-            win_ttf = "couri.ttf"
-        else:
-            fn = "cour"
-            win_ttf = "cour.ttf"
+        fn = "cobi" if (bold and italic) else ("cobo" if bold else ("coit" if italic else "cour"))
+        win_ttf = "courbi.ttf" if (bold and italic) else ("courbd.ttf" if bold else ("couri.ttf" if italic else "cour.ttf"))
+    elif "calibri" in fam:
+        fn = "hebi" if (bold and italic) else ("hebo" if bold else ("heit" if italic else "helv"))
+        win_ttf = "calibriz.ttf" if (bold and italic) else ("calibrib.ttf" if bold else ("calibrii.ttf" if italic else "calibri.ttf"))
+    elif "segoe" in fam:
+        fn = "hebi" if (bold and italic) else ("hebo" if bold else ("heit" if italic else "helv"))
+        win_ttf = "segoeuiz.ttf" if (bold and italic) else ("segoeuib.ttf" if bold else ("segoeuii.ttf" if italic else "segoeui.ttf"))
+    elif "georgia" in fam:
+        fn = "tibi" if (bold and italic) else ("tibo" if bold else ("tiit" if italic else "tiro"))
+        win_ttf = "georgiaz.ttf" if (bold and italic) else ("georgiab.ttf" if bold else ("georgiai.ttf" if italic else "georgia.ttf"))
+    elif "verdana" in fam:
+        fn = "hebi" if (bold and italic) else ("hebo" if bold else ("heit" if italic else "helv"))
+        win_ttf = "verdanaz.ttf" if (bold and italic) else ("verdanab.ttf" if bold else ("verdanai.ttf" if italic else "verdana.ttf"))
     else:  # Helvetica / Arial / Default Sans
-        if bold and italic:
-            fn = "hebi"
-            win_ttf = "arialbi.ttf"
-        elif bold:
-            fn = "hebo"
-            win_ttf = "arialbd.ttf"
-        elif italic:
-            fn = "heit"
-            win_ttf = "ariali.ttf"
-        else:
-            fn = "helv"
-            win_ttf = "arial.ttf"
+        fn = "hebi" if (bold and italic) else ("hebo" if bold else ("heit" if italic else "helv"))
+        win_ttf = "arialbi.ttf" if (bold and italic) else ("arialbd.ttf" if bold else ("ariali.ttf" if italic else "arial.ttf"))
 
-    win_fonts_dir = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
+    win_fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
     specific_win_font = os.path.join(win_fonts_dir, win_ttf)
     fallback_arial = os.path.join(win_fonts_dir, "arial.ttf")
 
@@ -1563,22 +1545,10 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
         except Exception:
             pass
 
-    # 1. Try standard Base-14 font code with box overflow check
     success = False
-    try:
-        if is_box and isinstance(point_or_rect, fitz.Rect):
-            rc = page.insert_textbox(point_or_rect, text, fontname=fn, fontsize=fontsize, color=color, align=align, render_mode=render_mode)
-            if rc >= 0:
-                success = True
-        else:
-            pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
-            page.insert_text(pt, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
-            success = True
-    except Exception:
-        pass
 
-    # 2. Try Windows TrueType font matching requested style
-    if not success and os.path.exists(specific_win_font):
+    # 1. Try Windows TrueType font matching requested style (best fidelity & Unicode coverage)
+    if os.path.exists(specific_win_font):
         try:
             if is_box and isinstance(point_or_rect, fitz.Rect):
                 rc = page.insert_textbox(point_or_rect, text, fontfile=specific_win_font, fontsize=fontsize, color=color, align=align, render_mode=render_mode)
@@ -1591,7 +1561,21 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
         except Exception:
             pass
 
-    # 3. Try Windows Arial (universal Unicode support)
+    # 2. Try standard Base-14 font code (guaranteed built into all PDF engines, zero fontfile needed)
+    if not success:
+        try:
+            if is_box and isinstance(point_or_rect, fitz.Rect):
+                rc = page.insert_textbox(point_or_rect, text, fontname=fn, fontsize=fontsize, color=color, align=align, render_mode=render_mode)
+                if rc >= 0:
+                    success = True
+            else:
+                pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
+                page.insert_text(pt, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
+                success = True
+        except Exception:
+            pass
+
+    # 3. Try Windows Arial (universal Unicode support for special symbols / non-latin)
     if not success and os.path.exists(fallback_arial):
         try:
             if is_box and isinstance(point_or_rect, fitz.Rect):
@@ -1605,7 +1589,7 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
         except Exception:
             pass
 
-    # 4. Universal line-by-line fallback
+    # 4. Universal line-by-line fallback with standard Base-14 Helvetica
     if not success:
         try:
             lines = str(text).split("\n")
@@ -1619,6 +1603,15 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
         except Exception:
             pass
 
+    # 5. Ultimate fallback with default system font parameter
+    if not success:
+        try:
+            pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else (fitz.Point(point_or_rect[0], point_or_rect[1]) if not isinstance(point_or_rect, fitz.Rect) else fitz.Point(point_or_rect.x0, point_or_rect.y0 + fontsize))
+            page.insert_text(pt, str(text), fontsize=fontsize, color=color)
+            success = True
+        except Exception:
+            pass
+
     # Underline handling
     if underline and success:
         try:
@@ -1628,7 +1621,10 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
             base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
             for idx, line in enumerate(lines):
                 cur_y = base_y + idx * line_h
-                w_t = fitz.get_text_length(line, fontname=fn, fontsize=fontsize)
+                try:
+                    w_t = fitz.get_text_length(line, fontname=fn, fontsize=fontsize)
+                except Exception:
+                    w_t = fitz.get_text_length(line, fontname="helv", fontsize=fontsize)
                 page.draw_line(fitz.Point(base_x, cur_y + 1.5), fitz.Point(base_x + w_t, cur_y + 1.5), color=color, width=max(0.75, fontsize * 0.08))
         except Exception:
             pass
@@ -2312,7 +2308,7 @@ def sanitize_acroform_field_names(handler):
 app = Flask(__name__)
 CORS(app)
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 APP_NAME = "A B INFOTECH - PDF Sign & All-in-One Power Suite"
 UPDATE_METADATA_URLS = [
     "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json"
@@ -3467,6 +3463,11 @@ class PdfVirtualEditor(tk.Frame):
             # Opacity
             tk.Label(self.submenu_frame, text="Opacity:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
             ttk.Combobox(self.submenu_frame, textvariable=self.opacity_var, values=["100%", "75%", "50%", "25%"], width=5, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=2)
+
+            if t == "true_edit":
+                ttk.Separator(self.submenu_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+                ttk.Button(self.submenu_frame, text="✓ Apply Edit", style="Primary3D.TButton", command=self.apply_text_edit).pack(side=tk.LEFT, padx=3)
+                ttk.Button(self.submenu_frame, text="🗑️ Redact / Delete", style="Tool3D.TButton", command=self.delete_selected_block).pack(side=tk.LEFT, padx=3)
 
         elif t in ("rect", "circle", "line") or (sel_elem and sel_elem.get("type") in ("rect", "circle", "line")):
             # Shape Formatting
