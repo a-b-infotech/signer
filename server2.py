@@ -2311,7 +2311,8 @@ CORS(app)
 APP_VERSION = "2.2.0"
 APP_NAME = "A B INFOTECH - PDF Sign & All-in-One Power Suite"
 UPDATE_METADATA_URLS = [
-    "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json"
+    "https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json",
+    "https://github.com/a-b-infotech/signer/raw/main/version.json"
 ]
 
 def parse_semver(ver_str):
@@ -2416,6 +2417,8 @@ class SoftwareUpdateManager:
     Automated version checker, notification dialog, download progress tracker,
     and one-click setup installer launcher for Windows.
     """
+    _is_downloading = False
+
     @staticmethod
     def fetch_remote_version_info():
         for url in UPDATE_METADATA_URLS:
@@ -2424,7 +2427,7 @@ class SoftwareUpdateManager:
                     url,
                     headers={"User-Agent": f"ABInfoSigner/{APP_VERSION} (Windows)"}
                 )
-                with urllib.request.urlopen(req, timeout=6) as resp:
+                with urllib.request.urlopen(req, timeout=8) as resp:
                     if resp.status == 200:
                         data = json.loads(resp.read().decode('utf-8'))
                         return data
@@ -2433,22 +2436,100 @@ class SoftwareUpdateManager:
         return None
 
     @staticmethod
+    def start_silent_background_download(parent, info):
+        """
+        Silently downloads the new update installer package in the background.
+        Once downloaded and verified, prompts the user with one-click restart and install.
+        """
+        if SoftwareUpdateManager._is_downloading:
+            return
+        SoftwareUpdateManager._is_downloading = True
+
+        def _silent_worker():
+            try:
+                remote_ver = info.get("version", "Latest")
+                target_installer = os.path.join(tempfile.gettempdir(), "Abinfo_Signer_Windows_Setup.exe")
+                download_urls = [
+                    info.get("download_url"),
+                    info.get("fallback_url"),
+                    info.get("offline_installer_url"),
+                    "https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe",
+                    "https://github.com/a-b-infotech/signer/releases/download/v1.1/Abinfo_Signer_Windows_Setup.exe",
+                    "https://github.com/a-b-infotech/my-software/releases/download/1.0/Abinfo_Signer_Offline.exe"
+                ]
+
+                downloaded_ok = False
+                for durl in download_urls:
+                    if not durl:
+                        continue
+                    try:
+                        req = urllib.request.Request(durl, headers={"User-Agent": f"ABInfoSigner/{APP_VERSION} (Windows)"})
+                        with urllib.request.urlopen(req, timeout=30) as resp:
+                            with open(target_installer, 'wb') as out_f:
+                                while True:
+                                    chunk = resp.read(64 * 1024)
+                                    if not chunk:
+                                        break
+                                    out_f.write(chunk)
+                        if os.path.exists(target_installer) and os.path.getsize(target_installer) > 1024 * 1024:
+                            downloaded_ok = True
+                            break
+                    except Exception as err:
+                        logger.debug(f"Silent update download attempt failed from {durl}: {err}")
+
+                SoftwareUpdateManager._is_downloading = False
+
+                if downloaded_ok and parent:
+                    def _prompt_user():
+                        msg = (
+                            f"✓ A new version (v{remote_ver}) of A B INFOTECH Suite has been downloaded automatically in the background!\n\n"
+                            "Would you like to restart the application and install the update now?\n\n"
+                            "• Click YES to restart and apply update now.\n"
+                            "• Click NO to continue working and update on next launch."
+                        )
+                        ans = messagebox.askyesno(
+                            "🚀 Software Update Ready - A B INFOTECH",
+                            msg,
+                            parent=parent
+                        )
+                        if ans:
+                            try:
+                                subprocess.Popen([target_installer])
+                                os._exit(0)
+                            except Exception as e:
+                                messagebox.showerror("Update Error", f"Failed to start installer:\n{e}", parent=parent)
+                    parent.after(0, _prompt_user)
+            except Exception as outer_err:
+                SoftwareUpdateManager._is_downloading = False
+                logger.debug(f"Background update download error: {outer_err}")
+
+        threading.Thread(target=_silent_worker, daemon=True).start()
+
+    @staticmethod
     def check_for_updates(parent=None, silent=False):
         def _worker():
             info = SoftwareUpdateManager.fetch_remote_version_info()
             if not info:
                 if not silent and parent:
-                    parent.after(0, lambda: messagebox.showwarning(
-                        "Update Check",
-                        "Unable to contact the update server.\n\nPlease ensure your internet connection is active.",
+                    err_msg = (
+                        "Could not contact update servers or fetch release metadata.\n\n"
+                        "Please verify your internet connection or download manually from:\n"
+                        "https://github.com/a-b-infotech/signer/releases/latest"
+                    )
+                    parent.after(0, lambda: messagebox.showerror(
+                        "Update Check Failed",
+                        err_msg,
                         parent=parent
                     ))
                 return
 
             remote_ver = info.get("version", "")
             if is_newer_version(remote_ver, APP_VERSION):
-                if parent:
-                    parent.after(0, lambda: SoftwareUpdateManager.show_update_available_dialog(parent, info))
+                if silent:
+                    SoftwareUpdateManager.start_silent_background_download(parent, info)
+                else:
+                    if parent:
+                        parent.after(0, lambda: SoftwareUpdateManager.show_update_available_dialog(parent, info))
             else:
                 if not silent and parent:
                     parent.after(0, lambda: messagebox.showinfo(
@@ -2527,7 +2608,14 @@ class SoftwareUpdateManager:
         lbl_detail = tk.Label(frame, text="0% downloaded", font=get_sys_font(8), fg="#64748B", bg="#F8FAFC")
         lbl_detail.pack(anchor=tk.W)
 
-        download_urls = [info.get("download_url"), info.get("fallback_url")]
+        download_urls = [
+            info.get("download_url"),
+            info.get("fallback_url"),
+            info.get("offline_installer_url"),
+            "https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe",
+            "https://github.com/a-b-infotech/signer/releases/download/v1.1/Abinfo_Signer_Windows_Setup.exe",
+            "https://github.com/a-b-infotech/my-software/releases/download/1.0/Abinfo_Signer_Offline.exe"
+        ]
 
         def _download_thread():
             temp_dir = tempfile.gettempdir()
@@ -2559,7 +2647,7 @@ class SoftwareUpdateManager:
                                         pbar.config(value=p),
                                         lbl_detail.config(text=f"{p}% ({c:.1f} MB / {t:.1f} MB)")
                                     ))
-                        if os.path.exists(target_installer) and os.path.getsize(target_installer) > 500 * 1024:
+                        if os.path.exists(target_installer) and os.path.getsize(target_installer) > 1024 * 1024:
                             success = True
                             break
                 except Exception as e:
@@ -2587,9 +2675,9 @@ class SoftwareUpdateManager:
                     prog_dlg.destroy()
                     messagebox.showerror(
                         "Download Failed",
-                        "Could not download the update package from any available server.\n"
+                        "Could not download the update package from any available server.\n\n"
                         "Please check your network connection or download manually from:\n"
-                        "https://www.a-b-infotech.in/",
+                        "https://github.com/a-b-infotech/signer/releases/latest",
                         parent=parent
                     )
                 prog_dlg.after(0, on_fail)
@@ -5758,7 +5846,7 @@ class SettingsDialog:
 
         tk.Label(ver_box, text=f"Installed Version: v{APP_VERSION} PRO SUITE", font=get_sys_font(10, "bold"), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W)
         tk.Label(ver_box, text=f"Build Channel: Official Windows 64-bit Stable Release  |  OS: {CURRENT_OS}", font=get_sys_font(8), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 0))
-        tk.Label(ver_box, text=f"Update Server: https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F0FDF4").pack(anchor=tk.W, pady=(4, 0))
+        tk.Label(ver_box, text=f"Update Server: https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F0FDF4").pack(anchor=tk.W, pady=(4, 0))
 
         tk.Checkbutton(
             card, text="Automatically Check for Updates on Application Startup",
@@ -5776,7 +5864,7 @@ class SettingsDialog:
 
         ttk.Button(
             upd_btn_row, text="🌐 Visit Download Portal", style="Tool3D.TButton",
-            command=lambda: webbrowser.open("https://github.com/a-b-infotech/abinfo-signer/releases")
+            command=lambda: webbrowser.open("https://github.com/a-b-infotech/signer/releases")
         ).pack(side=tk.LEFT, padx=(0, 6))
 
         ttk.Button(

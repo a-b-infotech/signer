@@ -2,8 +2,9 @@
   "version": "2.2.0",
   "name": "A B INFOTECH - PDF Sign & All-in-One Power Suite",
   "release_date": "2026-11-02",
-  "download_url": "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/downloads/Abinfo_Signer_Windows_Setup.exe",
-  "fallback_url": "https://invoice.a-b-infotech.in/downloads/Abinfo_Signer_Windows_Setup.exe",
+  "download_url": "https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe",
+  "fallback_url": "https://github.com/a-b-infotech/signer/releases/download/v1.1/Abinfo_Signer_Windows_Setup.exe",
+  "offline_installer_url": "https://github.com/a-b-infotech/my-software/releases/download/1.0/Abinfo_Signer_Offline.exe",
   "min_os": "Windows 10 / 11 (32-bit & 64-bit)",
   "changelog": [
     "Full-featured Web PDF Signer workspace (Token.php) with interactive signature placement, USB token PIN validation, and instant download",

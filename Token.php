@@ -1,21 +1,77 @@
 <?php
-// Token.php
-// A B INFOTECH - Unified Digital Signer & Web Signing Workspace
-// Handles both Web PDF Signing Portal and License API Services
-ini_set('display_errors', 0);
-error_reporting(0);
+session_start();
 
-// Set Timezone to India for exact expiration and timestamping
+// Set Timezone to India to ensure EXACT time matching for expiration
 date_default_timezone_set('Asia/Kolkata');
 
-// Database connection if present
-if (file_exists('db.php')) {
-    require_once 'db.php';
+// ==========================================
+// 1. DATABASE CONFIGURATION FOR LICENSE CHECK
+// ==========================================
+$db_host = 'sql302.ezyro.com';
+$db_user = 'ezyro_37092101';            // DB username
+$db_pass = 'abhi@123';                // DB password
+$db_name = 'ezyro_37092101_fj';       // DB name
+$table_name = 'license_keys';         // Table name
+
+function getDbConnection($db_host, $db_user, $db_pass, $db_name) {
+    try {
+        $conn = mysqli_init();
+        if (!$conn) return null;
+        $conn->options(MYSQLI_OPT_CONNECT_TIMEOUT, 3);
+        if (@$conn->real_connect($db_host, $db_user, $db_pass, $db_name)) {
+            return $conn;
+        }
+    } catch (Exception $e) {}
+    return null;
 }
 
-// ====================================================================
-// 1. HANDLE BROWSER SYNC (Opens in browser, redirects to Python)
-// ====================================================================
+// AJAX Endpoint to verify license from the database
+if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
+    header('Content-Type: application/json');
+    $key = $_POST['key'] ?? ($_GET['key'] ?? '');
+
+    // Developer Bypass
+    if ($key === 'ABI-MASTER-PASS') {
+        echo json_encode(['status' => 'active', 'tier' => 'pro']);
+        exit;
+    }
+
+    $conn = getDbConnection($db_host, $db_user, $db_pass, $db_name);
+    if (!$conn || $conn->connect_error) {
+        echo json_encode(['status' => 'error', 'message' => 'DB Connection failed']);
+        exit;
+    }
+
+    $stmt = $conn->prepare("SELECT status, expiredate, license_tier FROM $table_name WHERE license_key = ? LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("s", $key);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        if ($row = $result->fetch_assoc()) {
+            if ($row['status'] !== 'active') {
+                echo json_encode(['status' => 'inactive']);
+            } 
+            // Checks Date AND EXACT Time (Hours:Minutes:Seconds) against current IST time
+            elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
+                echo json_encode(['status' => 'expired']);
+            } else {
+                $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
+                echo json_encode(['status' => 'active', 'tier' => $tier]);
+            }
+        } else {
+            echo json_encode(['status' => 'invalid']);
+        }
+        $stmt->close();
+    } else {
+        echo json_encode(['status' => 'error', 'message' => 'Query error']);
+    }
+    
+    $conn->close();
+    exit;
+}
+
+// Desktop App Browser Sync Endpoint
 if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
     $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
     
@@ -29,24 +85,33 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
         exit;
     }
 
-    if (isset($pdo)) {
-        try {
-            $stmt = $pdo->prepare("SELECT id, license_key, status, expiredate, license_tier, client_email, activated_at FROM license_keys WHERE license_key = :key LIMIT 1");
-            $stmt->bindParam(':key', $license_key);
+    $conn = getDbConnection($db_host, $db_user, $db_pass, $db_name);
+    if ($conn) {
+        $stmt = $conn->prepare("SELECT id, license_key, status, expiredate, license_tier, client_email, activated_at FROM $table_name WHERE license_key = ? LIMIT 1");
+        if ($stmt) {
+            $stmt->bind_param("s", $license_key);
             $stmt->execute();
+            $result = $stmt->get_result();
 
-            if ($stmt->rowCount() > 0) {
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row = $result->fetch_assoc()) {
                 $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
                 
                 if (strtolower($row['status']) === 'inactive') {
                     if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
-                        $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = :id");
-                        $upd->execute([':id' => $row['id']]);
+                        $upd = $conn->prepare("UPDATE $table_name SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = ?");
+                        if ($upd) {
+                            $upd->bind_param("i", $row['id']);
+                            $upd->execute();
+                            $upd->close();
+                        }
                         $row['expiredate'] = date('Y-m-d H:i:s', strtotime('+1 year'));
                     } else {
-                        $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW() WHERE id = :id");
-                        $upd->execute([':id' => $row['id']]);
+                        $upd = $conn->prepare("UPDATE $table_name SET status = 'active', activated_at = NOW() WHERE id = ?");
+                        if ($upd) {
+                            $upd->bind_param("i", $row['id']);
+                            $upd->execute();
+                            $upd->close();
+                        }
                     }
                     $row['status'] = 'active';
                     $row['activated_at'] = date('Y-m-d H:i:s');
@@ -64,173 +129,59 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
                 } else {
                     header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=" . urlencode($id) . "&key=" . urlencode($license_key) . "&status_val=" . urlencode($row['status']) . "&tier=" . urlencode($tier) . "&client_email=" . urlencode($client_email) . "&activated_at=" . urlencode($activated_at) . "&expiredate=" . urlencode($expiredate));
                 }
-                exit;
-            } else {
-                header("Location: http://127.0.0.1:5000/api/sync_callback?status=invalid");
+                $stmt->close();
+                $conn->close();
                 exit;
             }
-        } catch (Exception $e) {
-            header("Location: http://127.0.0.1:5000/api/sync_callback?status=error");
-            exit;
+            $stmt->close();
         }
-    } else {
-        header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=" . urlencode($license_key) . "&status_val=active&tier=pro&client_email=" . urlencode("sales@a-b-infotech.in") . "&activated_at=" . urlencode(date('Y-m-d H:i:s')) . "&expiredate=never");
-        exit;
+        $conn->close();
     }
+
+    header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=" . urlencode($license_key) . "&status_val=active&tier=pro&client_email=" . urlencode("sales@a-b-infotech.in") . "&activated_at=" . urlencode(date('Y-m-d H:i:s')) . "&expiredate=never");
+    exit;
+}
+// ==========================================
+
+$config = [
+    'uploadDir' => 'uploads/',
+    'allowedTypes' => ['pdf'],
+    'maxFileSize' => 50 * 1024 * 1024,
+];
+
+if (!is_dir($config['uploadDir'])) {
+    mkdir($config['uploadDir'], 0755, true);
 }
 
-// ====================================================================
-// 2. HANDLE BACKGROUND API VERIFICATION
-// ====================================================================
-if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
-    header('Content-Type: application/json');
-    $key = $_REQUEST['key'] ?? '';
+function sanitizeInput($input) {
+    return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
+}
 
-    // Developer Bypass
-    if ($key === 'ABI-MASTER-PASS') {
-        echo json_encode([
-            'status' => 'active',
-            'id' => 1,
-            'license_key' => 'ABI-MASTER-PASS',
-            'status_val' => 'active',
-            'tier' => 'pro',
-            'license_tier' => 'pro',
-            'client_email' => 'sales@a-b-infotech.in',
-            'activated_at' => date('Y-m-d H:i:s'),
-            'expiredate' => 'never'
-        ]);
-        exit;
+if (isset($_GET['action']) && $_GET['action'] === 'reset') {
+    if (isset($_SESSION['pdfPath']) && file_exists($_SESSION['pdfPath'])) {
+        @unlink($_SESSION['pdfPath']);
     }
-
-    if (isset($pdo)) {
-        try {
-            $stmt = $pdo->prepare("SELECT id, license_key, status, expiredate, license_tier, client_email, activated_at FROM license_keys WHERE license_key = :key LIMIT 1");
-            $stmt->bindParam(':key', $key);
-            $stmt->execute();
-
-            if ($stmt->rowCount() > 0) {
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-                
-                if (strtolower($row['status']) === 'inactive') {
-                    if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
-                        $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = :id");
-                        $upd->execute([':id' => $row['id']]);
-                        $row['expiredate'] = date('Y-m-d H:i:s', strtotime('+1 year'));
-                    } else {
-                        $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW() WHERE id = :id");
-                        $upd->execute([':id' => $row['id']]);
-                    }
-                    $row['status'] = 'active';
-                    $row['activated_at'] = date('Y-m-d H:i:s');
-                }
-
-                $is_expired = (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time());
-                $final_status = $is_expired ? 'expired' : $row['status'];
-
-                echo json_encode([
-                    'status' => $final_status,
-                    'id' => (int)$row['id'],
-                    'license_key' => $row['license_key'],
-                    'status_val' => $row['status'],
-                    'tier' => $tier,
-                    'license_tier' => $tier,
-                    'client_email' => $row['client_email'] ?? '',
-                    'activated_at' => $row['activated_at'] ?? '',
-                    'expiredate' => !empty($row['expiredate']) ? $row['expiredate'] : 'never'
-                ]);
-            } else {
-                echo json_encode(['status' => 'invalid', 'message' => 'License key not found!']);
-            }
-        } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'message' => 'Database Error: ' . $e->getMessage()]);
-        }
-    } else {
-        echo json_encode([
-            'status' => 'active',
-            'id' => 1,
-            'license_key' => $key,
-            'status_val' => 'active',
-            'tier' => 'pro',
-            'license_tier' => 'pro',
-            'client_email' => 'sales@a-b-infotech.in',
-            'activated_at' => date('Y-m-d H:i:s'),
-            'expiredate' => 'never'
-        ]);
-    }
+    unset($_SESSION['pdfPath'], $_SESSION['fileName']);
+    header("Location: " . $_SERVER['PHP_SELF']);
     exit;
 }
 
-// ====================================================================
-// 3. HANDLE BROWSER ACTIVATION (When User enters key in Desktop App)
-// ====================================================================
-if (isset($_REQUEST['key']) && !empty($_REQUEST['key']) && !isset($_GET['app'])) {
-    $license_key = trim($_REQUEST['key']);
+$uploadError = null;
 
-    if ($license_key === 'ABI-MASTER-PASS') {
-        header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid&id=1&key=" . urlencode($license_key) . "&status_val=active&expiredate=never&tier=pro&client_email=" . urlencode("sales@a-b-infotech.in") . "&activated_at=" . urlencode(date('Y-m-d H:i:s')));
-        exit;
-    }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['pdfFile'])) {
+    $fileName = basename($_FILES['pdfFile']['name']);
+    $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
 
-    if (isset($pdo)) {
-        try {
-            $stmt = $pdo->prepare("SELECT id, license_key, status, expiredate, license_tier, client_email, activated_at FROM license_keys WHERE license_key = :key LIMIT 1");
-            $stmt->bindParam(':key', $license_key);
-            $stmt->execute();
+    if ($fileExtension !== 'pdf') {
+        $uploadError = "Only PDF files are allowed.";
+    } else {
+        $uniqueFileName = uniqid('pdf_', true) . '.pdf';
+        $filePath = $config['uploadDir'] . $uniqueFileName;
 
-            if ($stmt->rowCount() > 0) {
-                $row = $stmt->fetch(PDO::FETCH_ASSOC);
-                
-                if (strtolower($row['status']) === 'inactive') {
-                    if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
-                        $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = :id");
-                        $upd->execute([':id' => $row['id']]);
-                        $row['expiredate'] = date('Y-m-d H:i:s', strtotime('+1 year'));
-                    } else {
-                        $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW() WHERE id = :id");
-                        $upd->execute([':id' => $row['id']]);
-                    }
-                    $row['status'] = 'active';
-                    $row['activated_at'] = date('Y-m-d H:i:s');
-                }
-
-                if ($row['status'] !== 'active') {
-                    header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("This license key is " . $row['status'] . ". Please contact +91 7016797720 (sales@a-b-infotech.in) to activate."));
-                    exit;
-                }
-
-                if (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                    header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("This license key has expired. Please contact +91 7016797720 (sales@a-b-infotech.in) to renew."));
-                    exit;
-                }
-
-                if (empty($row['activated_at']) || $row['activated_at'] === '0000-00-00 00:00:00') {
-                    $upd = $pdo->prepare("UPDATE license_keys SET activated_at = NOW() WHERE id = :id");
-                    $upd->execute([':id' => $row['id']]);
-                    $row['activated_at'] = date('Y-m-d H:i:s');
-                }
-
-                $exp_date = !empty($row['expiredate']) ? $row['expiredate'] : 'never';
-                $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-                $client_email = $row['client_email'] ?? '';
-                $activated_at = $row['activated_at'] ?? '';
-                $id = $row['id'];
-
-                header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid"
-                    . "&id=" . urlencode($id)
-                    . "&key=" . urlencode($license_key)
-                    . "&status_val=" . urlencode($row['status'])
-                    . "&expiredate=" . urlencode($exp_date)
-                    . "&tier=" . urlencode($tier)
-                    . "&client_email=" . urlencode($client_email)
-                    . "&activated_at=" . urlencode($activated_at));
-                exit;
-            } else {
-                header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("License key not found! Please check your license key or contact +91 7016797720 / sales@a-b-infotech.in."));
-                exit;
-            }
-        } catch (Exception $e) {
-            header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Error: " . $e->getMessage()));
+        if (move_uploaded_file($_FILES['pdfFile']['tmp_name'], $filePath)) {
+            $_SESSION['pdfPath'] = $filePath;
+            $_SESSION['fileName'] = $fileName;
+            header("Location: " . $_SERVER['PHP_SELF']);
             exit;
         }
     }
@@ -239,923 +190,703 @@ if (isset($_REQUEST['key']) && !empty($_REQUEST['key']) && !isset($_GET['app']))
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A B INFOTECH - Web Digital PDF Signer (USB Hardware Token)</title>
-    <!-- Fonts & Icons -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- PDF.js CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-    <style>
-        :root {
-            --primary: #1E3A8A;
-            --primary-light: #3B82F6;
-            --accent: #059669;
-            --accent-hover: #047857;
-            --bg: #0F172A;
-            --panel: #1E293B;
-            --panel-card: #27354E;
-            --border: #334155;
-            --text-main: #F8FAFC;
-            --text-sub: #94A3B8;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A B INFOTECH - PDF Signer</title>
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-        }
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
-        body {
-            background-color: var(--bg);
-            color: var(--text-main);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
+<!-- Google Tag Manager & Microsoft Clarity Scripts -->
+<script>
+    (function(w, d, s, l, i) {
+        w[l] = w[l] || [];
+        w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' });
+        var f = d.getElementsByTagName(s)[0],
+            j = d.createElement(s),
+            dl = l != 'dataLayer' ? '&l=' + l : '';
+        j.async = true;
+        j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+        f.parentNode.insertBefore(j, f);
+    })(window, document, 'script', 'dataLayer', 'GTM-PRJ7VHLR');
+</script>
+<script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "ujg2qgx1l3");
+</script>
 
-        header {
-            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
-            border-bottom: 1px solid var(--border);
-            padding: 14px 24px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
+<style>
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #0f2027;
+    color: #fff;
+    margin: 0;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+    
+#bg-img {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: -1; opacity: 0.8;
+}
 
-        .brand-box {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
+.glass-card {
+    background: rgba(25, 30, 40, 0.75);
+    backdrop-filter: blur(12px);
+    border-radius: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5);
+}
 
-        .brand-logo {
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
-            background: linear-gradient(135deg, #1E3A8A, #3B82F6);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.2rem;
-            font-weight: 800;
-            color: #FFFFFF;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-        }
+.btn-abi {
+    border: none; border-radius: 8px; padding: 12px 20px;
+    cursor: pointer; font-weight: 700; transition: 0.3s;
+    font-size: 14px;
+}
 
-        .brand-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.25rem;
-            font-weight: 800;
-            letter-spacing: 0.5px;
-            color: #FFFFFF;
-        }
+.btn-cyan { background: #0dcaf0; color: #000; }
+.btn-cyan:hover { background: #0baccc; }
+.btn-success { background: #2ecc71; color: white; }
+.btn-success:hover { background: #27ae60; }
+.btn-danger { background: #e74c3c; color: white; }
+.btn-danger:hover { background: #c0392b; }
+.btn-warning { background: #f39c12; color: #fff; }
+.btn-warning:hover { background: #e67e22; }
 
-        .brand-sub {
-            font-size: 0.75rem;
-            color: #38BDF8;
-            font-weight: 600;
-        }
+.glass-input {
+    width: 100%; padding: 10px; border-radius: 6px;
+    border: 1px solid rgba(13, 202, 240, 0.4);
+    background: rgba(0, 0, 0, 0.3); color: white;
+    margin-bottom: 15px; box-sizing: border-box;
+}
 
-        .server-status-pill {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 14px;
-            border-radius: 9999px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            background: rgba(15, 23, 42, 0.7);
-            border: 1px solid var(--border);
-            transition: all 0.3s ease;
-        }
+.custom-file-upload {
+    display: block; padding: 30px;
+    border: 2px dashed rgba(13, 202, 240, 0.5);
+    border-radius: 12px; text-align: center;
+    cursor: pointer; margin-bottom: 20px;
+    transition: 0.2s;
+}
+.custom-file-upload:hover {
+    border-color: #0dcaf0;
+    background: rgba(13, 202, 240, 0.05);
+}
 
-        .status-dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            background-color: #EF4444;
-            box-shadow: 0 0 8px #EF4444;
-        }
+#pdfFile { display: none; }
 
-        .status-dot.online {
-            background-color: #10B981;
-            box-shadow: 0 0 8px #10B981;
-        }
+.workspace-container {
+    display: flex; gap: 20px; width: 95%; max-width: 1400px;
+    margin: 20px auto; height: 90vh; overflow: hidden;
+}
 
-        /* Main Workspace Layout */
-        main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: 20px 24px;
-            gap: 20px;
-            max-width: 1440px;
-            margin: 0 auto;
-            width: 100%;
-        }
+.pdf-sidebar {
+    flex: 0 0 320px; padding: 20px; overflow-y: auto;
+    background: rgba(25, 30, 40, 0.9); border-radius: 12px; box-sizing: border-box;
+}
 
-        .app-grid {
-            display: grid;
-            grid-template-columns: 1fr 380px;
-            gap: 24px;
-            height: calc(100vh - 120px);
-            min-height: 650px;
-        }
+.pdf-panel {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    background: rgba(0, 0, 0, 0.3); border-radius: 12px; overflow: hidden;
+}
 
-        @media (max-width: 1024px) {
-            .app-grid {
-                grid-template-columns: 1fr;
-                height: auto;
-            }
-        }
+.pdf-toolbar {
+    padding: 15px; background: rgba(25, 30, 40, 0.95);
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px;
+}
 
-        /* Left Canvas & Viewer Section */
-        .viewer-card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-        }
+.pdf-container {
+    flex: 1; overflow: auto; padding: 15px; display: flex;
+    justify-content: center; align-items: flex-start;
+}
 
-        .viewer-toolbar {
-            background: #182234;
-            padding: 10px 16px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
+.pdf-wrapper {
+    position: relative; display: inline-block; background: white;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
 
-        .toolbar-group {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+.interaction-layer {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+}
 
-        .btn-tool {
-            background: var(--panel-card);
-            border: 1px solid var(--border);
-            color: var(--text-main);
-            padding: 7px 14px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            transition: all 0.2s ease;
-        }
+.active-layer { cursor: crosshair; background: rgba(13, 202, 240, 0.08); }
+.selection-box { position: absolute; border: 2px dashed #0dcaf0; background: rgba(13, 202, 240, 0.2); }
+.signature-area {
+    position: absolute; border: 2px solid #2ecc71; background: rgba(46, 204, 113, 0.2);
+    color: #27ae60; font-size: 13px; display: flex; justify-content: center; align-items: center;
+    font-weight: bold; text-align: center;
+}
 
-        .btn-tool:hover {
-            background: #334155;
-            border-color: #64748B;
-        }
+.area-item {
+    background: rgba(0, 0, 0, 0.3); padding: 10px; border-radius: 8px;
+    margin-bottom: 10px; display: flex; justify-content: space-between;
+}
 
-        .btn-tool.active {
-            background: #0284C7;
-            border-color: #38BDF8;
-            color: #FFFFFF;
-            box-shadow: 0 0 12px rgba(2, 132, 199, 0.5);
-        }
+.logo {
+    display: block; height: 80px; width: auto; background: white;
+    border-radius: 8px; padding: 10px; margin-bottom: 20px;
+}
+.logo img { height: 100%; width: 100%; object-fit: contain; transition: transform 0.3s ease; }
+.logo:hover img { transform: scale(1.05); }
 
-        .btn-tool:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-
-        .page-badge {
-            font-size: 0.85rem;
-            color: #94A3B8;
-            font-weight: 600;
-        }
-
-        /* PDF Canvas Area */
-        .canvas-viewport {
-            flex: 1;
-            background: #334155;
-            overflow: auto;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            padding: 24px;
-            position: relative;
-        }
-
-        #pdfWrapper {
-            position: relative;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.6);
-            display: none;
-            background: #FFFFFF;
-        }
-
-        #pdfCanvas {
-            display: block;
-        }
-
-        #interactionLayer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            cursor: default;
-            user-select: none;
-        }
-
-        #interactionLayer.active-layer {
-            cursor: crosshair;
-        }
-
-        /* Selection Rectangles & Signature Cards */
-        .selection-box {
-            position: absolute;
-            border: 2px dashed #0284C7;
-            background: rgba(2, 132, 199, 0.25);
-            pointer-events: none;
-            z-index: 10;
-        }
-
-        .signature-area {
-            position: absolute;
-            border: 2px solid #059669;
-            background: rgba(5, 150, 105, 0.2);
-            color: #059669;
-            font-weight: 700;
-            font-size: 0.8rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            border-radius: 6px;
-            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
-            backdrop-filter: blur(2px);
-            z-index: 5;
-            padding: 4px;
-        }
-
-        /* Upload Placeholder */
-        .upload-placeholder {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            width: 100%;
-            padding: 40px;
-            text-align: center;
-            cursor: pointer;
-            border: 2px dashed #475569;
-            border-radius: 12px;
-            background: rgba(30, 41, 59, 0.5);
-            transition: all 0.25s ease;
-        }
-
-        .upload-placeholder:hover {
-            border-color: #38BDF8;
-            background: rgba(30, 41, 59, 0.8);
-        }
-
-        .upload-icon {
-            font-size: 3.5rem;
-            margin-bottom: 12px;
-            color: #38BDF8;
-        }
-
-        /* Right Control & Token Settings Sidebar */
-        .sidebar-card {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            display: flex;
-            flex-direction: column;
-            padding: 20px;
-            gap: 18px;
-            overflow-y: auto;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-        }
-
-        .sidebar-title {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.15rem;
-            font-weight: 700;
-            color: #FFFFFF;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .form-section {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        label {
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: var(--text-sub);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        select, input[type="password"], input[type="text"] {
-            background: var(--panel-card);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            color: #FFFFFF;
-            padding: 10px 14px;
-            font-size: 0.9rem;
-            outline: none;
-            width: 100%;
-            transition: border-color 0.2s ease;
-        }
-
-        select:focus, input:focus {
-            border-color: #38BDF8;
-            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
-        }
-
-        .areas-list-box {
-            background: #182234;
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 10px;
-            max-height: 140px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .area-item {
-            background: var(--panel-card);
-            padding: 6px 10px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 0.8rem;
-            font-weight: 600;
-            color: #34D399;
-        }
-
-        .empty-hint {
-            font-size: 0.8rem;
-            color: #64748B;
-            text-align: center;
-            padding: 10px 0;
-            font-style: italic;
-        }
-
-        /* 3D Primary Action Button */
-        .btn-sign {
-            background: linear-gradient(135deg, #059669 0%, #047857 100%);
-            border: 1px solid #10B981;
-            color: #FFFFFF;
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.05rem;
-            font-weight: 700;
-            padding: 14px 20px;
-            border-radius: 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            box-shadow: 0 8px 20px rgba(5, 150, 105, 0.4);
-            transition: all 0.25s ease;
-            margin-top: auto;
-        }
-
-        .btn-sign:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 12px 25px rgba(5, 150, 105, 0.6);
-            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
-        }
-
-        .btn-sign:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        /* Offline Alert Banner */
-        #offlineBanner {
-            display: none;
-            background: linear-gradient(135deg, #991B1B 0%, #7F1D1D 100%);
-            border: 1px solid #EF4444;
-            color: #FEE2E2;
-            padding: 12px 18px;
-            border-radius: 12px;
-            font-size: 0.85rem;
-            line-height: 1.4;
-            margin-bottom: 12px;
-        }
-
-        #offlineBanner strong {
-            display: block;
-            margin-bottom: 4px;
-            font-size: 0.95rem;
-        }
-
-        /* Spinner Overlay */
-        .spinner-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(15, 23, 42, 0.85);
-            backdrop-filter: blur(8px);
-            z-index: 999;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 16px;
-        }
-
-        .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid rgba(56, 189, 248, 0.2);
-            border-top-color: #38BDF8;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .spinner-text {
-            font-family: 'Outfit', sans-serif;
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #FFFFFF;
-        }
-    </style>
+@media(max-width: 992px) {
+    .workspace-container { flex-direction: column; height: auto; min-height: 100vh; overflow: visible; }
+    .pdf-sidebar { flex: none; width: 100%; order: 2; }
+    .pdf-panel { flex: none; height: 65vh; order: 1; }
+    .pdf-toolbar { flex-direction: column; align-items: stretch; }
+    .pdf-toolbar > div { display: flex; justify-content: space-between; margin-bottom: 10px; }
+}
+</style>
 </head>
 <body>
 
-<header>
-    <div class="brand-box">
-        <div class="brand-logo">AB</div>
-        <div>
-            <div class="brand-title">A B INFOTECH</div>
-            <div class="brand-sub">Web Digital PDF Signer (USB Hardware Token)</div>
+<!-- Dynamic Ads Container (Hidden by default, shown in demo mode or license expired) -->
+<div class="ad-container" style="display:none; text-align:center; margin: 10px auto; max-width: 95%;">
+    <!-- Google AdSense Block -->
+    <ins class="adsbygoogle"
+         style="display:block"
+         data-ad-client="ca-pub-4544316411176795"
+         data-ad-slot="YOUR_AD_SLOT_ID"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+</div>
+
+<!-- Overlays -->
+<div id="offline-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,32,39,0.95); z-index:9999; justify-content:center; align-items:center; flex-direction:column;">
+    <div class="glass-card" style="padding:40px; text-align:center; max-width:420px; width:90%;">
+        <h2 style="color:#e74c3c; margin-top:0;">⚠️ Software Required</h2>
+        <p style="margin-bottom:25px; line-height:1.6;">You need to install and run the background A B INFOTECH software to connect your USB hardware token.</p>
+        
+        <a href="https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe" class="btn-abi btn-cyan" style="text-decoration:none; display:block; margin-bottom:10px; box-sizing:border-box;">📥 Download Latest Windows Setup</a>
+        <a href="https://github.com/a-b-infotech/my-software/releases/download/1.0/Abinfo_Signer_Offline.exe" class="btn-abi btn-success" style="text-decoration:none; display:block; margin-bottom:15px; box-sizing:border-box;">🔐 Download Standalone Offline Edition</a>
+        
+        <button onclick="checkBackgroundServer()" class="btn-abi btn-cyan" style="width:100%;">↻ Retry Connection</button>
+    </div>
+</div>
+   
+<div id="update-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,32,39,0.95); z-index:9998; justify-content:center; align-items:center; flex-direction:column;">
+    <div class="glass-card" style="padding:40px; text-align:center; max-width:420px; width:90%;">
+        <h2 style="color:#f39c12; margin-top:0;">🔄 Update Required</h2>
+        <p style="margin-bottom:25px; line-height:1.6;">A new version of the Digital Signer is required to continue using the software.</p>
+        
+        <a href="https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe" class="btn-abi btn-cyan" style="text-decoration:none; display:block; margin-bottom:10px; box-sizing:border-box;">📥 Download Latest Windows Setup</a>
+        <a href="https://github.com/a-b-infotech/my-software/releases/download/1.0/Abinfo_Signer_Offline.exe" class="btn-abi btn-success" style="text-decoration:none; display:block; box-sizing:border-box;">🔐 Download Offline Version</a>
+    </div>
+</div>
+
+<div id="expired-overlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,32,39,0.95); z-index:9997; justify-content:center; align-items:center; flex-direction:column;">
+    <div class="glass-card" style="padding:40px; text-align:center; max-width:420px; width:90%;">
+        <h2 style="color:#e74c3c; margin-top:0;">⏳ License Expired</h2>
+        <p style="margin-bottom:25px; line-height:1.6;">Your software license has expired. Please renew your license to continue using the Digital Signer.</p>
+        
+        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-abi btn-warning" style="text-decoration:none; display:block; margin-bottom:15px; box-sizing:border-box; font-size: 16px;">💳 Renew / Purchase License Online</a>
+        
+        <div style="background:rgba(0,0,0,0.3); padding:15px; border-radius:8px; margin-bottom:20px;">
+            <p style="margin:5px 0; color:#aaa;">Manual Contact:</p>
+            <p style="margin:5px 0; font-size:18px; font-weight:bold; color:#2ecc71;">📞 <a href="tel:7016797720" style="color:#2ecc71; text-decoration:none;">7016797720</a></p>
+            <p style="margin:5px 0; font-size:16px; font-weight:bold; color:#0dcaf0;">✉️ <a href="mailto:sales@a-b-infotech.in" style="color:#0dcaf0; text-decoration:none;">sales@a-b-infotech.in</a></p>
         </div>
+        <a href="https://api.whatsapp.com/send?phone=917016797720&text=I%20want%20to%20renew%20my%20PDF%20Signer%20License" target="_blank" class="btn-abi btn-success" style="text-decoration:none; display:block; box-sizing:border-box;">💬 Contact on WhatsApp</a>
     </div>
-    <div class="server-status-pill" id="serverPill">
-        <div class="status-dot" id="statusDot"></div>
-        <span id="statusText">Checking Local Server...</span>
+</div>
+
+<!-- Core System Checks & Ad Loading -->
+<script>
+window.isDemoMode = false;
+window.adsLoaded = false;
+
+function loadAds() {
+    if (!window.adsLoaded) {
+        const script = document.createElement('script');
+        script.async = true;
+        script.src = "https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4544316411176795";
+        script.crossOrigin = "anonymous";
+        document.head.appendChild(script);
+        window.adsLoaded = true;
+        
+        setTimeout(() => {
+            try { (adsbygoogle = window.adsbygoogle || []).push({}); } catch (e) {}
+        }, 500);
+    }
+    document.querySelectorAll('.ad-container').forEach(el => el.style.display = 'block');
+}
+
+function removeAds() {
+    document.querySelectorAll('.ad-container').forEach(el => el.style.display = 'none');
+}
+
+function parseSemver(v) {
+    if (!v) return [0, 0, 0];
+    return String(v).replace(/^v/i, '').split('.').map(n => parseInt(n) || 0);
+}
+
+function isOlderThan(vClient, vMin) {
+    const c = parseSemver(vClient);
+    const m = parseSemver(vMin);
+    for (let i = 0; i < 3; i++) {
+        const cv = c[i] || 0;
+        const mv = m[i] || 0;
+        if (cv < mv) return true;
+        if (cv > mv) return false;
+    }
+    return false;
+}
+
+async function checkBackgroundServer() {
+    try {
+        const res = await fetch('http://127.0.0.1:5000/api/health', { mode: 'cors' });
+        if (res.ok) {
+            document.getElementById('offline-overlay').style.display = 'none';
+            const data = await res.json();
+            
+            if (data.version) {
+                document.querySelectorAll('.app-version-display').forEach(el => {
+                    el.textContent = 'v' + data.version;
+                });
+            }
+            
+            if (data.demo === true) {
+                // Not activated
+                window.isDemoMode = true;
+                const demoMsg = document.getElementById('demoWarningMsg');
+                if (demoMsg) demoMsg.style.display = 'block';
+                document.getElementById('update-overlay').style.display = 'none';
+                document.getElementById('expired-overlay').style.display = 'none';
+                loadAds(); // Trigger Ads for Demo Mode
+            } else {
+                // Activated, verify expiration with database
+                const formData = new FormData();
+                formData.append('key', data.key || '');
+
+                let verifyData = { status: 'active' };
+                try {
+                    const verifyRes = await fetch('?action=verify_license', { method: 'POST', body: formData });
+                    verifyData = await verifyRes.json();
+                } catch (ve) {
+                    verifyData = { status: 'active' }; // Fallback to active if offline
+                }
+
+                if (verifyData.status === 'expired') {
+                    document.getElementById('expired-overlay').style.display = 'flex';
+                    document.getElementById('update-overlay').style.display = 'none';
+                    loadAds(); // Trigger Ads for Expired License
+                    return; 
+                } else if (verifyData.status === 'active') {
+                    document.getElementById('expired-overlay').style.display = 'none';
+                    window.isDemoMode = false;
+                    const demoMsg = document.getElementById('demoWarningMsg');
+                    if (demoMsg) demoMsg.style.display = 'none';
+                    removeAds(); // Hide Ads for Valid Users
+                    
+                    // Check if client version is older than required 2.0.0
+                    if (data.version && isOlderThan(data.version, '2.0.0')) {
+                        document.getElementById('update-overlay').style.display = 'flex';
+                    } else {
+                        document.getElementById('update-overlay').style.display = 'none';
+                    }
+                } else {
+                    window.isDemoMode = true;
+                    const demoMsg = document.getElementById('demoWarningMsg');
+                    if (demoMsg) demoMsg.style.display = 'block';
+                    document.getElementById('expired-overlay').style.display = 'none';
+                    loadAds();
+                }
+            }
+        } else {
+            throw new Error('Server not OK');
+        }
+    } catch (e) {
+        document.getElementById('offline-overlay').style.display = 'flex';
+        document.getElementById('update-overlay').style.display = 'none';
+        document.getElementById('expired-overlay').style.display = 'none';
+    }
+}
+window.addEventListener('load', checkBackgroundServer);
+setInterval(checkBackgroundServer, 2000); 
+</script>
+
+<img src="bg-anim.gif" id="bg-img" onerror="this.style.display='none';">
+
+<?php if (!isset($_SESSION['pdfPath'])): ?>
+
+<!-- UPLOAD SCREEN -->
+<div style="max-width:600px;margin:10vh auto; padding: 0 15px;">
+    <div class="glass-card" style="padding:40px;">
+        <a href="Token.php" class="logo-section" style="text-align:center;color:#0dcaf0;text-decoration:none; display:block;">
+            <span class="logo">
+                <img src="abinfo.png" alt="A B INFOTECH" onerror="this.src='app_icon.png';">
+            </span>
+        </a>
+        <h2 style="text-align:center;color:#0dcaf0; margin-top: 10px;">
+            A B INFOTECH - Digital Signer <span class="app-version-display" style="font-size: 14px; color: #aaa; margin-left: 5px;"></span>
+        </h2>
+
+        <?php if ($uploadError): ?>
+            <div style="color:#ff6b6b;margin-bottom:15px; text-align:center;"><?= $uploadError ?></div>
+        <?php endif; ?>
+
+        <form method="POST" enctype="multipart/form-data">
+            <label for="pdfFile" class="custom-file-upload">
+                <span id="file-chosen">📁 Click here to Select PDF Document</span>
+            </label>
+            <input type="file" id="pdfFile" name="pdfFile" accept=".pdf" required>
+            <button type="submit" class="btn-abi btn-cyan" style="width:100%; font-size:16px;">Upload & Open PDF</button>
+        </form>
     </div>
-</header>
-
-<main>
-    <div id="offlineBanner">
-        <strong>⚠️ Local API Server (Port 5000) is Offline</strong>
-        To sign PDFs using your USB Hardware Token from the web, please launch the <strong>A B INFOTECH Signer</strong> desktop application on this PC.
-    </div>
-
-    <div class="app-grid">
-        <!-- Left: PDF Canvas & Interactive Drawing Viewport -->
-        <div class="viewer-card">
-            <div class="viewer-toolbar">
-                <div class="toolbar-group">
-                    <label for="pdfFileInput" class="btn-tool" style="cursor:pointer;">
-                        📂 Choose PDF
-                    </label>
-                    <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;">
-                    <button class="btn-tool" id="selectAreaBtn" disabled onclick="toggleAreaSelection()">
-                        ✍️ Draw Signature Box
-                    </button>
-                    <button class="btn-tool" id="clearBoxesBtn" disabled onclick="clearSignatureBoxes()">
-                        🗑️ Clear Boxes
-                    </button>
-                </div>
-
-                <div class="toolbar-group">
-                    <button class="btn-tool" id="prevPageBtn" disabled onclick="changePage(-1)">◀ Prev</button>
-                    <span class="page-badge" id="pageIndicator">Page 0 / 0</span>
-                    <button class="btn-tool" id="nextPageBtn" disabled onclick="changePage(1)">Next ▶</button>
-                    <button class="btn-tool" id="zoomOutBtn" disabled onclick="zoom(-0.2)">🔍-</button>
-                    <button class="btn-tool" id="zoomInBtn" disabled onclick="zoom(0.2)">🔍+</button>
-                </div>
-            </div>
-
-            <div class="canvas-viewport" id="viewport">
-                <div class="upload-placeholder" id="placeholder" onclick="document.getElementById('pdfFileInput').click()">
-                    <div class="upload-icon">📄</div>
-                    <div style="font-family:'Outfit',sans-serif; font-size:1.25rem; font-weight:700; margin-bottom:6px;">Upload PDF Document</div>
-                    <p style="color:#94A3B8; font-size:0.85rem; max-width:400px;">Click here or drag and drop a PDF file to preview pages and draw digital signature placements.</p>
-                </div>
-
-                <div id="pdfWrapper">
-                    <canvas id="pdfCanvas"></canvas>
-                    <div id="interactionLayer"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Right: Token Driver, Certificate & Signing Action -->
-        <div class="sidebar-card">
-            <div class="sidebar-title">
-                <span>🔐</span> Token & Signing Settings
-            </div>
-
-            <div class="form-section">
-                <label>1. Select USB Token Driver</label>
-                <select id="driverDropdownWorkspace" onchange="fetchCertificates()">
-                    <option value="">Auto-Detect / Select Driver...</option>
-                </select>
-            </div>
-
-            <div class="form-section">
-                <label>2. Digital Certificate</label>
-                <select id="certDropdown" name="certAlias">
-                    <option value="">Select Certificate from Token...</option>
-                </select>
-            </div>
-
-            <div class="form-section">
-                <label>3. Token Password / User PIN</label>
-                <input type="password" id="tokenPin" name="tokenPassword" placeholder="Enter USB Token PIN..." autocomplete="off">
-            </div>
-
-            <div class="form-section">
-                <label>4. Placed Signature Boxes</label>
-                <div class="areas-list-box" id="signatureList">
-                    <div class="empty-hint">No signature boxes drawn yet.<br>Click "Draw Signature Box" to place.</div>
-                </div>
-            </div>
-
-            <button class="btn-sign" id="finalSignBtn" disabled onclick="executeSigning()">
-                ✍️ DIGITALLY SIGN PDF
-            </button>
-        </div>
-    </div>
-</main>
-
-<!-- Live Spinner Overlay -->
-<div class="spinner-overlay" id="loadingOverlay">
-    <div class="spinner"></div>
-    <div class="spinner-text" id="spinnerText">Processing...</div>
 </div>
 
 <script>
-// Local API server configuration
-const LOCAL_SERVER = "http://127.0.0.1:5000";
-let pdfDoc = null;
-let pageNum = 1;
-let scale = 1.25;
-let currentPdfHeight = 0;
-let isSelecting = false;
-let startX = 0, startY = 0;
-let currentArea = null;
-let tempBox = null;
-let signatureAreas = [];
-let loadedPdfFile = null;
-
-// Initialize PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-// -------------------------------------------------------------
-// 1. Health & Driver Synchronization with Local API Server
-// -------------------------------------------------------------
-async function checkServerHealth() {
-    try {
-        const resp = await fetch(`${LOCAL_SERVER}/api/health`, { method: 'GET', signal: AbortSignal.timeout(2000) });
-        if (resp.ok) {
-            const data = await resp.json();
-            document.getElementById('statusDot').className = 'status-dot online';
-            document.getElementById('statusText').textContent = `Connected (v${data.version || '2.2.0'} PRO)`;
-            document.getElementById('offlineBanner').style.display = 'none';
-            if (document.getElementById('driverDropdownWorkspace').options.length <= 1) {
-                loadDrivers();
-            }
-        } else {
-            throw new Error();
-        }
-    } catch (e) {
-        document.getElementById('statusDot').className = 'status-dot';
-        document.getElementById('statusText').textContent = 'Server Offline (Port 5000)';
-        document.getElementById('offlineBanner').style.display = 'block';
+document.getElementById('pdfFile').addEventListener('change', function(){
+    if (this.files && this.files[0]) {
+        document.getElementById('file-chosen').textContent = "Selected: " + this.files[0].name;
     }
-}
-
-async function loadDrivers() {
-    try {
-        const resp = await fetch(`${LOCAL_SERVER}/api/drivers`);
-        if (resp.ok) {
-            const drivers = await resp.json();
-            const dd = document.getElementById('driverDropdownWorkspace');
-            dd.innerHTML = '<option value="">Auto-Detect / Select Driver...</option>';
-            drivers.forEach(d => {
-                const opt = document.createElement('option');
-                opt.value = d;
-                opt.textContent = d;
-                dd.appendChild(opt);
-            });
-        }
-    } catch (e) {
-        console.warn("Could not load drivers:", e);
-    }
-}
-
-async function fetchCertificates() {
-    const driverName = document.getElementById('driverDropdownWorkspace').value;
-    const certDd = document.getElementById('certDropdown');
-    certDd.innerHTML = '<option value="">Reading Token Certificates...</option>';
-
-    try {
-        const url = driverName ? `${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driverName)}` : `${LOCAL_SERVER}/api/certificates`;
-        const resp = await fetch(url);
-        if (resp.ok) {
-            const certs = await resp.json();
-            certDd.innerHTML = '';
-            if (certs.length === 0) {
-                certDd.innerHTML = '<option value="">No certificates found in token</option>';
-            } else {
-                certs.forEach(c => {
-                    const opt = document.createElement('option');
-                    opt.value = c.alias;
-                    opt.textContent = `${c.cn} (${c.source})`;
-                    certDd.appendChild(opt);
-                });
-            }
-        }
-    } catch (e) {
-        certDd.innerHTML = '<option value="">Error reading certificates</option>';
-    }
-}
-
-// -------------------------------------------------------------
-// 2. PDF Rendering & Navigation
-// -------------------------------------------------------------
-document.getElementById('pdfFileInput').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (file && file.type === "application/pdf") {
-        loadedPdfFile = file;
-        const reader = new FileReader();
-        reader.onload = function() {
-            loadPdfData(new Uint8Array(this.result));
-        };
-        reader.readAsArrayBuffer(file);
-    }
-});
-
-function loadPdfData(pdfData) {
-    pdfjsLib.getDocument({ data: pdfData }).promise.then(doc => {
-        pdfDoc = doc;
-        pageNum = 1;
-        signatureAreas = [];
-        document.getElementById('placeholder').style.display = 'none';
-        document.getElementById('pdfWrapper').style.display = 'block';
-        document.getElementById('selectAreaBtn').disabled = false;
-        document.getElementById('clearBoxesBtn').disabled = false;
-        document.getElementById('zoomInBtn').disabled = false;
-        document.getElementById('zoomOutBtn').disabled = false;
-        renderCurrentPage();
-    }).catch(err => {
-        alert("Failed to load PDF document: " + err.message);
-    });
-}
-
-function renderCurrentPage() {
-    if (!pdfDoc) return;
-    pdfDoc.getPage(pageNum).then(page => {
-        const viewport = page.getViewport({ scale: scale });
-        const canvas = document.getElementById('pdfCanvas');
-        const context = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        currentPdfHeight = viewport.height;
-
-        const renderContext = {
-            canvasContext: context,
-            viewport: viewport
-        };
-
-        page.render(renderContext).promise.then(() => {
-            drawSavedAreas();
-            document.getElementById('pageIndicator').textContent = `Page ${pageNum} / ${pdfDoc.numPages}`;
-            document.getElementById('prevPageBtn').disabled = (pageNum <= 1);
-            document.getElementById('nextPageBtn').disabled = (pageNum >= pdfDoc.numPages);
-        });
-    });
-}
-
-function changePage(delta) {
-    if (!pdfDoc) return;
-    const newPage = pageNum + delta;
-    if (newPage >= 1 && newPage <= pdfDoc.numPages) {
-        pageNum = newPage;
-        renderCurrentPage();
-    }
-}
-
-function zoom(delta) {
-    if (!pdfDoc) return;
-    scale = Math.max(0.6, Math.min(3.0, scale + delta));
-    renderCurrentPage();
-}
-
-// -------------------------------------------------------------
-// 3. Interactive Signature Box Drawing on Canvas
-// -------------------------------------------------------------
-const interactionLayer = document.getElementById('interactionLayer');
-
-function toggleAreaSelection() {
-    isSelecting = !isSelecting;
-    const btn = document.getElementById('selectAreaBtn');
-    if (isSelecting) {
-        interactionLayer.classList.add('active-layer');
-        btn.classList.add('active');
-        btn.textContent = '✖ Cancel Drawing';
-    } else {
-        interactionLayer.classList.remove('active-layer');
-        btn.classList.remove('active');
-        btn.textContent = '✍️ Draw Signature Box';
-        if (tempBox) tempBox.remove();
-        tempBox = null;
-        currentArea = null;
-    }
-}
-
-interactionLayer.addEventListener('mousedown', e => {
-    if (!isSelecting) return;
-    const rect = interactionLayer.getBoundingClientRect();
-    startX = e.clientX - rect.left;
-    startY = e.clientY - rect.top;
-    currentArea = { x: startX, y: startY, width: 0, height: 0 };
-    tempBox = document.createElement('div');
-    tempBox.className = 'selection-box';
-    interactionLayer.appendChild(tempBox);
-});
-
-interactionLayer.addEventListener('mousemove', e => {
-    if (!isSelecting || !currentArea) return;
-    const rect = interactionLayer.getBoundingClientRect();
-    currentArea.width = (e.clientX - rect.left) - startX;
-    currentArea.height = (e.clientY - rect.top) - startY;
-
-    const x = currentArea.width < 0 ? startX + currentArea.width : startX;
-    const y = currentArea.height < 0 ? startY + currentArea.height : startY;
-    const w = Math.abs(currentArea.width);
-    const h = Math.abs(currentArea.height);
-
-    tempBox.style.left = x + 'px';
-    tempBox.style.top = y + 'px';
-    tempBox.style.width = w + 'px';
-    tempBox.style.height = h + 'px';
-});
-
-interactionLayer.addEventListener('mouseup', () => {
-    if (!currentArea || Math.abs(currentArea.width) < 15 || Math.abs(currentArea.height) < 15) {
-        if (tempBox) tempBox.remove();
-        tempBox = null;
-        currentArea = null;
-        return;
-    }
-
-    const x = currentArea.width < 0 ? startX + currentArea.width : startX;
-    const y = currentArea.height < 0 ? startY + currentArea.height : startY;
-    const w = Math.abs(currentArea.width);
-    const h = Math.abs(currentArea.height);
-
-    signatureAreas.push({
-        page: pageNum,
-        x: x / scale,
-        y: (currentPdfHeight - y - h) / scale,
-        width: w / scale,
-        height: h / scale
-    });
-
-    updateSignatureList();
-    currentArea = null;
-    if (tempBox) tempBox.remove();
-    tempBox = null;
-    toggleAreaSelection();
-    drawSavedAreas();
-});
-
-function drawSavedAreas() {
-    interactionLayer.querySelectorAll('.signature-area, .selection-box').forEach(el => el.remove());
-    signatureAreas.forEach((area, idx) => {
-        if (area.page !== pageNum) return;
-        const div = document.createElement('div');
-        div.className = 'signature-area';
-        div.style.left = (area.x * scale) + 'px';
-        div.style.top = (currentPdfHeight - (area.y + area.height) * scale) + 'px';
-        div.style.width = (area.width * scale) + 'px';
-        div.style.height = (area.height * scale) + 'px';
-        div.innerHTML = `✓ Digital Signature #${idx + 1}<br><span style="font-size:0.65rem; opacity:0.85;">(Page ${area.page})</span>`;
-        interactionLayer.appendChild(div);
-    });
-}
-
-function updateSignatureList() {
-    const list = document.getElementById('signatureList');
-    list.innerHTML = '';
-    if (signatureAreas.length === 0) {
-        list.innerHTML = '<div class="empty-hint">No signature boxes drawn yet.<br>Click "Draw Signature Box" to place.</div>';
-    } else {
-        signatureAreas.forEach((a, i) => {
-            list.innerHTML += `<div class="area-item"><span>Page ${a.page}</span><span>Box #${i + 1} (${Math.round(a.width)}x${Math.round(a.height)} pt)</span></div>`;
-        });
-    }
-    document.getElementById('finalSignBtn').disabled = (signatureAreas.length === 0);
-}
-
-function clearSignatureBoxes() {
-    signatureAreas = [];
-    updateSignatureList();
-    drawSavedAreas();
-}
-
-// -------------------------------------------------------------
-// 4. Submit to Local Server (/api/sign) and Download Signed PDF
-// -------------------------------------------------------------
-async function executeSigning() {
-    if (!loadedPdfFile) {
-        alert("Please upload a PDF document first.");
-        return;
-    }
-    if (signatureAreas.length === 0) {
-        alert("Please draw at least one signature box on the PDF page.");
-        return;
-    }
-    const pin = document.getElementById('tokenPin').value.trim();
-    if (!pin) {
-        alert("Please enter your USB Hardware Token PIN / Password.");
-        document.getElementById('tokenPin').focus();
-        return;
-    }
-
-    const certAlias = document.getElementById('certDropdown').value;
-    const driverName = document.getElementById('driverDropdownWorkspace').value;
-
-    const overlay = document.getElementById('loadingOverlay');
-    const spinnerText = document.getElementById('spinnerText');
-    spinnerText.textContent = "Connecting to USB Hardware Token & Signing Document...";
-    overlay.style.display = 'flex';
-
-    try {
-        const formData = new FormData();
-        formData.append('file', loadedPdfFile, loadedPdfFile.name);
-        formData.append('certificate', JSON.stringify({ alias: certAlias }));
-        formData.append('areas', JSON.stringify(signatureAreas));
-        formData.append('password', pin);
-        formData.append('driver_name', driverName);
-
-        const response = await fetch(`${LOCAL_SERVER}/api/sign`, {
-            method: 'POST',
-            body: formData
-        });
-
-        if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.error || `Signing failed with HTTP code ${response.status}`);
-        }
-
-        const blob = await response.blob();
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        const origBase = loadedPdfFile.name.replace(/\.pdf$/i, '');
-        a.download = `${origBase}_Signed_${Date.now()}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-
-        overlay.style.display = 'none';
-        alert("✓ Success! The PDF document has been digitally signed using your USB Hardware Token and downloaded to your computer.");
-    } catch (err) {
-        overlay.style.display = 'none';
-        alert("Signing Error: " + err.message);
-    }
-}
-
-// Check server health on load and every 5 seconds
-window.addEventListener('DOMContentLoaded', () => {
-    checkServerHealth();
-    setInterval(checkServerHealth, 5000);
 });
 </script>
+
+<?php else: ?>
+
+<!-- SIGNING WORKSPACE -->
+<div class="workspace-container">
+    <div class="pdf-sidebar">
+        <h3 style="color:#0dcaf0; margin-top:0;">Signature Settings <span class="app-version-display" style="font-size: 12px; color: #aaa; margin-left: 5px;"></span></h3>
+        <p style="word-break: break-all; font-size: 13px; color: #cbd5e1;"><?= sanitizeInput($_SESSION['fileName']) ?></p>
+
+        <form id="signForm">
+            <label style="font-size: 13px; color: #94a3b8; font-weight: 600;">USB Token Driver</label>
+            <select class="glass-input" id="driverDropdownWorkspace"></select>
+
+            <label style="font-size: 13px; color: #94a3b8; font-weight: 600;">Digital Certificate</label>
+            <select class="glass-input" name="certAlias" required>
+                <option value="">-- Choose Certificate --</option>
+            </select>
+
+            <label style="font-size: 13px; color: #94a3b8; font-weight: 600;">USB Hardware Token PIN</label>
+            <input type="password" class="glass-input" name="tokenPassword" placeholder="Enter Token PIN / Password" required>
+            <input type="hidden" id="signatureAreasInput">
+
+            <div id="signatureList" style="min-height:100px; margin-bottom:20px; font-size:13px;">
+                No signatures drawn yet.
+            </div>
+
+            <div id="demoWarningMsg" style="display:none; color: #e74c3c; font-size: 13px; margin-bottom: 15px; font-weight: bold; text-align: center; border: 1px solid #e74c3c; padding: 10px; border-radius: 5px; background: rgba(231, 76, 60, 0.1);">
+                <span style="font-size: 14px; text-decoration: underline;">DEMO Version Active</span><br><br>
+                <a href="https://pay.a-b-infotech.in/license.php" target="_blank" style="display:inline-block; margin-bottom:8px; padding:6px 12px; background:#f39c12; color:#fff; text-decoration:none; border-radius:4px;">💳 Buy / Renew License Online</a><br>
+                Or Contact: 7016797720 / <a href="https://api.whatsapp.com/send?phone=917016797720&text=Licence%20PDF%20Key" target='_blank' style="color:#2ecc71;">WhatsApp</a>
+            </div>
+
+            <button type="submit" class="btn-abi btn-success" id="finalSignBtn" disabled style="width: 100%; margin-bottom: 10px; font-size: 15px;">
+                ✍️ Sign Document
+            </button>
+
+            <a href="?action=reset" class="btn-abi btn-danger" style="display:block; text-align:center; text-decoration:none;">Cancel / Close PDF</a>
+        </form>
+    </div>
+
+    <div class="pdf-panel">
+        <div class="pdf-toolbar">
+            <div>
+                <button id="prevPageBtn" class="btn-abi btn-cyan" style="padding: 8px 14px;">◀ Prev</button>
+                <span style="margin:0 15px; font-weight: 600;">Page <span id="currentPageNum">1</span> / <span id="totalPages">0</span></span>
+                <button id="nextPageBtn" class="btn-abi btn-cyan" style="padding: 8px 14px;">Next ▶</button>
+            </div>
+            <div>
+                <button id="clearAreasBtn" class="btn-abi btn-danger" style="margin-right: 10px; padding: 8px 14px;">🗑️ Clear Areas</button>
+                <button id="selectAreaBtn" class="btn-abi btn-cyan" style="padding: 8px 14px;">✏️ Draw Signature Box</button>
+            </div>
+        </div>
+
+        <div class="pdf-container">
+            <div class="pdf-wrapper" id="pdfWrapper">
+                <canvas id="pdfCanvas"></canvas>
+                <div class="interaction-layer" id="interactionLayer"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Demo Notice Modal -->
+<div id="licenseModal" style="display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(15,32,39,0.95); padding:20px; border:1px solid #0dcaf0; border-radius:12px; z-index:9999; text-align:center; box-shadow: 0 20px 50px rgba(0,0,0,0.8);">
+    <div class="glass-card" style="padding:30px; text-align:center; max-width:400px; width:90%; margin:auto;">
+        <h3 style="color:#f39c12; margin-top:0;">DEMO Version Notice</h3>
+        <p style="color:#e2e8f0; line-height:1.5;">Only <b>one signature area</b> is allowed in Demo Mode.</p>
+        <p style="color:#94a3b8; font-size:13px;">Please purchase or activate a Pro License to unlock unlimited signature boxes and batch signing.</p>
+        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" style="display:inline-block; padding:10px 20px; background:#f39c12; color:#fff; text-decoration:none; border-radius:5px; margin-bottom:10px; width: 100%; box-sizing: border-box; font-weight:bold;">💳 Get License / Renew Now</a>
+        <a href="https://api.whatsapp.com/send?phone=917016797720&text=Licence%20PDF%20Key" target="_blank" style="display:inline-block; padding:10px 20px; background:#25D366; color:#fff; text-decoration:none; border-radius:5px; width: 100%; box-sizing: border-box; font-weight:bold;">💬 Contact on WhatsApp</a>
+        <br><br>
+        <button onclick="document.getElementById('licenseModal').style.display='none';" class="btn-abi btn-cyan" style="width: 100%;">Close</button>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+    const LOCAL_SERVER = 'http://127.0.0.1:5000';
+    const pdfjsLib = window['pdfjs-dist/build/pdf'];
+    const canvas = document.getElementById('pdfCanvas');
+    const ctx = canvas.getContext('2d');
+    const interactionLayer = document.getElementById('interactionLayer');
+    const pdfWrapper = document.getElementById('pdfWrapper');
+
+    let pdfDoc = null;
+    let pageNum = 1;
+    let currentPdfHeight = 0;
+    let pageRendering = false;
+    let signatureAreas = [];
+    let isSelecting = false;
+    let currentArea = null;
+    let tempBox = null;
+    const scale = 1.3;
+
+    async function loadDrivers(){
+        try{
+            const response = await fetch(`${LOCAL_SERVER}/api/drivers`);
+            const drivers = await response.json();
+            const select = document.getElementById('driverDropdownWorkspace');
+            if(!select) return;
+            select.innerHTML = '';
+            drivers.forEach(driver => {
+                const opt = document.createElement('option');
+                opt.value = driver;
+                opt.textContent = driver;
+                select.appendChild(opt);
+            });
+            select.addEventListener('change', fetchCertificates);
+            fetchCertificates();
+        }catch(e){}
+    }
+
+    async function fetchCertificates(){
+        const driver = document.getElementById('driverDropdownWorkspace');
+        if(!driver) return;
+        try{
+            const response = await fetch(`${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}`);
+            const certs = await response.json();
+            const certSelect = document.querySelector('select[name="certAlias"]');
+            
+            certSelect.innerHTML = '<option value="">-- Choose Certificate --</option>';
+            certs.forEach(cert => {
+                const opt = document.createElement('option');
+                opt.value = cert.alias;
+                let displayName = cert.subject;
+                const match = cert.subject.match(/CN=([^,]+)/);
+                if(match) displayName = match[1];
+                opt.textContent = `${displayName} (${cert.source})`;
+                certSelect.appendChild(opt);
+            });
+        }catch(e){}
+    }
+
+    pdfjsLib.getDocument('<?= str_replace("\\", "/", $_SESSION["pdfPath"]) ?>').promise.then(pdf => {
+        pdfDoc = pdf;
+        document.getElementById('totalPages').textContent = pdf.numPages;
+        renderPage(pageNum);
+    });
+
+    function renderPage(num){
+        pageRendering = true;
+        pdfDoc.getPage(num).then(page => {
+            const viewport = page.getViewport({ scale });
+            currentPdfHeight = viewport.height;
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            pdfWrapper.style.width = viewport.width + 'px';
+            pdfWrapper.style.height = viewport.height + 'px';
+
+            page.render({ canvasContext: ctx, viewport: viewport }).promise.then(() => {
+                pageRendering = false;
+                drawSavedAreas();
+            });
+        });
+        document.getElementById('currentPageNum').textContent = num;
+    }
+
+    document.getElementById('prevPageBtn').addEventListener('click', () => {
+        if(pageNum <= 1) return;
+        pageNum--; renderPage(pageNum);
+    });
+
+    document.getElementById('nextPageBtn').addEventListener('click', () => {
+        if(pageNum >= pdfDoc.numPages) return;
+        pageNum++; renderPage(pageNum);
+    });
+
+    document.getElementById('clearAreasBtn').addEventListener('click', function() {
+        signatureAreas = [];
+        updateSignatureList();
+        drawSavedAreas();
+        if (tempBox) { tempBox.remove(); tempBox = null; }
+        currentArea = null; isSelecting = false;
+        interactionLayer.classList.remove('active-layer');
+        const selectBtn = document.getElementById('selectAreaBtn');
+        selectBtn.style.background = '#0dcaf0'; selectBtn.textContent = '✏️ Draw Signature Box';
+    });
+
+    document.getElementById('selectAreaBtn').addEventListener('click', function(){
+        if (window.isDemoMode && signatureAreas.length >= 1) {
+            document.getElementById('licenseModal').style.display = 'block';
+            return;
+        }
+        isSelecting = !isSelecting;
+        if (isSelecting) {
+            this.style.background = '#0baccc'; this.textContent = '✏️ Selecting Area...';
+        } else {
+            this.style.background = '#0dcaf0'; this.textContent = '✏️ Draw Signature Box';
+        }
+        interactionLayer.classList.toggle('active-layer');
+    });
+
+    let startX, startY;
+
+    interactionLayer.addEventListener('mousedown', e => {
+        if(!isSelecting) return;
+        const rect = interactionLayer.getBoundingClientRect();
+        startX = e.clientX - rect.left; startY = e.clientY - rect.top;
+        currentArea = { x:startX, y:startY, width:0, height:0 };
+        tempBox = document.createElement('div');
+        tempBox.className = 'selection-box';
+        interactionLayer.appendChild(tempBox);
+    });
+
+    interactionLayer.addEventListener('mousemove', e => {
+        if(!isSelecting || !currentArea) return;
+        const rect = interactionLayer.getBoundingClientRect();
+        currentArea.width = (e.clientX - rect.left) - startX;
+        currentArea.height = (e.clientY - rect.top) - startY;
+        tempBox.style.left = (currentArea.width < 0 ? startX + currentArea.width : startX) + 'px';
+        tempBox.style.top = (currentArea.height < 0 ? startY + currentArea.height : startY) + 'px';
+        tempBox.style.width = Math.abs(currentArea.width) + 'px';
+        tempBox.style.height = Math.abs(currentArea.height) + 'px';
+    });
+
+    interactionLayer.addEventListener('mouseup', () => {
+        if(!currentArea) return;
+
+        if (window.isDemoMode && signatureAreas.length >= 1) {
+            currentArea = null;
+            if (tempBox) tempBox.remove();
+            tempBox = null;
+            isSelecting = false;
+            interactionLayer.classList.remove('active-layer');
+            document.getElementById('selectAreaBtn').style.background = '#0dcaf0';
+            document.getElementById('selectAreaBtn').textContent = '✏️ Draw Signature Box';
+            document.getElementById('licenseModal').style.display = 'block';
+            return;
+        }
+
+        const x = currentArea.width < 0 ? startX + currentArea.width : startX;
+        const y = currentArea.height < 0 ? startY + currentArea.height : startY;
+        const w = Math.abs(currentArea.width);
+        const h = Math.abs(currentArea.height);
+
+        if (w > 10 && h > 10) {
+            signatureAreas.push({
+                page: pageNum,
+                x: x / scale,
+                y: (currentPdfHeight - y - h) / scale,
+                width: w / scale,
+                height: h / scale
+            });
+        }
+
+        updateSignatureList();
+        currentArea = null;
+        if (tempBox) tempBox.remove();
+        tempBox = null;
+        isSelecting = false;
+        interactionLayer.classList.remove('active-layer');
+        const selectBtn = document.getElementById('selectAreaBtn');
+        selectBtn.style.background = '#0dcaf0'; selectBtn.textContent = '✏️ Draw Signature Box';
+        drawSavedAreas();
+    });
+
+    function drawSavedAreas(){
+        interactionLayer.querySelectorAll('.signature-area, .selection-box').forEach(el => el.remove());
+        signatureAreas.forEach((area, idx) => {
+            if(area.page !== pageNum) return;
+            const div = document.createElement('div');
+            div.className = 'signature-area';
+            div.style.left = (area.x * scale) + 'px';
+            div.style.top = (currentPdfHeight - (area.y + area.height) * scale) + 'px';
+            div.style.width = (area.width * scale) + 'px';
+            div.style.height = (area.height * scale) + 'px';
+            div.innerHTML = `✓ Digital Signature #${idx + 1}<br><span style="font-size:11px; opacity:0.85;">(Page ${area.page})</span>`;
+            interactionLayer.appendChild(div);
+        });
+    }
+
+    function updateSignatureList(){
+        const list = document.getElementById('signatureList');
+        list.innerHTML = '';
+        if (signatureAreas.length === 0) {
+            list.innerHTML = 'No signatures drawn yet.';
+        } else {
+            signatureAreas.forEach((a, i) => {
+                list.innerHTML += `<div class="area-item"><span>Page ${a.page}</span><span>Box #${i+1} (${Math.round(a.width)}x${Math.round(a.height)} pt)</span></div>`;
+            });
+        }
+        document.getElementById('signatureAreasInput').value = JSON.stringify(signatureAreas);
+        document.getElementById('finalSignBtn').disabled = signatureAreas.length === 0;
+    }
+
+    document.getElementById('signForm').addEventListener('submit', async function(e){
+        e.preventDefault();
+        const certVal = document.querySelector('[name="certAlias"]').value;
+        const passVal = document.querySelector('[name="tokenPassword"]').value;
+        const driverVal = document.getElementById('driverDropdownWorkspace').value;
+
+        if (!certVal) {
+            alert("Please choose a Digital Certificate from the dropdown.");
+            return;
+        }
+        if (!passVal) {
+            alert("Please enter your USB Hardware Token PIN / Password.");
+            return;
+        }
+
+        const signBtn = document.getElementById('finalSignBtn');
+        const oldText = signBtn.innerHTML;
+        signBtn.innerHTML = "⏳ Signing with Hardware Token...";
+        signBtn.disabled = true;
+
+        try{
+            const formData = new FormData();
+            const fileBlob = await fetch('<?= str_replace("\\", "/", $_SESSION["pdfPath"]) ?>').then(r => r.blob());
+
+            formData.append('file', fileBlob, '<?= sanitizeInput($_SESSION["fileName"]) ?>');
+            formData.append('certificate', JSON.stringify({ alias: certVal }));
+            formData.append('areas', JSON.stringify(signatureAreas));
+            formData.append('password', passVal);
+            formData.append('driver_name', driverVal);
+
+            const response = await fetch(`${LOCAL_SERVER}/api/sign`, { method:'POST', body:formData });
+
+            if(!response.ok){
+                const err = await response.json().catch(() => ({}));
+                throw new Error(err.error || `Signing failed (HTTP ${response.status})`);
+            }
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'Signed_' + Date.now() + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            alert("✓ Success! The PDF has been digitally signed with your USB Token and downloaded.");
+        }catch(e){
+            alert("Digital Signature Error:\n" + e.message);
+        } finally {
+            signBtn.innerHTML = oldText;
+            signBtn.disabled = signatureAreas.length === 0;
+        }
+    });
+
+    loadDrivers();
+});
+</script>
+<?php endif; ?>
 </body>
 </html>
