@@ -44,7 +44,7 @@ if CURRENT_OS == 'Windows':
 
 # GUI & Visual Components
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, colorchooser
+from tkinter import ttk, filedialog, messagebox, colorchooser, font as tkfont
 
 # Prevent PyMuPDF layout/LLM modules from causing issues
 sys.modules['pymupdf4llm'] = None
@@ -1334,11 +1334,6 @@ def smart_compress_pdf(input_path, output_path, level="extreme", preserve_sigs=T
 
                 if len(new_bytes) < len(orig_bytes):
                     page.replace_image(xr, stream=new_bytes)
-                    try:
-                        doc.xref_set_key(xr, "ColorSpace", "/DeviceRGB" if im.mode == "RGB" else "/DeviceGray")
-                        doc.xref_set_key(xr, "DecodeParms", "null")
-                    except Exception:
-                        pass
             except Exception as img_err:
                 logger.debug(f"Image compress skipped for xref {xr}: {img_err}")
 
@@ -1510,37 +1505,38 @@ def get_bbox_bg_color(page_or_pix, bbox, page_rect=None):
         logger.debug(f"Failed to sample background color: {e}")
     return (1.0, 1.0, 1.0)
 
-def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fontsize=10.0, color=(0.0, 0.0, 0.0), bold=False, italic=False, is_box=False, render_mode=0):
+def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fontsize=10.0, color=(0.0, 0.0, 0.0), bold=False, italic=False, underline=False, bg_color=None, align=0, is_box=False, render_mode=0, opacity=1.0):
     """
     Safely inserts text into a PyMuPDF page with 100% guarantee against 'need font file or buffer' errors.
-    Automatically handles Base-14 fonts, Windows system fonts, and Unicode fallback with overflow deficit handling.
+    Automatically handles Base-14 fonts, Windows system fonts, alignment, underline, background fill,
+    and Unicode fallback with overflow deficit handling.
     """
     fam = str(font_family).lower()
     if any(k in fam for k in ("times", "serif", "roman")):
         if bold and italic:
-            fn = "times-bolditalic"
+            fn = "tibi"
             win_ttf = "timesbi.ttf"
         elif bold:
-            fn = "times-bold"
+            fn = "tibo"
             win_ttf = "timesbd.ttf"
         elif italic:
-            fn = "times-italic"
+            fn = "tiit"
             win_ttf = "timesi.ttf"
         else:
-            fn = "times-roman"
+            fn = "tiro"
             win_ttf = "times.ttf"
     elif any(k in fam for k in ("courier", "mono", "typewriter", "consolas")):
         if bold and italic:
-            fn = "courier-boldoblique"
+            fn = "cobi"
             win_ttf = "courbi.ttf"
         elif bold:
-            fn = "courier-bold"
+            fn = "cobo"
             win_ttf = "courbd.ttf"
         elif italic:
-            fn = "courier-oblique"
+            fn = "coit"
             win_ttf = "couri.ttf"
         else:
-            fn = "courier"
+            fn = "cour"
             win_ttf = "cour.ttf"
     else:  # Helvetica / Arial / Default Sans
         if bold and italic:
@@ -1556,76 +1552,88 @@ def safe_insert_pdf_text(page, point_or_rect, text, font_family="Helvetica", fon
             fn = "helv"
             win_ttf = "arial.ttf"
 
-    win_fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    win_fonts_dir = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
     specific_win_font = os.path.join(win_fonts_dir, win_ttf)
     fallback_arial = os.path.join(win_fonts_dir, "arial.ttf")
 
+    # If background color requested, draw filled background box
+    if bg_color and is_box and isinstance(point_or_rect, fitz.Rect):
+        try:
+            page.draw_rect(point_or_rect, color=bg_color, fill=bg_color, fill_opacity=opacity)
+        except Exception:
+            pass
+
     # 1. Try standard Base-14 font code with box overflow check
+    success = False
     try:
         if is_box and isinstance(point_or_rect, fitz.Rect):
-            rc = page.insert_textbox(point_or_rect, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
+            rc = page.insert_textbox(point_or_rect, text, fontname=fn, fontsize=fontsize, color=color, align=align, render_mode=render_mode)
             if rc >= 0:
-                return True
+                success = True
         else:
             pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
             page.insert_text(pt, text, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
-            return True
+            success = True
     except Exception:
         pass
 
     # 2. Try Windows TrueType font matching requested style
-    if os.path.exists(specific_win_font):
+    if not success and os.path.exists(specific_win_font):
         try:
             if is_box and isinstance(point_or_rect, fitz.Rect):
-                rc = page.insert_textbox(point_or_rect, text, fontfile=specific_win_font, fontsize=fontsize, color=color, render_mode=render_mode)
+                rc = page.insert_textbox(point_or_rect, text, fontfile=specific_win_font, fontsize=fontsize, color=color, align=align, render_mode=render_mode)
                 if rc >= 0:
-                    return True
+                    success = True
             else:
                 pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
                 page.insert_text(pt, text, fontfile=specific_win_font, fontsize=fontsize, color=color, render_mode=render_mode)
-                return True
+                success = True
         except Exception:
             pass
 
     # 3. Try Windows Arial (universal Unicode support)
-    if os.path.exists(fallback_arial):
+    if not success and os.path.exists(fallback_arial):
         try:
             if is_box and isinstance(point_or_rect, fitz.Rect):
-                rc = page.insert_textbox(point_or_rect, text, fontfile=fallback_arial, fontsize=fontsize, color=color, render_mode=render_mode)
+                rc = page.insert_textbox(point_or_rect, text, fontfile=fallback_arial, fontsize=fontsize, color=color, align=align, render_mode=render_mode)
                 if rc >= 0:
-                    return True
+                    success = True
             else:
                 pt = point_or_rect if isinstance(point_or_rect, fitz.Point) else fitz.Point(point_or_rect[0], point_or_rect[1])
                 page.insert_text(pt, text, fontfile=fallback_arial, fontsize=fontsize, color=color, render_mode=render_mode)
-                return True
+                success = True
         except Exception:
             pass
 
-    # 4. Universal line-by-line fallback (Guarantees 100% of text is placed even if box is tight)
-    try:
-        lines = str(text).split("\n")
-        line_h = fontsize * 1.25
-        base_x = point_or_rect.x0 if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.x if isinstance(point_or_rect, fitz.Point) else point_or_rect[0])
-        base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
-        for idx, line in enumerate(lines):
-            pt = fitz.Point(base_x, base_y + idx * line_h)
-            page.insert_text(pt, line, fontname=fn, fontsize=fontsize, color=color, render_mode=render_mode)
-        return True
-    except Exception:
-        pass
+    # 4. Universal line-by-line fallback
+    if not success:
+        try:
+            lines = str(text).split("\n")
+            line_h = fontsize * 1.25
+            base_x = point_or_rect.x0 if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.x if isinstance(point_or_rect, fitz.Point) else point_or_rect[0])
+            base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
+            for idx, line in enumerate(lines):
+                pt = fitz.Point(base_x, base_y + idx * line_h)
+                page.insert_text(pt, line, fontname="helv", fontsize=fontsize, color=color, render_mode=render_mode)
+            success = True
+        except Exception:
+            pass
 
-    # 5. Ultimate fallback to standard 'helv'
-    try:
-        lines = str(text).split("\n")
-        line_h = fontsize * 1.25
-        base_x = point_or_rect.x0 if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.x if isinstance(point_or_rect, fitz.Point) else point_or_rect[0])
-        base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
-        for idx, line in enumerate(lines):
-            pt = fitz.Point(base_x, base_y + idx * line_h)
-            page.insert_text(pt, line, fontname="helv", fontsize=fontsize, color=color, render_mode=render_mode)
-        return True
-    except Exception as final_e:
-        raise RuntimeError(f"Could not insert text with available fonts: {final_e}")
+    # Underline handling
+    if underline and success:
+        try:
+            lines = str(text).split("\n")
+            line_h = fontsize * 1.25
+            base_x = point_or_rect.x0 if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.x if isinstance(point_or_rect, fitz.Point) else point_or_rect[0])
+            base_y = (point_or_rect.y0 + fontsize) if isinstance(point_or_rect, fitz.Rect) else (point_or_rect.y if isinstance(point_or_rect, fitz.Point) else point_or_rect[1])
+            for idx, line in enumerate(lines):
+                cur_y = base_y + idx * line_h
+                w_t = fitz.get_text_length(line, fontname=fn, fontsize=fontsize)
+                page.draw_line(fitz.Point(base_x, cur_y + 1.5), fitz.Point(base_x + w_t, cur_y + 1.5), color=color, width=max(0.75, fontsize * 0.08))
+        except Exception:
+            pass
+
+    return success
 
 def sample_text_color_int(pix, box, bg_rgb):
     """
@@ -2307,8 +2315,7 @@ CORS(app)
 APP_VERSION = "2.1.0"
 APP_NAME = "A B INFOTECH - PDF Sign & All-in-One Power Suite"
 UPDATE_METADATA_URLS = [
-    "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json",
-    "https://invoice.a-b-infotech.in/version.json"
+    "https://raw.githubusercontent.com/a-b-infotech/abinfo-signer/main/version.json"
 ]
 
 def parse_semver(ver_str):
@@ -3207,16 +3214,14 @@ class AddTextDialog:
 # ==========================================
 class PdfVirtualEditor(tk.Frame):
     """
-    Wondershare PDFelement & Adobe Acrobat Style Interactive PDF Editor & High-Level OCR:
-    - View Mode vs Edit Text Mode with interactive selection frames & 8 grab handles
-    - In-place formatting ribbon: Font Family, Font Size, Bold, Italic, Color presets & picker
-    - Multi-level Undo (Ctrl+Z) support for edits and redactions
-    - Interactive 'Add Text' tool to place text anywhere on page
-    - 'Open Active PDF' shortcut to seamlessly edit current open document from Tab 1
-    - High-level multilingual OCR (RapidOCR) for scanned images and pages
-    - Full Document Searchable PDF generator (embeds invisible text layer for Adobe search/copy)
-    - In-place clean background-matched redaction and 100% crash-free font replacement
-    - Save / Export edited PDF with signature preservation
+    A B INFOTECH - iLovePDF Online PDF Editor & Form Filler Desktop Suite:
+    - Interactive Tools: Hand (Pan), Select/Transform (8 handles), Add Text, Insert Image,
+      Freehand Draw/Pen, Shapes (Rect, Circle, Line/Arrow), Symbols/Stamps, Interactive Form Filler,
+      and TrueEdit (existing PDF text inline replacement with background-matched redactions).
+    - Dynamic Contextual Styling Submenu Ribbon matching iLovePDF.
+    - Bottom Floating Viewbar with page navigation, zoom, fit width/height, undo/redo.
+    - Right Docked Notebook Sidebar: Layers & Elements Manager, TrueEdit & OCR Inspector, Form Fields.
+    - Commit & Save Engine with 100% digital signature preservation.
     """
     def __init__(self, parent, main_app=None):
         super().__init__(parent, bg="#F1F5F9")
@@ -3225,31 +3230,50 @@ class PdfVirtualEditor(tk.Frame):
         self.pdf_path = None
         self.current_page = 0
         self.scale = 1.35
-        self.spans = []  # Detected text spans for the active page
+        self.tk_img = None
+
+        # Tool selection: "select", "hand", "text", "image", "draw", "rect", "circle", "line", "symbols", "forms", "true_edit"
+        self.active_tool = "select"
+        self.page_elements = {}  # {page_idx: [element_dict, ...]}
+        self.selected_elem_idx = None
+        self.hover_elem_idx = None
+
+        # Drag & Transform state
+        self.drag_mode = None  # None, "move", "resize_tl", "resize_tr", "resize_bl", "resize_br", "draw", "rubber_shape"
+        self.drag_start_canvas = (0.0, 0.0)
+        self.drag_orig_rect = None
+        self.current_drawing_points = []
+        self.rubber_shape_id = None
+        self.rubber_shape_label = None
+
+        # TrueEdit & Form state
+        self.spans = []
         self.selected_span_idx = None
         self.hover_span_idx = None
-        self.editor_mode = "edit"  # "view" or "edit"
-        self.add_text_mode = False
-        self.is_dragging_text_area = False
-        self.add_start_cx = 0.0
-        self.add_start_cy = 0.0
-        self.add_area_rect = None
-        self.add_area_label = None
-        self.click_down_cx = 0.0
-        self.click_down_cy = 0.0
-        self.undo_stack = []
+        self.form_widgets = []
+        self.selected_widget_idx = None
 
-        # Formatting properties
+        # History stacks
+        self.undo_stack = []
+        self.redo_stack = []
+
+        # Formatting Variables
         self.font_family_var = tk.StringVar(value="Helvetica")
-        self.font_size_var = tk.StringVar(value="10")
+        self.font_size_var = tk.StringVar(value="12")
         self.bold_var = tk.BooleanVar(value=False)
         self.italic_var = tk.BooleanVar(value=False)
+        self.underline_var = tk.BooleanVar(value=False)
         self.text_color_hex = "#000000"
+        self.fill_color_hex = ""  # empty = transparent
+        self.stroke_color_hex = "#000000"
+        self.stroke_width_var = tk.StringVar(value="2")
+        self.align_var = tk.StringVar(value="left")
+        self.opacity_var = tk.StringVar(value="100%")
 
-        # Interactive OCR & Text Search properties
+        # Search properties
         self.ocr_search_var = tk.StringVar(value="")
         self.search_all_pages_var = tk.BooleanVar(value=False)
-        self.search_matches = []  # list of span indices or (page_idx, span_idx)
+        self.search_matches = []
         self.active_search_match_idx = -1
 
         self._build_ui()
@@ -3274,7 +3298,7 @@ class PdfVirtualEditor(tk.Frame):
         tk.Label(
             lock_card,
             text=f"Your current license ({tier_lbl} Edition) does not have the OCR & PDF Text Editor module unlocked.\n\n"
-                 f"To unlock direct Adobe/PDFelement-style text editing, font formatting, and scanned image OCR,\n"
+                 f"To unlock direct iLovePDF-style text editing, shapes, freehand drawing, and scanned image OCR,\n"
                  f"please upgrade to the Pro Edition.",
             font=get_sys_font(9), fg="#475569", bg="#FFFFFF", wraplength=480, justify="center"
         ).pack(pady=(10, 16))
@@ -3297,122 +3321,82 @@ class PdfVirtualEditor(tk.Frame):
         for w in self.winfo_children():
             w.destroy()
 
-        # ----------------------------------------------------
-        # 1. TOP MAIN TOOLBAR (Document Navigation & Modes)
-        # ----------------------------------------------------
-        toolbar = tk.Frame(self, bg="#E2E8F0", padx=8, pady=4, relief=tk.RAISED, bd=1)
-        toolbar.pack(side=tk.TOP, fill=tk.X)
+        # =====================================================================
+        # 1. TOP MAIN TOOLBAR & TOOL RIBBON (iLovePDF Style)
+        # =====================================================================
+        top_bar = tk.Frame(self, bg="#0F172A", padx=8, pady=4)
+        top_bar.pack(side=tk.TOP, fill=tk.X)
 
-        ttk.Button(toolbar, text="📂 Open PDF", style="Primary3D.TButton", command=self.open_pdf).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🔄 Open Active PDF", style="Tool3D.TButton", command=self.load_active_pdf).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="❌ Clear", style="Tool3D.TButton", command=self.clear_pdf).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="◀ Prev", style="Tool3D.TButton", command=self.prev_page).pack(side=tk.LEFT, padx=2)
-        self.lbl_page = tk.Label(toolbar, text="Page: 0 / 0", font=get_sys_font(8, "bold"), fg="#1E293B", bg="#E2E8F0")
-        self.lbl_page.pack(side=tk.LEFT, padx=6)
-        ttk.Button(toolbar, text="Next ▶", style="Tool3D.TButton", command=self.next_page).pack(side=tk.LEFT, padx=2)
+        # Left: Document File Actions
+        doc_actions = tk.Frame(top_bar, bg="#0F172A")
+        doc_actions.pack(side=tk.LEFT)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+        ttk.Button(doc_actions, text="📂 Open PDF", style="Primary3D.TButton", command=self.open_pdf).pack(side=tk.LEFT, padx=2)
+        ttk.Button(doc_actions, text="🔄 Active PDF", style="Tool3D.TButton", command=self.load_active_pdf).pack(side=tk.LEFT, padx=2)
+        ttk.Button(doc_actions, text="❌ Clear", style="Tool3D.TButton", command=self.clear_pdf).pack(side=tk.LEFT, padx=2)
 
-        # Zoom Controls
-        ttk.Button(toolbar, text="🔍-", style="Tool3D.TButton", width=3, command=self.zoom_out).pack(side=tk.LEFT, padx=1)
-        self.lbl_zoom = tk.Label(toolbar, text=f"{int(self.scale*100)}%", font=get_sys_font(8), bg="#E2E8F0")
-        self.lbl_zoom.pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="🔍+", style="Tool3D.TButton", width=3, command=self.zoom_in).pack(side=tk.LEFT, padx=1)
+        # Right: Save Button & Quick Tools
+        right_actions = tk.Frame(top_bar, bg="#0F172A")
+        right_actions.pack(side=tk.RIGHT)
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+        ttk.Button(right_actions, text="📑 Searchable PDF", style="Tool3D.TButton", command=self.make_document_searchable).pack(side=tk.LEFT, padx=2)
+        ttk.Button(right_actions, text="💾 SAVE PDF (Ctrl+S)", style="Primary3D.TButton", command=self.save_edited_pdf).pack(side=tk.LEFT, padx=4)
 
-        # Mode Selection (Acrobat / PDFelement style)
-        self.btn_view_mode = tk.Button(
-            toolbar, text="👁️ Read / View Mode", font=get_sys_font(8, "bold"),
-            bg="#CBD5E1", fg="#334155", relief=tk.FLAT, padx=6, pady=2,
-            command=lambda: self.set_editor_mode("view")
-        )
-        self.btn_view_mode.pack(side=tk.LEFT, padx=2)
+        # Center: Tool Ribbon (iLovePDF Modes)
+        tool_ribbon = tk.Frame(self, bg="#1E293B", padx=6, pady=4)
+        tool_ribbon.pack(side=tk.TOP, fill=tk.X)
 
-        self.btn_edit_mode = tk.Button(
-            toolbar, text="✏️ Edit Text Mode", font=get_sys_font(8, "bold"),
-            bg="#0284C7", fg="#FFFFFF", relief=tk.RAISED, padx=6, pady=2,
-            command=lambda: self.set_editor_mode("edit")
-        )
-        self.btn_edit_mode.pack(side=tk.LEFT, padx=2)
+        self.tool_buttons = {}
+        tools = [
+            ("select", "↖ Select / Move", "#38BDF8"),
+            ("hand", "✋ Hand / Pan", "#94A3B8"),
+            ("text", "T Add Text", "#34D399"),
+            ("image", "🖼 Image", "#F472B6"),
+            ("draw", "✏️ Draw / Pen", "#A78BFA"),
+            ("rect", "▢ Rectangle", "#FBBF24"),
+            ("circle", "◯ Circle", "#FB923C"),
+            ("line", "╱ Line", "#E879F9"),
+            ("symbols", "★ Symbols", "#FCD34D"),
+            ("forms", "📝 Form Filler", "#60A5FA"),
+            ("true_edit", "✏️ Edit PDF Text", "#4ADE80"),
+            ("ocr", "🔍 OCR Page", "#818CF8")
+        ]
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+        for t_key, t_label, t_color in tools:
+            btn = tk.Button(
+                tool_ribbon, text=t_label, font=get_sys_font(8, "bold"),
+                bg="#334155" if t_key != self.active_tool else "#0284C7",
+                fg="#F8FAFC", activebackground="#0284C7", activeforeground="#FFFFFF",
+                relief=tk.RAISED if t_key == self.active_tool else tk.FLAT,
+                bd=1, padx=6, pady=3,
+                command=lambda k=t_key: self.set_active_tool(k)
+            )
+            btn.pack(side=tk.LEFT, padx=2)
+            self.tool_buttons[t_key] = btn
 
-        # Quick Actions
-        self.btn_add_text = ttk.Button(toolbar, text="➕ Add Text / Tax", style="Tool3D.TButton", command=self.toggle_add_text_mode)
-        self.btn_add_text.pack(side=tk.LEFT, padx=2)
+        # =====================================================================
+        # 2. CONTEXTUAL SUBMENU STYLING RIBBON (Dynamic Formatting Bar)
+        # =====================================================================
+        self.submenu_frame = tk.Frame(self, bg="#F8FAFC", padx=8, pady=4, relief=tk.GROOVE, bd=1)
+        self.submenu_frame.pack(side=tk.TOP, fill=tk.X)
+        self._build_context_submenu()
 
-        self.btn_undo = ttk.Button(toolbar, text="↩️ Undo", style="Tool3D.TButton", command=self.undo, state=tk.DISABLED)
-        self.btn_undo.pack(side=tk.LEFT, padx=2)
-
-        ttk.Button(toolbar, text="🔍 OCR Page", style="Tool3D.TButton", command=self.recognize_ocr).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="📑 Searchable PDF (OCR All)", style="Tool3D.TButton", command=self.make_document_searchable).pack(side=tk.LEFT, padx=2)
-        ttk.Button(toolbar, text="💾 Save / Export PDF", style="Primary3D.TButton", command=self.save_edited_pdf).pack(side=tk.RIGHT, padx=4)
-
-        # ----------------------------------------------------
-        # 2. ADOBE/PDFELEMENT FORMATTING RIBBON (Font, Size, Color)
-        # ----------------------------------------------------
-        self.ribbon = tk.Frame(self, bg="#F8FAFC", padx=10, pady=5, relief=tk.GROOVE, bd=1)
-        self.ribbon.pack(side=tk.TOP, fill=tk.X)
-
-        tk.Label(self.ribbon, text="Formatting:", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 6))
-
-        # Font Family
-        tk.Label(self.ribbon, text="Font:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT)
-        font_families = ["Helvetica", "Arial", "Times-Roman", "Courier", "Calibri", "Segoe UI"]
-        self.combo_font = ttk.Combobox(self.ribbon, textvariable=self.font_family_var, values=font_families, width=12, state="readonly", font=get_sys_font(8))
-        self.combo_font.pack(side=tk.LEFT, padx=(2, 6))
-
-        # Font Size
-        tk.Label(self.ribbon, text="Size:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT)
-        font_sizes = ["6", "7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32", "36", "48"]
-        self.combo_size = ttk.Combobox(self.ribbon, textvariable=self.font_size_var, values=font_sizes, width=4, state="readonly", font=get_sys_font(8))
-        self.combo_size.pack(side=tk.LEFT, padx=(2, 6))
-
-        # Bold & Italic Toggles
-        self.btn_bold = tk.Checkbutton(self.ribbon, text="B", variable=self.bold_var, font=get_sys_font(8, "bold"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD")
-        self.btn_bold.pack(side=tk.LEFT, padx=1)
-        self.btn_italic = tk.Checkbutton(self.ribbon, text="I", variable=self.italic_var, font=get_sys_font(8, "italic"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD")
-        self.btn_italic.pack(side=tk.LEFT, padx=(1, 6))
-
-        # Color Swatches
-        tk.Label(self.ribbon, text="Color:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT)
-        self.swatch_indicator = tk.Label(self.ribbon, text="   ", bg=self.text_color_hex, relief=tk.SOLID, bd=1)
-        self.swatch_indicator.pack(side=tk.LEFT, padx=(2, 4))
-
-        quick_colors = [("#000000", "Black"), ("#4B5563", "Gray"), ("#1D4ED8", "Blue"), ("#DC2626", "Red"), ("#059669", "Green")]
-        for hex_val, col_name in quick_colors:
-            btn_col = tk.Button(self.ribbon, bg=hex_val, width=1, height=1, relief=tk.FLAT, command=lambda c=hex_val: self.set_text_color(c))
-            btn_col.pack(side=tk.LEFT, padx=1)
-
-        ttk.Button(self.ribbon, text="🎨 Custom...", style="Tool3D.TButton", command=self.pick_custom_color).pack(side=tk.LEFT, padx=(4, 8))
-
-        ttk.Separator(self.ribbon, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
-
-        # Direct Ribbon Action Buttons
-        ttk.Button(self.ribbon, text="✓ Apply Edit", style="Primary3D.TButton", command=self.apply_text_edit).pack(side=tk.LEFT, padx=4)
-        ttk.Button(self.ribbon, text="🗑️ Redact / Delete", style="Tool3D.TButton", command=self.delete_selected_block).pack(side=tk.LEFT, padx=4)
-
-        self.lbl_ribbon_status = tk.Label(self.ribbon, text="Edit Mode: Click or double-click any text box to modify.", font=get_sys_font(8, "italic"), fg="#047857", bg="#F8FAFC")
-        self.lbl_ribbon_status.pack(side=tk.RIGHT, padx=6)
-
-        # ----------------------------------------------------
-        # 3. MAIN SPLIT CONTENT: Canvas (Left) + Sidebar (Right)
-        # ----------------------------------------------------
+        # =====================================================================
+        # 3. MAIN SPLIT: Canvas Area (Left) + Docked Inspector (Right)
+        # =====================================================================
         split_f = tk.Frame(self, bg="#CBD5E1")
         split_f.pack(fill=tk.BOTH, expand=True)
 
-        # Left: Interactive Canvas
-        canvas_f = tk.Frame(split_f, bg="#CBD5E1")
-        canvas_f.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        canvas_container = tk.Frame(split_f, bg="#64748B")
+        canvas_container.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.v_scroll = ttk.Scrollbar(canvas_f, orient=tk.VERTICAL)
+        self.v_scroll = ttk.Scrollbar(canvas_container, orient=tk.VERTICAL)
         self.v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.h_scroll = ttk.Scrollbar(canvas_f, orient=tk.HORIZONTAL)
+        self.h_scroll = ttk.Scrollbar(canvas_container, orient=tk.HORIZONTAL)
         self.h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
 
         self.canvas = tk.Canvas(
-            canvas_f, bg="#64748B",
+            canvas_container, bg="#64748B",
             xscrollcommand=self.h_scroll.set,
             yscrollcommand=self.v_scroll.set,
             bd=0, highlightthickness=0
@@ -3421,115 +3405,388 @@ class PdfVirtualEditor(tk.Frame):
         self.v_scroll.config(command=self.canvas.yview)
         self.h_scroll.config(command=self.canvas.xview)
 
+        # Bind Mouse & Keyboard events
         self.canvas.bind("<ButtonPress-1>", self._on_canvas_mouse_down)
         self.canvas.bind("<B1-Motion>", self._on_canvas_mouse_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_mouse_up)
         self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
         self.canvas.bind("<Motion>", self._on_canvas_motion)
         self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
-        self.bind_all("<Escape>", lambda e: self.toggle_add_text_mode() if getattr(self, "add_text_mode", False) else None)
         self.bind_all("<Control-z>", lambda e: self.undo())
+        self.bind_all("<Control-y>", lambda e: self.redo())
         self.bind_all("<Control-s>", lambda e: self.save_edited_pdf())
+        self.bind_all("<Delete>", lambda e: self.delete_selected_element())
+        self.bind_all("<Escape>", lambda e: self.set_active_tool("select"))
 
-        # Right: Docked Text Editing Sidebar
-        sidebar = tk.Frame(split_f, bg="#FFFFFF", width=380, padx=12, pady=10, relief=tk.RAISED, bd=1)
+        # Floating Bottom Viewbar (Centered over canvas like iLovePDF)
+        self._build_floating_viewbar(canvas_container)
+
+        # Right Docked Panel: Elements Manager, TrueEdit & Forms
+        self._build_sidebar(split_f)
+
+    def _build_context_submenu(self):
+        for w in self.submenu_frame.winfo_children():
+            w.destroy()
+
+        t = self.active_tool
+        sel_elem = self._get_selected_element()
+
+        # Tool indicator label
+        tk.Label(self.submenu_frame, text=f"Tool: {t.upper()}", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 8))
+
+        if t in ("text", "select", "true_edit") or (sel_elem and sel_elem.get("type") == "text"):
+            # Typography Formatting
+            tk.Label(self.submenu_frame, text="Font:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT)
+            fonts = ["Helvetica", "Arial", "Times-Roman", "Courier", "Calibri", "Segoe UI", "Georgia", "Verdana", "Impact", "Comic Sans MS"]
+            self.combo_font = ttk.Combobox(self.submenu_frame, textvariable=self.font_family_var, values=fonts, width=12, state="readonly", font=get_sys_font(8))
+            self.combo_font.pack(side=tk.LEFT, padx=2)
+            self.combo_font.bind("<<ComboboxSelected>>", lambda e: self._on_font_changed())
+
+            tk.Label(self.submenu_frame, text="Size:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(4, 0))
+            sizes = ["6", "7", "8", "9", "10", "11", "12", "14", "16", "18", "20", "24", "28", "32", "36", "48", "64", "72"]
+            self.combo_size = ttk.Combobox(self.submenu_frame, textvariable=self.font_size_var, values=sizes, width=4, state="readonly", font=get_sys_font(8))
+            self.combo_size.pack(side=tk.LEFT, padx=2)
+            self.combo_size.bind("<<ComboboxSelected>>", lambda e: self._on_font_changed())
+
+            tk.Checkbutton(self.submenu_frame, text="B", variable=self.bold_var, font=get_sys_font(8, "bold"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD", command=self._on_font_changed).pack(side=tk.LEFT, padx=1)
+            tk.Checkbutton(self.submenu_frame, text="I", variable=self.italic_var, font=get_sys_font(8, "italic"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD", command=self._on_font_changed).pack(side=tk.LEFT, padx=1)
+            tk.Checkbutton(self.submenu_frame, text="U", variable=self.underline_var, font=get_sys_font(8, "underline"), width=2, indicatoron=False, bg="#E2E8F0", selectcolor="#93C5FD", command=self._on_font_changed).pack(side=tk.LEFT, padx=1)
+
+            # Text Color
+            tk.Label(self.submenu_frame, text="Color:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            self.lbl_text_col = tk.Label(self.submenu_frame, text="   ", bg=self.text_color_hex, relief=tk.SOLID, bd=1)
+            self.lbl_text_col.pack(side=tk.LEFT, padx=1)
+            for c in ["#000000", "#4B5563", "#1D4ED8", "#DC2626", "#059669"]:
+                tk.Button(self.submenu_frame, bg=c, width=1, relief=tk.FLAT, command=lambda hex_c=c: self._set_text_color(hex_c)).pack(side=tk.LEFT, padx=1)
+            ttk.Button(self.submenu_frame, text="🎨...", width=3, style="Tool3D.TButton", command=self._pick_text_color).pack(side=tk.LEFT, padx=2)
+
+            # Alignment
+            tk.Label(self.submenu_frame, text="Align:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            ttk.Combobox(self.submenu_frame, textvariable=self.align_var, values=["left", "center", "right"], width=6, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=2)
+
+            # Opacity
+            tk.Label(self.submenu_frame, text="Opacity:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            ttk.Combobox(self.submenu_frame, textvariable=self.opacity_var, values=["100%", "75%", "50%", "25%"], width=5, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=2)
+
+        elif t in ("rect", "circle", "line") or (sel_elem and sel_elem.get("type") in ("rect", "circle", "line")):
+            # Shape Formatting
+            tk.Label(self.submenu_frame, text="Stroke Width:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT)
+            ttk.Combobox(self.submenu_frame, textvariable=self.stroke_width_var, values=["1", "2", "3", "5", "8"], width=3, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=2)
+
+            tk.Label(self.submenu_frame, text="Border Color:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            self.lbl_stroke_col = tk.Label(self.submenu_frame, text="   ", bg=self.stroke_color_hex, relief=tk.SOLID, bd=1)
+            self.lbl_stroke_col.pack(side=tk.LEFT, padx=1)
+            ttk.Button(self.submenu_frame, text="🎨...", width=3, style="Tool3D.TButton", command=self._pick_stroke_color).pack(side=tk.LEFT, padx=2)
+
+            tk.Label(self.submenu_frame, text="Fill Color:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            self.lbl_fill_col = tk.Label(self.submenu_frame, text="   " if self.fill_color_hex else "None", bg=self.fill_color_hex if self.fill_color_hex else "#FFFFFF", relief=tk.SOLID, bd=1)
+            self.lbl_fill_col.pack(side=tk.LEFT, padx=1)
+            ttk.Button(self.submenu_frame, text="Fill...", width=5, style="Tool3D.TButton", command=self._pick_fill_color).pack(side=tk.LEFT, padx=1)
+            ttk.Button(self.submenu_frame, text="Transparent", style="Tool3D.TButton", command=self._clear_fill_color).pack(side=tk.LEFT, padx=1)
+
+            tk.Label(self.submenu_frame, text="Opacity:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            ttk.Combobox(self.submenu_frame, textvariable=self.opacity_var, values=["100%", "75%", "50%", "25%"], width=5, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=2)
+
+        elif t == "draw":
+            # Freehand Pen Options
+            tk.Label(self.submenu_frame, text="Pen Width:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT)
+            ttk.Combobox(self.submenu_frame, textvariable=self.stroke_width_var, values=["1", "2", "3", "5", "8"], width=3, state="readonly", font=get_sys_font(8)).pack(side=tk.LEFT, padx=2)
+
+            tk.Label(self.submenu_frame, text="Pen Color:", font=get_sys_font(8), bg="#F8FAFC").pack(side=tk.LEFT, padx=(6, 2))
+            self.lbl_stroke_col = tk.Label(self.submenu_frame, text="   ", bg=self.stroke_color_hex, relief=tk.SOLID, bd=1)
+            self.lbl_stroke_col.pack(side=tk.LEFT, padx=1)
+            for c in ["#000000", "#DC2626", "#1D4ED8", "#059669", "#7C3AED"]:
+                tk.Button(self.submenu_frame, bg=c, width=1, relief=tk.FLAT, command=lambda hex_c=c: self._set_stroke_color(hex_c)).pack(side=tk.LEFT, padx=1)
+            ttk.Button(self.submenu_frame, text="🎨...", width=3, style="Tool3D.TButton", command=self._pick_stroke_color).pack(side=tk.LEFT, padx=2)
+            ttk.Button(self.submenu_frame, text="🗑️ Clear Page Drawings", style="Tool3D.TButton", command=self.clear_drawings_on_page).pack(side=tk.LEFT, padx=8)
+
+        elif t == "symbols":
+            # Quick Symbols Bar
+            tk.Label(self.submenu_frame, text="Click Symbol to Stamp on PDF:", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(side=tk.LEFT, padx=(0, 4))
+            symbols = [("✔ Check", "✔", "#059669"), ("✖ Cross", "✖", "#DC2626"), ("★ Star", "★", "#F59E0B"), ("❤ Heart", "❤", "#EC4899"), ("➔ Arrow", "➔", "#2563EB")]
+            for s_name, s_char, s_col in symbols:
+                ttk.Button(self.submenu_frame, text=s_name, style="Tool3D.TButton", command=lambda ch=s_char, cl=s_col: self.stamp_symbol_on_center(ch, cl)).pack(side=tk.LEFT, padx=2)
+
+        elif t == "image":
+            ttk.Button(self.submenu_frame, text="📂 Choose Image from PC...", style="Primary3D.TButton", command=self.prompt_insert_image).pack(side=tk.LEFT, padx=4)
+
+        # Status text on the right
+        self.lbl_ribbon_status = tk.Label(self.submenu_frame, text="Ready.", font=get_sys_font(8, "italic"), fg="#047857", bg="#F8FAFC")
+        self.lbl_ribbon_status.pack(side=tk.RIGHT, padx=6)
+
+    def _build_floating_viewbar(self, parent):
+        # Bottom floating viewbar matching iLovePDF
+        self.viewbar = tk.Frame(parent, bg="#1E293B", padx=10, pady=4, relief=tk.RAISED, bd=2)
+        self.viewbar.place(relx=0.5, rely=0.95, anchor=tk.CENTER)
+
+        # Prev / Next
+        ttk.Button(self.viewbar, text="◀", width=3, style="Tool3D.TButton", command=self.prev_page).pack(side=tk.LEFT, padx=2)
+        self.ent_page = ttk.Entry(self.viewbar, width=3, font=get_sys_font(8, "bold"), justify="center")
+        self.ent_page.insert(0, "1")
+        self.ent_page.pack(side=tk.LEFT, padx=1)
+        self.ent_page.bind("<Return>", lambda e: self._jump_to_entered_page())
+        self.lbl_page_total = tk.Label(self.viewbar, text="/ 1", font=get_sys_font(8, "bold"), fg="#F8FAFC", bg="#1E293B")
+        self.lbl_page_total.pack(side=tk.LEFT, padx=(1, 4))
+        ttk.Button(self.viewbar, text="▶", width=3, style="Tool3D.TButton", command=self.next_page).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(self.viewbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+
+        # Zoom
+        ttk.Button(self.viewbar, text="🔍-", width=3, style="Tool3D.TButton", command=self.zoom_out).pack(side=tk.LEFT, padx=1)
+        self.lbl_zoom = tk.Label(self.viewbar, text=f"{int(self.scale*100)}%", font=get_sys_font(8, "bold"), fg="#38BDF8", bg="#1E293B", width=5)
+        self.lbl_zoom.pack(side=tk.LEFT, padx=2)
+        ttk.Button(self.viewbar, text="🔍+", width=3, style="Tool3D.TButton", command=self.zoom_in).pack(side=tk.LEFT, padx=1)
+
+        ttk.Separator(self.viewbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+
+        ttk.Button(self.viewbar, text="⛶ Fit Width", style="Tool3D.TButton", command=self.fit_width).pack(side=tk.LEFT, padx=2)
+        ttk.Button(self.viewbar, text="⊡ Fit Page", style="Tool3D.TButton", command=self.fit_page).pack(side=tk.LEFT, padx=2)
+
+        ttk.Separator(self.viewbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6)
+
+        self.btn_undo = ttk.Button(self.viewbar, text="↩", width=3, style="Tool3D.TButton", command=self.undo, state=tk.DISABLED)
+        self.btn_undo.pack(side=tk.LEFT, padx=1)
+        self.btn_redo = ttk.Button(self.viewbar, text="↪", width=3, style="Tool3D.TButton", command=self.redo, state=tk.DISABLED)
+        self.btn_redo.pack(side=tk.LEFT, padx=1)
+
+    def _build_sidebar(self, parent):
+        sidebar = tk.Frame(parent, bg="#FFFFFF", width=360, padx=8, pady=8, relief=tk.RAISED, bd=1)
         sidebar.pack(side=tk.RIGHT, fill=tk.Y)
         sidebar.pack_propagate(False)
 
-        tk.Label(sidebar, text="Interactive Text Inspector", font=get_sys_font(10, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 2))
-        tk.Label(sidebar, text="Select text blocks on canvas/list to edit, add new text, or save document:", font=get_sys_font(8), fg="#64748B", bg="#FFFFFF", wraplength=350, justify="left").pack(anchor=tk.W, pady=(0, 4))
+        self.side_nb = ttk.Notebook(sidebar)
+        self.side_nb.pack(fill=tk.BOTH, expand=True)
 
-        # Top Action Row in Sidebar
-        sb_act_row = tk.Frame(sidebar, bg="#FFFFFF")
-        sb_act_row.pack(fill=tk.X, pady=(0, 6))
-        self.btn_sb_add_text = ttk.Button(sb_act_row, text="➕ Add Text / Tax", style="Tool3D.TButton", command=self.toggle_add_text_mode)
-        self.btn_sb_add_text.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
-        ttk.Button(sb_act_row, text="💾 SAVE PDF (Ctrl+S)", style="Primary3D.TButton", command=self.save_edited_pdf).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(2, 0))
+        # ----------------------------------------------------
+        # Tab A: Elements & Layers (iLovePDF Style)
+        # ----------------------------------------------------
+        tab_layers = tk.Frame(self.side_nb, bg="#FFFFFF", padx=6, pady=6)
+        self.side_nb.add(tab_layers, text="📑 Layers")
 
-        # Interactive Document & Page Search Bar
-        search_box = tk.Frame(sidebar, bg="#F1F5F9", relief=tk.SOLID, bd=1, padx=6, pady=4)
-        search_box.pack(fill=tk.X, pady=(0, 6))
+        tk.Label(tab_layers, text="Page Elements & Layer Stack", font=get_sys_font(9, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
 
-        s_top = tk.Frame(search_box, bg="#F1F5F9")
+        list_f = tk.Frame(tab_layers, bg="#FFFFFF")
+        list_f.pack(fill=tk.BOTH, expand=True)
+
+        self.tree_elements = ttk.Treeview(list_f, columns=("Type", "Details"), show="headings", height=10)
+        self.tree_elements.heading("Type", text="Type")
+        self.tree_elements.heading("Details", text="Element Details")
+        self.tree_elements.column("Type", width=70)
+        self.tree_elements.column("Details", width=240)
+        el_scroll = ttk.Scrollbar(list_f, orient=tk.VERTICAL, command=self.tree_elements.yview)
+        self.tree_elements.config(yscrollcommand=el_scroll.set)
+        self.tree_elements.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        el_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_elements.bind("<<TreeviewSelect>>", self._on_element_tree_select)
+
+        # Layer controls
+        layer_btn_row = tk.Frame(tab_layers, bg="#FFFFFF")
+        layer_btn_row.pack(fill=tk.X, pady=(6, 2))
+        ttk.Button(layer_btn_row, text="▲ Bring Forward", style="Tool3D.TButton", command=self.bring_element_forward).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(layer_btn_row, text="▼ Send Backward", style="Tool3D.TButton", command=self.send_element_backward).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+
+        layer_btn_row2 = tk.Frame(tab_layers, bg="#FFFFFF")
+        layer_btn_row2.pack(fill=tk.X, pady=(2, 6))
+        ttk.Button(layer_btn_row2, text="📋 Duplicate", style="Tool3D.TButton", command=self.duplicate_selected_element).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(layer_btn_row2, text="🗑️ Delete", style="Tool3D.TButton", command=self.delete_selected_element).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(layer_btn_row2, text="❌ Clear All", style="Tool3D.TButton", command=self.clear_all_page_elements).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+
+        # ----------------------------------------------------
+        # Tab B: TrueEdit & OCR Text Inspector
+        # ----------------------------------------------------
+        tab_true_edit = tk.Frame(self.side_nb, bg="#FFFFFF", padx=6, pady=6)
+        self.side_nb.add(tab_true_edit, text="✏️ TrueEdit")
+
+        # Search Bar
+        search_f = tk.Frame(tab_true_edit, bg="#F1F5F9", relief=tk.SOLID, bd=1, padx=4, pady=4)
+        search_f.pack(fill=tk.X, pady=(0, 6))
+
+        s_top = tk.Frame(search_f, bg="#F1F5F9")
         s_top.pack(fill=tk.X)
-
-        self.ent_ocr_search = ttk.Entry(s_top, textvariable=self.ocr_search_var, font=get_sys_font(8))
-        self.ent_ocr_search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        self.ent_ocr_search.bind("<Return>", lambda e: self.find_next_search_match())
-        self.ent_ocr_search.bind("<KeyRelease>", lambda e: self.on_search_query_changed())
-
+        self.ent_search = ttk.Entry(s_top, textvariable=self.ocr_search_var, font=get_sys_font(8))
+        self.ent_search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        self.ent_search.bind("<Return>", lambda e: self.find_next_search_match())
+        self.ent_search.bind("<KeyRelease>", lambda e: self.on_search_query_changed())
         ttk.Button(s_top, text="◀", width=3, style="Tool3D.TButton", command=self.find_prev_search_match).pack(side=tk.LEFT, padx=1)
         ttk.Button(s_top, text="▶", width=3, style="Tool3D.TButton", command=self.find_next_search_match).pack(side=tk.LEFT, padx=1)
 
-        s_bot = tk.Frame(search_box, bg="#F1F5F9")
+        s_bot = tk.Frame(search_f, bg="#F1F5F9")
         s_bot.pack(fill=tk.X, pady=(2, 0))
-
-        self.lbl_search_count = tk.Label(s_bot, text="🔍 Search text on page / doc...", font=get_sys_font(7, "bold"), fg="#64748B", bg="#F1F5F9")
+        self.lbl_search_count = tk.Label(s_bot, text="🔍 Search PDF text...", font=get_sys_font(7, "bold"), fg="#64748B", bg="#F1F5F9")
         self.lbl_search_count.pack(side=tk.LEFT)
+        tk.Checkbutton(s_bot, text="All Pages", variable=self.search_all_pages_var, font=get_sys_font(7), bg="#F1F5F9", command=self.perform_ocr_search).pack(side=tk.RIGHT)
 
-        tk.Checkbutton(
-            s_bot, text="All Pages", variable=self.search_all_pages_var,
-            font=get_sys_font(7), bg="#F1F5F9", command=self.on_search_scope_toggled
-        ).pack(side=tk.RIGHT)
-
-        # Detected text list
-        list_f = tk.Frame(sidebar, bg="#FFFFFF")
-        list_f.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
-        self.tree_spans = ttk.Treeview(list_f, columns=("Text",), show="headings", height=8)
-        self.tree_spans.heading("Text", text="Detected Text Elements on Page")
-        self.tree_spans.column("Text", width=320)
-        t_scroll = ttk.Scrollbar(list_f, orient=tk.VERTICAL, command=self.tree_spans.yview)
-        self.tree_spans.config(yscrollcommand=t_scroll.set)
+        # Detected text elements tree
+        tree_f = tk.Frame(tab_true_edit, bg="#FFFFFF")
+        tree_f.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        self.tree_spans = ttk.Treeview(tree_f, columns=("Text",), show="headings", height=7)
+        self.tree_spans.heading("Text", text="Detected Document Text Blocks")
+        self.tree_spans.column("Text", width=300)
+        sp_scroll = ttk.Scrollbar(tree_f, orient=tk.VERTICAL, command=self.tree_spans.yview)
+        self.tree_spans.config(yscrollcommand=sp_scroll.set)
         self.tree_spans.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        t_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        sp_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.tree_spans.bind("<<TreeviewSelect>>", self._on_tree_select)
 
         # In-place Edit Form
-        form_card = tk.Frame(sidebar, bg="#F8FAFC", relief=tk.GROOVE, bd=1, padx=8, pady=8)
-        form_card.pack(fill=tk.X, pady=(0, 6))
-
-        tk.Label(form_card, text="Edit Selected Text:", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(anchor=tk.W)
+        form_card = tk.Frame(tab_true_edit, bg="#F8FAFC", relief=tk.GROOVE, bd=1, padx=6, pady=6)
+        form_card.pack(fill=tk.X)
+        tk.Label(form_card, text="Edit Existing Text in PDF:", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(anchor=tk.W)
         self.txt_editor = tk.Text(form_card, height=4, font=get_sys_font(9), bg="#FFFFFF", bd=1, relief=tk.SOLID)
-        self.txt_editor.pack(fill=tk.X, pady=(4, 6))
+        self.txt_editor.pack(fill=tk.X, pady=(2, 4))
         self.txt_editor.bind("<Control-Return>", lambda e: self.apply_text_edit())
 
-        self.lbl_font_info = tk.Label(form_card, text="Font: Auto | Origin: Same", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F8FAFC")
-        self.lbl_font_info.pack(anchor=tk.W, pady=(0, 6))
+        self.lbl_font_info = tk.Label(form_card, text="Select text to edit", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F8FAFC")
+        self.lbl_font_info.pack(anchor=tk.W, pady=(0, 4))
 
-        btn_act_row = tk.Frame(form_card, bg="#F8FAFC")
-        btn_act_row.pack(fill=tk.X)
-        ttk.Button(btn_act_row, text="✓ Apply Edit (Ctrl+Enter)", style="Primary3D.TButton", command=self.apply_text_edit).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
-        ttk.Button(btn_act_row, text="🗑️ Delete Block", style="Tool3D.TButton", command=self.delete_selected_block).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(3, 0))
+        act_r = tk.Frame(form_card, bg="#F8FAFC")
+        act_r.pack(fill=tk.X)
+        ttk.Button(act_r, text="✓ Apply Edit", style="Primary3D.TButton", command=self.apply_text_edit).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        ttk.Button(act_r, text="🗑️ Redact", style="Tool3D.TButton", command=self.delete_selected_block).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(2, 0))
 
-    def _save_undo_state(self):
-        if not self.doc:
-            return
-        try:
-            self.undo_stack.append((self.doc.tobytes(), self.current_page))
-            if len(self.undo_stack) > 12:
-                self.undo_stack.pop(0)
-            if hasattr(self, 'btn_undo'):
-                self.btn_undo.config(state=tk.NORMAL)
-        except Exception as e:
-            logger.debug(f"Could not save undo state: {e}")
+        # ----------------------------------------------------
+        # Tab C: Interactive Form Fields Filler
+        # ----------------------------------------------------
+        tab_forms = tk.Frame(self.side_nb, bg="#FFFFFF", padx=6, pady=6)
+        self.side_nb.add(tab_forms, text="📝 Form Fields")
 
-    def undo(self):
-        if not self.undo_stack:
-            messagebox.showinfo("Undo", "Nothing to undo.")
-            return
-        try:
-            pdf_bytes, page_num = self.undo_stack.pop()
-            self.doc = fitz.open("pdf", pdf_bytes)
-            self.current_page = min(page_num, max(0, len(self.doc) - 1))
+        tk.Label(tab_forms, text="Interactive PDF Form Fields", font=get_sys_font(9, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+
+        form_tree_f = tk.Frame(tab_forms, bg="#FFFFFF")
+        form_tree_f.pack(fill=tk.BOTH, expand=True, pady=(0, 6))
+        self.tree_forms = ttk.Treeview(form_tree_f, columns=("Name", "Value"), show="headings", height=8)
+        self.tree_forms.heading("Name", text="Field Name")
+        self.tree_forms.heading("Value", text="Field Value")
+        self.tree_forms.column("Name", width=120)
+        self.tree_forms.column("Value", width=180)
+        fm_scroll = ttk.Scrollbar(form_tree_f, orient=tk.VERTICAL, command=self.tree_forms.yview)
+        self.tree_forms.config(yscrollcommand=fm_scroll.set)
+        self.tree_forms.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        fm_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.tree_forms.bind("<<TreeviewSelect>>", self._on_form_tree_select)
+
+        ff_edit_card = tk.Frame(tab_forms, bg="#F8FAFC", relief=tk.GROOVE, bd=1, padx=6, pady=6)
+        ff_edit_card.pack(fill=tk.X)
+        tk.Label(ff_edit_card, text="Field Value:", font=get_sys_font(8, "bold"), fg="#1E3A8A", bg="#F8FAFC").pack(anchor=tk.W)
+        self.ent_form_val = ttk.Entry(ff_edit_card, font=get_sys_font(9))
+        self.ent_form_val.pack(fill=tk.X, pady=(2, 6))
+        self.ent_form_val.bind("<Return>", lambda e: self.apply_form_value())
+
+        fm_btn_row = tk.Frame(ff_edit_card, bg="#F8FAFC")
+        fm_btn_row.pack(fill=tk.X)
+        ttk.Button(fm_btn_row, text="✓ Set Value", style="Primary3D.TButton", command=self.apply_form_value).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+        ttk.Button(fm_btn_row, text="☑ Toggle Box", style="Tool3D.TButton", command=self.toggle_form_checkbox).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=1)
+
+    # =====================================================================
+    # TOOL SELECTION & SUBMENU UPDATES
+    # =====================================================================
+    def set_active_tool(self, tool_name):
+        self.active_tool = tool_name
+        for k, btn in self.tool_buttons.items():
+            if k == tool_name:
+                btn.config(bg="#0284C7", relief=tk.RAISED)
+            else:
+                btn.config(bg="#334155", relief=tk.FLAT)
+
+        # Set canvas cursor
+        if tool_name == "hand":
+            self.canvas.config(cursor="fleur")
+        elif tool_name in ("text", "draw", "rect", "circle", "line"):
+            self.canvas.config(cursor="crosshair")
+        else:
+            self.canvas.config(cursor="arrow")
+
+        # Switch notebook tab
+        if tool_name == "true_edit":
+            self.side_nb.select(1)
+        elif tool_name == "forms":
+            self.side_nb.select(2)
+        else:
+            self.side_nb.select(0)
+
+        self._build_context_submenu()
+        self.render_page()
+
+    def _get_selected_element(self):
+        elems = self.page_elements.get(self.current_page, [])
+        if self.selected_elem_idx is not None and 0 <= self.selected_elem_idx < len(elems):
+            return elems[self.selected_elem_idx]
+        return None
+
+    def _on_font_changed(self):
+        sel = self._get_selected_element()
+        if sel and sel.get("type") == "text":
+            self._save_undo_state()
+            sel["font"] = self.font_family_var.get()
+            try:
+                sel["size"] = float(self.font_size_var.get())
+            except ValueError:
+                pass
+            sel["bold"] = self.bold_var.get()
+            sel["italic"] = self.italic_var.get()
+            sel["underline"] = self.underline_var.get()
             self.render_page()
-            self.scan_and_detect_text()
-            self.selected_span_idx = None
-            self.txt_editor.delete("1.0", tk.END)
-            self.lbl_ribbon_status.config(text="↩️ Edit undone successfully.", fg="#1E40AF")
-            if not self.undo_stack and hasattr(self, 'btn_undo'):
-                self.btn_undo.config(state=tk.DISABLED)
-        except Exception as e:
-            messagebox.showerror("Undo Error", f"Failed to undo: {e}")
+
+    def _set_text_color(self, hex_val):
+        self.text_color_hex = hex_val
+        if hasattr(self, "lbl_text_col"):
+            self.lbl_text_col.config(bg=hex_val)
+        sel = self._get_selected_element()
+        if sel and sel.get("type") == "text":
+            self._save_undo_state()
+            sel["color"] = hex_val
+            self.render_page()
+
+    def _pick_text_color(self):
+        c = colorchooser.askcolor(initialcolor=self.text_color_hex, title="Select Text Color")
+        if c and c[1]:
+            self._set_text_color(c[1])
+
+    def _set_stroke_color(self, hex_val):
+        self.stroke_color_hex = hex_val
+        if hasattr(self, "lbl_stroke_col"):
+            self.lbl_stroke_col.config(bg=hex_val)
+        sel = self._get_selected_element()
+        if sel:
+            self._save_undo_state()
+            sel["stroke_color"] = hex_val
+            self.render_page()
+
+    def _pick_stroke_color(self):
+        c = colorchooser.askcolor(initialcolor=self.stroke_color_hex, title="Select Border / Stroke Color")
+        if c and c[1]:
+            self._set_stroke_color(c[1])
+
+    def _pick_fill_color(self):
+        init = self.fill_color_hex if self.fill_color_hex else "#FFFFFF"
+        c = colorchooser.askcolor(initialcolor=init, title="Select Fill Color")
+        if c and c[1]:
+            self.fill_color_hex = c[1]
+            if hasattr(self, "lbl_fill_col"):
+                self.lbl_fill_col.config(text="   ", bg=c[1])
+            sel = self._get_selected_element()
+            if sel:
+                self._save_undo_state()
+                sel["fill_color"] = c[1]
+                self.render_page()
+
+    def _clear_fill_color(self):
+        self.fill_color_hex = ""
+        if hasattr(self, "lbl_fill_col"):
+            self.lbl_fill_col.config(text="None", bg="#FFFFFF")
+        sel = self._get_selected_element()
+        if sel:
+            self._save_undo_state()
+            sel["fill_color"] = ""
+            self.render_page()
+
+    # =====================================================================
+    # DOCUMENT LOADING & RENDERING
+    # =====================================================================
+    def open_pdf(self):
+        f = filedialog.askopenfilename(title="Open PDF for OCR & Editing", filetypes=[("PDF Documents", "*.pdf")])
+        if f:
+            self.load_pdf(f)
 
     def load_active_pdf(self):
         pdf_path = None
@@ -3541,100 +3798,56 @@ class PdfVirtualEditor(tk.Frame):
 
         if pdf_path and os.path.exists(pdf_path):
             self.load_pdf(pdf_path)
-            self.lbl_ribbon_status.config(text=f"✓ Loaded active PDF: {os.path.basename(pdf_path)}", fg="#047857")
+            self.lbl_ribbon_status.config(text=f"Loaded active PDF: {os.path.basename(pdf_path)}", fg="#047857")
         else:
-            messagebox.showinfo("Open PDF", "No active PDF is currently loaded in Tab 1. Please click 'Open PDF' to select a document.")
-
-    def set_editor_mode(self, mode):
-        self.editor_mode = mode
-        self.add_text_mode = False
-        self.canvas.config(cursor="arrow")
-        if mode == "view":
-            self.btn_view_mode.config(bg="#0284C7", fg="#FFFFFF", relief=tk.RAISED)
-            self.btn_edit_mode.config(bg="#CBD5E1", fg="#334155", relief=tk.FLAT)
-            self.lbl_ribbon_status.config(text="View Mode: Viewing PDF without interactive edit frames.", fg="#475569")
-            self.canvas.delete("span_box")
-            self.canvas.delete("active_box")
-            self.canvas.delete("active_handle")
-        else:
-            self.btn_view_mode.config(bg="#CBD5E1", fg="#334155", relief=tk.FLAT)
-            self.btn_edit_mode.config(bg="#0284C7", fg="#FFFFFF", relief=tk.RAISED)
-            self.lbl_ribbon_status.config(text="Edit Mode: Click any text box to edit with handles.", fg="#047857")
-            self._draw_span_overlays()
-
-    def toggle_add_text_mode(self):
-        if not self.doc:
-            messagebox.showwarning("Warning", "Please open a PDF document first.")
-            return
-        self.add_text_mode = not self.add_text_mode
-        if self.add_text_mode:
-            self.set_editor_mode("edit")
-            self.canvas.config(cursor="crosshair")
-            self.btn_add_text.config(text="✖ Cancel Add")
-            if hasattr(self, "btn_sb_add_text"):
-                self.btn_sb_add_text.config(text="✖ Cancel Add")
-            self.lbl_ribbon_status.config(
-                text="✏️ Draw Text Area: Click and drag on the PDF page to select text area (or click once to place).",
-                fg="#D97706"
-            )
-        else:
-            self.canvas.config(cursor="arrow")
-            self.btn_add_text.config(text="➕ Add Text / Tax")
-            if hasattr(self, "btn_sb_add_text"):
-                self.btn_sb_add_text.config(text="➕ Add Text / Tax")
-            self.canvas.delete("add_area_rect")
-            self.canvas.delete("add_area_label")
-            self.canvas.delete("selected_add_area")
-            self.add_area_rect = None
-            self.add_area_label = None
-            self.is_dragging_text_area = False
-            self.lbl_ribbon_status.config(text="Edit Mode: Click any text box to edit with handles.", fg="#047857")
-
-    def zoom_in(self):
-        self.scale = min(3.0, self.scale + 0.25)
-        self.lbl_zoom.config(text=f"{int(self.scale*100)}%")
-        self.render_page()
-        if self.editor_mode == "edit":
-            self._draw_span_overlays()
-
-    def zoom_out(self):
-        self.scale = max(0.6, self.scale - 0.25)
-        self.lbl_zoom.config(text=f"{int(self.scale*100)}%")
-        self.render_page()
-        if self.editor_mode == "edit":
-            self._draw_span_overlays()
-
-    def set_text_color(self, hex_val):
-        self.text_color_hex = hex_val
-        self.swatch_indicator.config(bg=hex_val)
-
-    def pick_custom_color(self):
-        col = colorchooser.askcolor(initialcolor=self.text_color_hex, title="Select Text Color")
-        if col and col[1]:
-            self.set_text_color(col[1])
-
-    def open_pdf(self):
-        f = filedialog.askopenfilename(title="Open PDF for OCR & Editing", filetypes=[("PDF Documents", "*.pdf")])
-        if f:
-            self.load_pdf(f)
+            messagebox.showinfo("Open PDF", "No active PDF is currently loaded in Tab 1.")
 
     def load_pdf(self, path):
         try:
             self.doc = fitz.open(path)
             self.pdf_path = path
             self.current_page = 0
+            self.page_elements.clear()
+            self.selected_elem_idx = None
             self.undo_stack.clear()
-            if hasattr(self, 'btn_undo'):
+            self.redo_stack.clear()
+            if hasattr(self, "btn_undo"):
                 self.btn_undo.config(state=tk.DISABLED)
+            if hasattr(self, "btn_redo"):
+                self.btn_redo.config(state=tk.DISABLED)
             self.render_page()
             self.scan_and_detect_text()
+            self.scan_and_detect_forms()
+            self.lbl_ribbon_status.config(text=f"Opened: {os.path.basename(path)} ({len(self.doc)} pages)", fg="#047857")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load PDF: {e}")
+
+    def clear_pdf(self):
+        self.doc = None
+        self.pdf_path = None
+        self.current_page = 0
+        self.page_elements.clear()
+        self.spans.clear()
+        self.form_widgets.clear()
+        self.selected_elem_idx = None
+        self.selected_span_idx = None
+        self.canvas.delete("all")
+        if hasattr(self, "ent_page"):
+            self.ent_page.delete(0, tk.END)
+            self.ent_page.insert(0, "0")
+            self.lbl_page_total.config(text="/ 0")
+        self._refresh_elements_tree()
+        self.lbl_ribbon_status.config(text="Document closed.", fg="#64748B")
 
     def render_page(self):
         if not self.doc or len(self.doc) == 0:
             return
-        self.lbl_page.config(text=f"Page: {self.current_page + 1} / {len(self.doc)}")
+        total = len(self.doc)
+        if hasattr(self, "ent_page"):
+            self.ent_page.delete(0, tk.END)
+            self.ent_page.insert(0, str(self.current_page + 1))
+            self.lbl_page_total.config(text=f"/ {total}")
+
         try:
             page = self.doc[self.current_page]
             mat = fitz.Matrix(self.scale, self.scale)
@@ -3644,9 +3857,668 @@ class PdfVirtualEditor(tk.Frame):
             self.canvas.delete("all")
             self.canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_img)
             self.canvas.config(scrollregion=(0, 0, pix.width, pix.height))
-        except Exception as e:
-            logger.error(f"Render editor page error: {e}")
 
+            # Draw added elements on top
+            self._draw_page_elements()
+
+            # Draw TrueEdit spans overlay if in true_edit mode
+            if self.active_tool == "true_edit":
+                self._draw_span_overlays()
+
+            # Draw Form fields overlay if in forms mode
+            if self.active_tool == "forms":
+                self._draw_form_overlays()
+
+            # Draw active selection handle frame
+            self._draw_active_selection_handles()
+        except Exception as e:
+            logger.error(f"Render page error: {e}")
+
+    def _draw_page_elements(self):
+        elems = self.page_elements.get(self.current_page, [])
+        for idx, el in enumerate(elems):
+            el_type = el.get("type")
+            r = el.get("rect")
+            if not r:
+                continue
+
+            cx0 = r.x0 * self.scale
+            cy0 = r.y0 * self.scale
+            cx1 = r.x1 * self.scale
+            cy1 = r.y1 * self.scale
+
+            tag = f"elem_{idx}"
+
+            if el_type == "text":
+                txt = el.get("text", "")
+                font_fam = el.get("font", "Helvetica")
+                font_sz = max(6, int(el.get("size", 12) * self.scale))
+                weight = "bold" if el.get("bold") else "normal"
+                slant = "italic" if el.get("italic") else "roman"
+                f_obj = tkfont.Font(family=font_fam, size=font_sz, weight=weight, slant=slant)
+
+                # Draw background if specified
+                bg_c = el.get("bg_color")
+                if bg_c:
+                    self.canvas.create_rectangle(cx0, cy0, cx1, cy1, fill=bg_c, outline="", tags=("page_elem", tag))
+
+                align = el.get("align", "left")
+                anchor = tk.NW if align == "left" else (tk.N if align == "center" else tk.NE)
+                text_x = cx0 if align == "left" else ((cx0 + cx1) / 2.0 if align == "center" else cx1)
+
+                self.canvas.create_text(
+                    text_x, cy0 + 2, text=txt, font=f_obj, fill=el.get("color", "#000000"),
+                    anchor=anchor, width=max(10, cx1 - cx0), tags=("page_elem", tag)
+                )
+
+                if el.get("underline"):
+                    self.canvas.create_line(cx0, cy0 + font_sz + 4, cx1, cy0 + font_sz + 4, fill=el.get("color", "#000000"), width=1.5, tags=("page_elem", tag))
+
+            elif el_type == "rect":
+                st_c = el.get("stroke_color", "#000000")
+                fl_c = el.get("fill_color", "")
+                w = max(1, int(float(el.get("stroke_width", 2))))
+                self.canvas.create_rectangle(
+                    cx0, cy0, cx1, cy1, outline=st_c, fill=fl_c if fl_c else "", width=w, tags=("page_elem", tag)
+                )
+
+            elif el_type == "circle":
+                st_c = el.get("stroke_color", "#000000")
+                fl_c = el.get("fill_color", "")
+                w = max(1, int(float(el.get("stroke_width", 2))))
+                self.canvas.create_oval(
+                    cx0, cy0, cx1, cy1, outline=st_c, fill=fl_c if fl_c else "", width=w, tags=("page_elem", tag)
+                )
+
+            elif el_type == "line":
+                st_c = el.get("stroke_color", "#000000")
+                w = max(1, int(float(el.get("stroke_width", 2))))
+                arrow_opt = tk.LAST if el.get("arrow") else None
+                self.canvas.create_line(
+                    cx0, cy0, cx1, cy1, fill=st_c, width=w, arrow=arrow_opt, tags=("page_elem", tag)
+                )
+
+            elif el_type == "image":
+                pil_im = el.get("pil_image")
+                if pil_im:
+                    iw = max(10, int((cx1 - cx0)))
+                    ih = max(10, int((cy1 - cy0)))
+                    resized = pil_im.resize((iw, ih), Image.Resampling.LANCZOS)
+                    tk_im = ImageTk.PhotoImage(resized)
+                    el["_cached_tk"] = tk_im
+                    self.canvas.create_image(cx0, cy0, anchor=tk.NW, image=tk_im, tags=("page_elem", tag))
+
+            elif el_type == "draw":
+                pts = el.get("points", [])
+                st_c = el.get("stroke_color", "#000000")
+                w = max(1, int(float(el.get("stroke_width", 2))))
+                if len(pts) >= 2:
+                    canvas_pts = []
+                    for px, py in pts:
+                        canvas_pts.extend([px * self.scale, py * self.scale])
+                    self.canvas.create_line(canvas_pts, fill=st_c, width=w, capstyle=tk.ROUND, joinstyle=tk.ROUND, smooth=True, tags=("page_elem", tag))
+
+    def _draw_active_selection_handles(self):
+        sel = self._get_selected_element()
+        if not sel:
+            return
+        r = sel.get("rect")
+        if not r:
+            return
+
+        cx0 = r.x0 * self.scale
+        cy0 = r.y0 * self.scale
+        cx1 = r.x1 * self.scale
+        cy1 = r.y1 * self.scale
+
+        # Selection rectangle
+        self.canvas.create_rectangle(
+            cx0 - 2, cy0 - 2, cx1 + 2, cy1 + 2,
+            outline="#0284C7", width=2, dash=(3, 3), tags=("active_handles",)
+        )
+
+        # 8 Grab Handles
+        hs = 4.0
+        mid_x = (cx0 + cx1) / 2.0
+        mid_y = (cy0 + cy1) / 2.0
+        handles = [
+            ("tl", cx0, cy0), ("t", mid_x, cy0), ("tr", cx1, cy0),
+            ("r", cx1, mid_y), ("br", cx1, cy1), ("b", mid_x, cy1),
+            ("bl", cx0, cy1), ("l", cx0, mid_y)
+        ]
+        for h_name, hx, hy in handles:
+            self.canvas.create_rectangle(
+                hx - hs, hy - hs, hx + hs, hy + hs,
+                fill="#FFFFFF", outline="#0284C7", width=1.5,
+                tags=("active_handles", f"handle_{h_name}")
+            )
+
+    # =====================================================================
+    # CANVAS MOUSE INTERACTIONS & TOOL HANDLERS
+    # =====================================================================
+    def _on_canvas_mouse_down(self, event):
+        if not self.doc:
+            return
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        self.drag_start_canvas = (cx, cy)
+        pdf_x = cx / self.scale
+        pdf_y = cy / self.scale
+
+        # Hand / Pan tool
+        if self.active_tool == "hand":
+            self.drag_mode = "pan"
+            self.canvas.scan_mark(event.x, event.y)
+            return
+
+        # Freehand Draw tool
+        if self.active_tool == "draw":
+            self.drag_mode = "draw"
+            self.current_drawing_points = [(pdf_x, pdf_y)]
+            return
+
+        # Shapes & Text Rubber-band drag
+        if self.active_tool in ("rect", "circle", "line", "text"):
+            self.drag_mode = "rubber_shape"
+            self.rubber_shape_id = self.canvas.create_rectangle(cx, cy, cx, cy, outline="#0284C7", width=2, dash=(3, 3))
+            self.rubber_shape_label = self.canvas.create_text(cx + 5, cy - 12, text="Drag area...", fill="#0284C7", font=get_sys_font(8, "bold"), anchor="w")
+            return
+
+        # TrueEdit tool click
+        if self.active_tool == "true_edit":
+            for idx, s in enumerate(self.spans):
+                bbox = s.get("bbox", (0, 0, 0, 0))
+                if bbox[0] <= pdf_x <= bbox[2] and bbox[1] <= pdf_y <= bbox[3]:
+                    self.tree_spans.selection_set(str(idx))
+                    self.tree_spans.see(str(idx))
+                    self._select_span(idx)
+                    return
+            return
+
+        # Forms tool click
+        if self.active_tool == "forms":
+            for idx, w in enumerate(self.form_widgets):
+                r = w.rect
+                if r.x0 <= pdf_x <= r.x1 and r.y0 <= pdf_y <= r.y1:
+                    self.tree_forms.selection_set(str(idx))
+                    self.tree_forms.see(str(idx))
+                    self._select_form_widget(idx)
+                    return
+            return
+
+        # Select / Transform tool: Check handles first, then elements
+        if self.active_tool == "select":
+            sel = self._get_selected_element()
+            if sel and sel.get("rect"):
+                r = sel["rect"]
+                cx0, cy0, cx1, cy1 = r.x0 * self.scale, r.y0 * self.scale, r.x1 * self.scale, r.y1 * self.scale
+                hs = 6.0
+                # Check 8 handles
+                if abs(cx - cx0) <= hs and abs(cy - cy0) <= hs:
+                    self.drag_mode = "resize_tl"; self.drag_orig_rect = fitz.Rect(r); return
+                if abs(cx - cx1) <= hs and abs(cy - cy0) <= hs:
+                    self.drag_mode = "resize_tr"; self.drag_orig_rect = fitz.Rect(r); return
+                if abs(cx - cx0) <= hs and abs(cy - cy1) <= hs:
+                    self.drag_mode = "resize_bl"; self.drag_orig_rect = fitz.Rect(r); return
+                if abs(cx - cx1) <= hs and abs(cy - cy1) <= hs:
+                    self.drag_mode = "resize_br"; self.drag_orig_rect = fitz.Rect(r); return
+                # Inside bounding box = move
+                if cx0 <= cx <= cx1 and cy0 <= cy <= cy1:
+                    self.drag_mode = "move"; self.drag_orig_rect = fitz.Rect(r); return
+
+            # Clicked outside active handles: Find clicked element
+            elems = self.page_elements.get(self.current_page, [])
+            clicked_idx = None
+            for idx in reversed(range(len(elems))):
+                r = elems[idx].get("rect")
+                if r and r.x0 <= pdf_x <= r.x1 and r.y0 <= pdf_y <= r.y1:
+                    clicked_idx = idx
+                    break
+
+            if clicked_idx is not None:
+                self.selected_elem_idx = clicked_idx
+                self.drag_mode = "move"
+                self.drag_orig_rect = fitz.Rect(elems[clicked_idx]["rect"])
+                self._sync_element_properties_to_ribbon(elems[clicked_idx])
+                self._select_tree_element(clicked_idx)
+            else:
+                self.selected_elem_idx = None
+
+            self.render_page()
+
+    def _on_canvas_mouse_drag(self, event):
+        if not self.doc:
+            return
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        pdf_x = cx / self.scale
+        pdf_y = cy / self.scale
+
+        if self.drag_mode == "pan":
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
+            return
+
+        if self.drag_mode == "draw":
+            self.current_drawing_points.append((pdf_x, pdf_y))
+            if len(self.current_drawing_points) >= 2:
+                p1 = self.current_drawing_points[-2]
+                p2 = self.current_drawing_points[-1]
+                w = max(1, int(float(self.stroke_width_var.get())))
+                self.canvas.create_line(p1[0]*self.scale, p1[1]*self.scale, p2[0]*self.scale, p2[1]*self.scale, fill=self.stroke_color_hex, width=w, capstyle=tk.ROUND, smooth=True)
+            return
+
+        if self.drag_mode == "rubber_shape" and self.rubber_shape_id:
+            sx, sy = self.drag_start_canvas
+            self.canvas.coords(self.rubber_shape_id, sx, sy, cx, cy)
+            x1, x2 = sorted([sx, cx]); y1, y2 = sorted([sy, cy])
+            pt_w = int((x2 - x1) / self.scale); pt_h = int((y2 - y1) / self.scale)
+            if self.rubber_shape_label:
+                self.canvas.coords(self.rubber_shape_label, x1 + 5, max(15.0, y1 - 12.0))
+                self.canvas.itemconfig(self.rubber_shape_label, text=f"Area: {pt_w} x {pt_h} pt")
+            return
+
+        sel = self._get_selected_element()
+        if not sel or not self.drag_orig_rect:
+            return
+
+        dx = (cx - self.drag_start_canvas[0]) / self.scale
+        dy = (cy - self.drag_start_canvas[1]) / self.scale
+        orig = self.drag_orig_rect
+
+        if self.drag_mode == "move":
+            sel["rect"] = fitz.Rect(orig.x0 + dx, orig.y0 + dy, orig.x1 + dx, orig.y1 + dy)
+            self.render_page()
+        elif self.drag_mode == "resize_br":
+            sel["rect"] = fitz.Rect(orig.x0, orig.y0, max(orig.x0 + 15, orig.x1 + dx), max(orig.y0 + 15, orig.y1 + dy))
+            self.render_page()
+        elif self.drag_mode == "resize_tl":
+            sel["rect"] = fitz.Rect(min(orig.x1 - 15, orig.x0 + dx), min(orig.y1 - 15, orig.y0 + dy), orig.x1, orig.y1)
+            self.render_page()
+        elif self.drag_mode == "resize_tr":
+            sel["rect"] = fitz.Rect(orig.x0, min(orig.y1 - 15, orig.y0 + dy), max(orig.x0 + 15, orig.x1 + dx), orig.y1)
+            self.render_page()
+        elif self.drag_mode == "resize_bl":
+            sel["rect"] = fitz.Rect(min(orig.x1 - 15, orig.x0 + dx), orig.y0, orig.x1, max(orig.y0 + 15, orig.y1 + dy))
+            self.render_page()
+
+    def _on_canvas_mouse_up(self, event):
+        if not self.doc:
+            return
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        pdf_x = cx / self.scale
+        pdf_y = cy / self.scale
+
+        if self.drag_mode == "pan":
+            self.drag_mode = None
+            return
+
+        if self.drag_mode == "draw":
+            self.drag_mode = None
+            if len(self.current_drawing_points) >= 2:
+                self._save_undo_state()
+                xs = [p[0] for p in self.current_drawing_points]
+                ys = [p[1] for p in self.current_drawing_points]
+                bounding = fitz.Rect(min(xs) - 2, min(ys) - 2, max(xs) + 2, max(ys) + 2)
+                elem = {
+                    "id": str(uuid.uuid4())[:8],
+                    "type": "draw",
+                    "rect": bounding,
+                    "points": list(self.current_drawing_points),
+                    "stroke_color": self.stroke_color_hex,
+                    "stroke_width": float(self.stroke_width_var.get())
+                }
+                self.page_elements.setdefault(self.current_page, []).append(elem)
+                self._refresh_elements_tree()
+                self.current_drawing_points = []
+                self.render_page()
+            return
+
+        if self.drag_mode == "rubber_shape":
+            self.drag_mode = None
+            if self.rubber_shape_id:
+                self.canvas.delete(self.rubber_shape_id)
+                self.rubber_shape_id = None
+            if self.rubber_shape_label:
+                self.canvas.delete(self.rubber_shape_label)
+                self.rubber_shape_label = None
+
+            sx, sy = self.drag_start_canvas
+            x1, x2 = sorted([sx / self.scale, pdf_x])
+            y1, y2 = sorted([sy / self.scale, pdf_y])
+            w = x2 - x1
+            h = y2 - y1
+
+            if self.active_tool == "text":
+                if w < 20 or h < 15:
+                    target_rect = fitz.Rect(x1, y1, x1 + 180, y1 + 35)
+                else:
+                    target_rect = fitz.Rect(x1, y1, x2, y2)
+                self._prompt_and_add_text_in_rect(target_rect)
+            elif self.active_tool in ("rect", "circle", "line"):
+                if w >= 8 and h >= 8:
+                    self._save_undo_state()
+                    target_rect = fitz.Rect(x1, y1, x2, y2)
+                    elem = {
+                        "id": str(uuid.uuid4())[:8],
+                        "type": self.active_tool,
+                        "rect": target_rect,
+                        "stroke_color": self.stroke_color_hex,
+                        "stroke_width": float(self.stroke_width_var.get()),
+                        "fill_color": self.fill_color_hex
+                    }
+                    self.page_elements.setdefault(self.current_page, []).append(elem)
+                    self.selected_elem_idx = len(self.page_elements[self.current_page]) - 1
+                    self._refresh_elements_tree()
+                    self.render_page()
+                    self.set_active_tool("select")
+            return
+
+        if self.drag_mode in ("move", "resize_tl", "resize_tr", "resize_bl", "resize_br"):
+            self.drag_mode = None
+            self._save_undo_state()
+            self.render_page()
+
+    def _on_canvas_double_click(self, event):
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        pdf_x = cx / self.scale
+        pdf_y = cy / self.scale
+
+        if self.active_tool == "true_edit":
+            for idx, s in enumerate(self.spans):
+                bbox = s.get("bbox", (0, 0, 0, 0))
+                if bbox[0] <= pdf_x <= bbox[2] and bbox[1] <= pdf_y <= bbox[3]:
+                    self._select_span(idx)
+                    self.txt_editor.focus_set()
+                    self.txt_editor.tag_add(tk.SEL, "1.0", tk.END)
+                    return
+
+        sel = self._get_selected_element()
+        if sel and sel.get("type") == "text":
+            self._prompt_edit_text_element(sel)
+
+    def _on_canvas_motion(self, event):
+        if not self.doc or self.active_tool not in ("select", "true_edit"):
+            return
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        pdf_x = cx / self.scale
+        pdf_y = cy / self.scale
+
+        if self.active_tool == "true_edit":
+            hovered = None
+            for idx, s in enumerate(self.spans):
+                bbox = s.get("bbox", (0, 0, 0, 0))
+                if bbox[0] <= pdf_x <= bbox[2] and bbox[1] <= pdf_y <= bbox[3]:
+                    hovered = idx
+                    break
+            if hovered != self.hover_span_idx:
+                self.hover_span_idx = hovered
+                self.canvas.delete("hover_span")
+                if hovered is not None and hovered != self.selected_span_idx:
+                    bbox = self.spans[hovered].get("bbox", (0, 0, 0, 0))
+                    self.canvas.create_rectangle(
+                        bbox[0]*self.scale-1, bbox[1]*self.scale-1, bbox[2]*self.scale+1, bbox[3]*self.scale+1,
+                        outline="#38BDF8", width=1.5, tags=("hover_span",)
+                    )
+
+    # =====================================================================
+    # TEXT & ELEMENT CREATION
+    # =====================================================================
+    def _prompt_and_add_text_in_rect(self, target_rect):
+        try:
+            cur_sz = float(self.font_size_var.get())
+        except ValueError:
+            cur_sz = 12.0
+
+        dlg = AddTextDialog(
+            self,
+            initial_text="",
+            target_rect=target_rect,
+            default_font=self.font_family_var.get(),
+            default_size=cur_sz,
+            default_color=self.text_color_hex,
+            bold=self.bold_var.get(),
+            italic=self.italic_var.get()
+        )
+        self.wait_window(dlg.dialog)
+
+        if not dlg.result:
+            return
+
+        self._save_undo_state()
+        new_text = dlg.result["text"]
+        elem = {
+            "id": str(uuid.uuid4())[:8],
+            "type": "text",
+            "rect": target_rect,
+            "text": new_text,
+            "font": dlg.result["font"],
+            "size": dlg.result["size"],
+            "color": dlg.result["color"],
+            "bold": dlg.result["bold"],
+            "italic": dlg.result["italic"],
+            "underline": self.underline_var.get(),
+            "align": self.align_var.get()
+        }
+        self.page_elements.setdefault(self.current_page, []).append(elem)
+        self.selected_elem_idx = len(self.page_elements[self.current_page]) - 1
+        self._refresh_elements_tree()
+        self.render_page()
+        self.set_active_tool("select")
+        self.lbl_ribbon_status.config(text=f"Added text: '{new_text[:30]}'", fg="#047857")
+
+    def _prompt_edit_text_element(self, sel):
+        dlg = AddTextDialog(
+            self,
+            initial_text=sel.get("text", ""),
+            target_rect=sel.get("rect"),
+            default_font=sel.get("font", "Helvetica"),
+            default_size=sel.get("size", 12),
+            default_color=sel.get("color", "#000000"),
+            bold=sel.get("bold", False),
+            italic=sel.get("italic", False)
+        )
+        self.wait_window(dlg.dialog)
+        if not dlg.result:
+            return
+
+        self._save_undo_state()
+        sel["text"] = dlg.result["text"]
+        sel["font"] = dlg.result["font"]
+        sel["size"] = dlg.result["size"]
+        sel["color"] = dlg.result["color"]
+        sel["bold"] = dlg.result["bold"]
+        sel["italic"] = dlg.result["italic"]
+        self._refresh_elements_tree()
+        self.render_page()
+
+    def prompt_insert_image(self):
+        f = filedialog.askopenfilename(
+            title="Select Image to Insert on PDF",
+            filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp")]
+        )
+        if not f:
+            return
+        try:
+            im = Image.open(f)
+            page = self.doc[self.current_page]
+            max_w = min(250.0, page.rect.width * 0.4)
+            aspect = im.height / float(im.width) if im.width > 0 else 1.0
+            max_h = max_w * aspect
+            cx = (page.rect.width - max_w) / 2.0
+            cy = (page.rect.height - max_h) / 2.0
+            target_rect = fitz.Rect(cx, cy, cx + max_w, cy + max_h)
+
+            with open(f, "rb") as img_f:
+                b = img_f.read()
+
+            self._save_undo_state()
+            elem = {
+                "id": str(uuid.uuid4())[:8],
+                "type": "image",
+                "rect": target_rect,
+                "pil_image": im.copy(),
+                "bytes": b
+            }
+            self.page_elements.setdefault(self.current_page, []).append(elem)
+            self.selected_elem_idx = len(self.page_elements[self.current_page]) - 1
+            self._refresh_elements_tree()
+            self.render_page()
+            self.set_active_tool("select")
+            self.lbl_ribbon_status.config(text=f"Inserted image: {os.path.basename(f)}", fg="#047857")
+        except Exception as e:
+            messagebox.showerror("Image Error", f"Failed to insert image: {e}")
+
+    def stamp_symbol_on_center(self, symbol_char, color_hex):
+        if not self.doc:
+            return
+        page = self.doc[self.current_page]
+        cx = page.rect.width / 2.0 - 25.0
+        cy = page.rect.height / 2.0 - 25.0
+        target_rect = fitz.Rect(cx, cy, cx + 50.0, cy + 50.0)
+
+        self._save_undo_state()
+        elem = {
+            "id": str(uuid.uuid4())[:8],
+            "type": "text",
+            "rect": target_rect,
+            "text": symbol_char,
+            "font": "Helvetica",
+            "size": 32.0,
+            "color": color_hex,
+            "bold": True,
+            "italic": False,
+            "align": "center"
+        }
+        self.page_elements.setdefault(self.current_page, []).append(elem)
+        self.selected_elem_idx = len(self.page_elements[self.current_page]) - 1
+        self._refresh_elements_tree()
+        self.render_page()
+        self.set_active_tool("select")
+
+    # =====================================================================
+    # LAYERS & ELEMENTS MANAGEMENT
+    # =====================================================================
+    def _refresh_elements_tree(self):
+        for item in self.tree_elements.get_children():
+            self.tree_elements.delete(item)
+        elems = self.page_elements.get(self.current_page, [])
+        for idx, el in enumerate(elems):
+            t = el.get("type", "unknown").capitalize()
+            det = el.get("text", "")[:30] if t.lower() == "text" else f"{int(el['rect'].width)}x{int(el['rect'].height)} pt"
+            self.tree_elements.insert("", tk.END, iid=str(idx), values=(t, det))
+
+    def _on_element_tree_select(self, event):
+        sel = self.tree_elements.selection()
+        if sel:
+            idx = int(sel[0])
+            elems = self.page_elements.get(self.current_page, [])
+            if 0 <= idx < len(elems):
+                self.selected_elem_idx = idx
+                self._sync_element_properties_to_ribbon(elems[idx])
+                self.render_page()
+
+    def _select_tree_element(self, idx):
+        try:
+            self.tree_elements.selection_set(str(idx))
+            self.tree_elements.see(str(idx))
+        except Exception:
+            pass
+
+    def _sync_element_properties_to_ribbon(self, el):
+        t = el.get("type")
+        if t == "text":
+            self.font_family_var.set(el.get("font", "Helvetica"))
+            self.font_size_var.set(str(int(el.get("size", 12))))
+            self.bold_var.set(el.get("bold", False))
+            self.italic_var.set(el.get("italic", False))
+            self.underline_var.set(el.get("underline", False))
+            self._set_text_color(el.get("color", "#000000"))
+        elif t in ("rect", "circle", "line"):
+            self.stroke_width_var.set(str(int(el.get("stroke_width", 2))))
+            self._set_stroke_color(el.get("stroke_color", "#000000"))
+            fl = el.get("fill_color", "")
+            if fl:
+                self.fill_color_hex = fl
+                if hasattr(self, "lbl_fill_col"):
+                    self.lbl_fill_col.config(text="   ", bg=fl)
+            else:
+                self._clear_fill_color()
+
+    def bring_element_forward(self):
+        elems = self.page_elements.get(self.current_page, [])
+        if self.selected_elem_idx is not None and self.selected_elem_idx < len(elems) - 1:
+            self._save_undo_state()
+            idx = self.selected_elem_idx
+            elems[idx], elems[idx + 1] = elems[idx + 1], elems[idx]
+            self.selected_elem_idx = idx + 1
+            self._refresh_elements_tree()
+            self._select_tree_element(self.selected_elem_idx)
+            self.render_page()
+
+    def send_element_backward(self):
+        elems = self.page_elements.get(self.current_page, [])
+        if self.selected_elem_idx is not None and self.selected_elem_idx > 0:
+            self._save_undo_state()
+            idx = self.selected_elem_idx
+            elems[idx], elems[idx - 1] = elems[idx - 1], elems[idx]
+            self.selected_elem_idx = idx - 1
+            self._refresh_elements_tree()
+            self._select_tree_element(self.selected_elem_idx)
+            self.render_page()
+
+    def duplicate_selected_element(self):
+        sel = self._get_selected_element()
+        if not sel:
+            return
+        self._save_undo_state()
+        new_el = dict(sel)
+        new_el["id"] = str(uuid.uuid4())[:8]
+        r = sel["rect"]
+        new_el["rect"] = fitz.Rect(r.x0 + 15, r.y0 + 15, r.x1 + 15, r.y1 + 15)
+        self.page_elements.setdefault(self.current_page, []).append(new_el)
+        self.selected_elem_idx = len(self.page_elements[self.current_page]) - 1
+        self._refresh_elements_tree()
+        self._select_tree_element(self.selected_elem_idx)
+        self.render_page()
+
+    def delete_selected_element(self):
+        elems = self.page_elements.get(self.current_page, [])
+        if self.selected_elem_idx is not None and 0 <= self.selected_elem_idx < len(elems):
+            self._save_undo_state()
+            elems.pop(self.selected_elem_idx)
+            self.selected_elem_idx = None
+            self._refresh_elements_tree()
+            self.render_page()
+            self.lbl_ribbon_status.config(text="Element deleted.", fg="#64748B")
+
+    def clear_all_page_elements(self):
+        if not self.page_elements.get(self.current_page):
+            return
+        if messagebox.askyesno("Clear All Elements", "Remove all added elements and drawings on this page?"):
+            self._save_undo_state()
+            self.page_elements[self.current_page] = []
+            self.selected_elem_idx = None
+            self._refresh_elements_tree()
+            self.render_page()
+
+    def clear_drawings_on_page(self):
+        elems = self.page_elements.get(self.current_page, [])
+        draws = [e for e in elems if e.get("type") == "draw"]
+        if not draws:
+            return
+        self._save_undo_state()
+        self.page_elements[self.current_page] = [e for e in elems if e.get("type") != "draw"]
+        self.selected_elem_idx = None
+        self._refresh_elements_tree()
+        self.render_page()
+        self.lbl_ribbon_status.config(text="Page freehand drawings cleared.", fg="#64748B")
+
+    # =====================================================================
+    # TRUEEDIT & TEXT DETECTION (INLINE MODIFICATION & REDACTION)
+    # =====================================================================
     def scan_and_detect_text(self):
         if not self.doc or len(self.doc) == 0:
             return
@@ -3655,7 +4527,6 @@ class PdfVirtualEditor(tk.Frame):
         for item in self.tree_spans.get_children():
             self.tree_spans.delete(item)
 
-        # Pre-render page pixmap ONCE for fast background color sampling
         try:
             cached_pix = page.get_pixmap(dpi=100)
             page_rect = page.rect
@@ -3663,11 +4534,10 @@ class PdfVirtualEditor(tk.Frame):
             cached_pix = None
             page_rect = None
 
-        # 1. Extract vector text blocks and spans with exact bounding boxes
         text_dict = page.get_text("dict")
         raw_spans = []
         for b in text_dict.get("blocks", []):
-            if b.get("type") == 0:  # Text block
+            if b.get("type") == 0:
                 for l in b.get("lines", []):
                     for s in l.get("spans", []):
                         txt = s.get("text", "").strip()
@@ -3675,7 +4545,6 @@ class PdfVirtualEditor(tk.Frame):
                             s["bg_rgb"] = get_bbox_bg_color(cached_pix if cached_pix else page, s.get("bbox", (0, 0, 0, 0)), page_rect)
                             raw_spans.append(s)
 
-        # 2. Deep-learning multilingual OCR fallback for scanned/image pages
         if not raw_spans:
             raw_spans = self._extract_ocr_page_text(page)
 
@@ -3683,33 +4552,211 @@ class PdfVirtualEditor(tk.Frame):
         for idx, s in enumerate(self.spans):
             self.tree_spans.insert("", tk.END, iid=str(idx), values=(s.get("text", "")[:45],))
 
-        if self.editor_mode == "edit":
+        if self.active_tool == "true_edit":
             self._draw_span_overlays()
 
+    def _draw_span_overlays(self):
+        self.canvas.delete("span_box")
+        for idx, s in enumerate(self.spans):
+            bbox = s.get("bbox", (0, 0, 0, 0))
+            self.canvas.create_rectangle(
+                bbox[0] * self.scale, bbox[1] * self.scale,
+                bbox[2] * self.scale, bbox[3] * self.scale,
+                outline="#93C5FD", width=1, dash=(2, 2), tags=("span_box",)
+            )
+
+    def _on_tree_select(self, event):
+        sel = self.tree_spans.selection()
+        if sel:
+            self._select_span(int(sel[0]))
+
+    def _select_span(self, idx):
+        if idx < 0 or idx >= len(self.spans):
+            return
+        self.selected_span_idx = idx
+        s = self.spans[idx]
+        self.txt_editor.delete("1.0", tk.END)
+        self.txt_editor.insert(tk.END, s.get("text", ""))
+
+        orig_font = s.get("font", "Helvetica")
+        fam_lower = orig_font.lower()
+        if "times" in fam_lower or "serif" in fam_lower:
+            self.font_family_var.set("Times-Roman")
+        elif "courier" in fam_lower or "mono" in fam_lower:
+            self.font_family_var.set("Courier")
+        elif "arial" in fam_lower:
+            self.font_family_var.set("Arial")
+        elif "calibri" in fam_lower:
+            self.font_family_var.set("Calibri")
+        else:
+            self.font_family_var.set("Helvetica")
+
+        self.font_size_var.set(str(round(float(s.get("size", 10.0)))))
+        self.lbl_font_info.config(text=f"Font: {orig_font} ({s.get('size', 10):.1f}pt)")
+
+        bbox = s.get("bbox", (0, 0, 0, 0))
+        self.canvas.delete("active_span")
+        self.canvas.create_rectangle(
+            bbox[0]*self.scale-2, bbox[1]*self.scale-2, bbox[2]*self.scale+2, bbox[3]*self.scale+2,
+            outline="#2563EB", width=2, tags=("active_span",)
+        )
+
+    def apply_text_edit(self):
+        if not self.doc or self.selected_span_idx is None:
+            messagebox.showwarning("Warning", "Please select a text block from the list or canvas first.")
+            return
+
+        new_text = self.txt_editor.get("1.0", tk.END).strip()
+        s = self.spans[self.selected_span_idx]
+        page = self.doc[self.current_page]
+        bbox = fitz.Rect(s["bbox"])
+
+        try:
+            self._save_undo_state()
+            bg_rgb = s.get("bg_rgb") or get_bbox_bg_color(page, bbox)
+            page.add_redact_annot(bbox, fill=bg_rgb)
+            page.apply_redactions()
+
+            try:
+                f_size = float(self.font_size_var.get())
+            except ValueError:
+                f_size = float(s.get("size", 10.0))
+
+            hex_c = self.text_color_hex.lstrip("#")
+            col_rgb = (int(hex_c[0:2], 16)/255.0, int(hex_c[2:4], 16)/255.0, int(hex_c[4:6], 16)/255.0) if len(hex_c) == 6 else (0.0, 0.0, 0.0)
+            origin = s.get("origin", (bbox.x0, bbox.y1 - 2))
+
+            safe_insert_pdf_text(
+                page,
+                fitz.Point(origin[0], origin[1]),
+                new_text,
+                font_family=self.font_family_var.get(),
+                fontsize=f_size,
+                color=col_rgb,
+                bold=self.bold_var.get(),
+                italic=self.italic_var.get(),
+                underline=self.underline_var.get()
+            )
+
+            self.render_page()
+            self.scan_and_detect_text()
+            self.lbl_ribbon_status.config(text="✓ Edit applied cleanly to PDF!", fg="#047857")
+        except Exception as e:
+            messagebox.showerror("Edit Error", f"Failed to apply text edit: {e}")
+
+    def delete_selected_block(self):
+        if not self.doc or self.selected_span_idx is None:
+            messagebox.showwarning("Warning", "Please select a text block to redact/delete.")
+            return
+
+        self._save_undo_state()
+        s = self.spans[self.selected_span_idx]
+        page = self.doc[self.current_page]
+        bbox = fitz.Rect(s["bbox"])
+
+        try:
+            bg_rgb = s.get("bg_rgb") or get_bbox_bg_color(page, bbox)
+            page.add_redact_annot(bbox, fill=bg_rgb)
+            page.apply_redactions()
+            self.selected_span_idx = None
+            self.txt_editor.delete("1.0", tk.END)
+            self.render_page()
+            self.scan_and_detect_text()
+            self.lbl_ribbon_status.config(text="✓ Text redacted and removed.", fg="#047857")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to redact block: {e}")
+
+    # =====================================================================
+    # INTERACTIVE FORMS FILLER
+    # =====================================================================
+    def scan_and_detect_forms(self):
+        if not self.doc or len(self.doc) == 0:
+            return
+        page = self.doc[self.current_page]
+        self.form_widgets.clear()
+        for item in self.tree_forms.get_children():
+            self.tree_forms.delete(item)
+
+        try:
+            for w in page.widgets():
+                self.form_widgets.append(w)
+                self.tree_forms.insert("", tk.END, iid=str(len(self.form_widgets) - 1), values=(w.field_name or "Field", str(w.field_value or "")))
+        except Exception as e:
+            logger.debug(f"Form widgets scan error: {e}")
+
+    def _draw_form_overlays(self):
+        self.canvas.delete("form_box")
+        for idx, w in enumerate(self.form_widgets):
+            r = w.rect
+            self.canvas.create_rectangle(
+                r.x0 * self.scale, r.y0 * self.scale,
+                r.x1 * self.scale, r.y1 * self.scale,
+                outline="#3B82F6", fill="#EFF6FF", stipple="gray25", width=1.5, tags=("form_box",)
+            )
+
+    def _on_form_tree_select(self, event):
+        sel = self.tree_forms.selection()
+        if sel:
+            self._select_form_widget(int(sel[0]))
+
+    def _select_form_widget(self, idx):
+        if 0 <= idx < len(self.form_widgets):
+            self.selected_widget_idx = idx
+            w = self.form_widgets[idx]
+            self.ent_form_val.delete(0, tk.END)
+            self.ent_form_val.insert(0, str(w.field_value or ""))
+
+            r = w.rect
+            self.canvas.delete("active_form")
+            self.canvas.create_rectangle(
+                r.x0 * self.scale - 2, r.y0 * self.scale - 2,
+                r.x1 * self.scale + 2, r.y1 * self.scale + 2,
+                outline="#1D4ED8", width=2.5, tags=("active_form",)
+            )
+
+    def apply_form_value(self):
+        if not self.doc or self.selected_widget_idx is None:
+            return
+        w = self.form_widgets[self.selected_widget_idx]
+        val = self.ent_form_val.get()
+        try:
+            self._save_undo_state()
+            w.field_value = val
+            w.update()
+            self.scan_and_detect_forms()
+            self.render_page()
+            self.lbl_ribbon_status.config(text=f"Form field '{w.field_name}' updated.", fg="#047857")
+        except Exception as e:
+            messagebox.showerror("Form Error", f"Failed to set field value: {e}")
+
+    def toggle_form_checkbox(self):
+        if not self.doc or self.selected_widget_idx is None:
+            return
+        w = self.form_widgets[self.selected_widget_idx]
+        try:
+            self._save_undo_state()
+            w.field_value = not bool(w.field_value)
+            w.update()
+            self.scan_and_detect_forms()
+            self.render_page()
+            self.lbl_ribbon_status.config(text=f"Checkbox '{w.field_name}' toggled.", fg="#047857")
+        except Exception as e:
+            messagebox.showerror("Form Error", f"Failed to toggle checkbox: {e}")
+
+    # =====================================================================
+    # MULTILINGUAL OCR & SEARCHABLE PDF
+    # =====================================================================
     def _extract_ocr_page_text(self, page):
-        """
-        Multilingual OCR extraction using RapidOCR on rendered page pixmap.
-        Detects exact text blocks, word positions, and bounding coordinates from images.
-        """
         res = []
         ocr = get_rapid_ocr_engine()
         if not ocr:
             try:
-                blocks = page.get_text("blocks")
-                for b in blocks:
+                for b in page.get_text("blocks"):
                     t = b[4].strip()
                     if t:
-                        res.append({
-                            "text": t,
-                            "bbox": b[:4],
-                            "origin": (b[0], b[3] - 2),
-                            "font": "Helvetica",
-                            "size": 10.0,
-                            "color": 0,
-                            "bg_rgb": get_bbox_bg_color(page, b[:4])
-                        })
-            except Exception as e:
-                logger.warning(f"Fallback scan text error: {e}")
+                        res.append({"text": t, "bbox": b[:4], "origin": (b[0], b[3] - 2), "font": "Helvetica", "size": 10.0, "color": 0, "bg_rgb": get_bbox_bg_color(page, b[:4])})
+            except Exception:
+                pass
             return res
 
         try:
@@ -3736,153 +4783,67 @@ class PdfVirtualEditor(tk.Frame):
                 y0 = min(p[1] for p in box) * sy
                 x1 = max(p[0] for p in box) * sx
                 y1 = max(p[1] for p in box) * sy
-                h = max(y1 - y0, 6.0)
-                f_size = max(7.0, round(h * 0.72))
+                f_size = max(7.0, round(max(y1 - y0, 6.0) * 0.72))
                 origin = (x0, y1 - 2)
 
                 bg_rgb = get_bbox_bg_color(pix, (x0, y0, x1, y1), page.rect)
                 txt_col = sample_text_color_int(pix, box, bg_rgb)
 
-                res.append({
-                    "text": text,
-                    "bbox": (x0, y0, x1, y1),
-                    "origin": origin,
-                    "font": "Helvetica",
-                    "size": float(f_size),
-                    "color": txt_col,
-                    "bg_rgb": bg_rgb,
-                    "is_ocr": True
-                })
+                res.append({"text": text, "bbox": (x0, y0, x1, y1), "origin": origin, "font": "Helvetica", "size": float(f_size), "color": txt_col, "bg_rgb": bg_rgb, "is_ocr": True})
         except Exception as e:
-            logger.error(f"RapidOCR page text extraction error: {e}")
+            logger.error(f"RapidOCR extraction error: {e}")
         return res
 
-    def recognize_ocr(self):
-        if not self.doc:
-            messagebox.showwarning("Warning", "Please open a PDF document first.")
-            return
-        page = self.doc[self.current_page]
-        self.lbl_ribbon_status.config(text="⏳ Performing multilingual OCR on active page...", fg="#D97706")
-        self.update_idletasks()
-        ocr_spans = self._extract_ocr_page_text(page)
-        if ocr_spans:
-            self.spans = ocr_spans
-            for item in self.tree_spans.get_children():
-                self.tree_spans.delete(item)
-            for idx, s in enumerate(self.spans):
-                self.tree_spans.insert("", tk.END, iid=str(idx), values=(s.get("text", "")[:45],))
-            if self.editor_mode == "edit":
-                self._draw_span_overlays()
-            count = len(self.spans)
-            self.lbl_ribbon_status.config(text=f"✓ OCR recognized {count} text blocks on Page {self.current_page + 1}.", fg="#047857")
-            messagebox.showinfo(
-                "OCR Complete",
-                f"✓ High-level multilingual OCR successfully recognized {count} text blocks on Page {self.current_page + 1}.\n\n"
-                "You can now click directly on any text block on the canvas to edit, format, or redact!"
-            )
-        else:
-            self.scan_and_detect_text()
-            count = len(self.spans)
-            self.lbl_ribbon_status.config(text=f"Recognized {count} text elements on Page {self.current_page + 1}.", fg="#047857")
-            messagebox.showinfo("OCR Complete", f"Recognized {count} text elements on Page {self.current_page + 1}.")
-
     def make_document_searchable(self):
-        """
-        Embeds an invisible searchable text layer (render_mode=3) across all pages of the PDF.
-        The visual appearance of the document is 100% preserved, while making it fully searchable
-        and copy-pasteable in Adobe Acrobat, Chrome, and any PDF viewer.
-        """
         if not self.doc:
             messagebox.showwarning("Warning", "Please open a PDF document first.")
             return
-
         ocr = get_rapid_ocr_engine()
         if not ocr:
-            messagebox.showerror("OCR Error", "RapidOCR engine is not available. Please ensure rapidocr_onnxruntime is installed.")
+            messagebox.showerror("OCR Error", "RapidOCR engine is not available.")
             return
 
-        total_pages = len(self.doc)
-        if not messagebox.askyesno(
-            "Searchable PDF OCR",
-            "This will run high-accuracy OCR on all pages and embed an invisible searchable text layer.\n\nProceed?"
-        ):
-            return
-
-        out_p = filedialog.asksaveasfilename(
-            title="Save Searchable PDF As",
-            defaultextension=".pdf",
-            filetypes=[("PDF Documents", "*.pdf")]
-        )
+        out_p = filedialog.asksaveasfilename(title="Save Searchable PDF As", defaultextension=".pdf", filetypes=[("PDF Documents", "*.pdf")])
         if not out_p:
             return
 
         self._save_undo_state()
-        self.lbl_ribbon_status.config(text="⏳ Performing multilingual OCR on document... Please wait.", fg="#D97706")
+        self.lbl_ribbon_status.config(text="⏳ Creating Searchable PDF... Please wait.", fg="#D97706")
         self.update_idletasks()
 
-        def ocr_worker():
+        def worker():
             try:
                 import numpy as np
-                added_words = 0
-                for p_idx in range(total_pages):
-                    page = self.doc[p_idx]
-                    existing_text = page.get_text().strip()
-                    # Only skip if the page already has rich searchable text layer (> 800 chars)
-                    if len(existing_text) > 800:
+                added = 0
+                for page in self.doc:
+                    if len(page.get_text().strip()) > 800:
                         continue
-
                     pix = page.get_pixmap(dpi=150)
                     np_img = np.frombuffer(pix.samples, dtype=np.uint8).reshape((pix.height, pix.width, 3))
-                    ocr_results, _ = ocr(np_img)
-                    if not ocr_results:
+                    ocr_res, _ = ocr(np_img)
+                    if not ocr_res:
                         continue
-
-                    sx = page.rect.width / pix.width
-                    sy = page.rect.height / pix.height
-
-                    for item in ocr_results:
-                        box = item[0]
-                        txt = str(item[1]).strip()
-                        if not txt:
+                    sx, sy = page.rect.width / pix.width, page.rect.height / pix.height
+                    for item in ocr_res:
+                        box, txt = item[0], str(item[1]).strip()
+                        if not txt or (len(item) > 2 and float(item[2]) < 0.25):
                             continue
-                        score = float(item[2]) if len(item) > 2 else 1.0
-                        if score < 0.25:
-                            continue
-
                         x0 = min(p[0] for p in box) * sx
-                        y0 = min(p[1] for p in box) * sy
-                        x1 = max(p[0] for p in box) * sx
                         y1 = max(p[1] for p in box) * sy
-                        f_size = max(6.0, (y1 - y0) * 0.75)
-
-                        # Insert invisible searchable text at exact coordinates
-                        try:
-                            safe_insert_pdf_text(page, fitz.Point(x0, y1 - 2), txt, fontsize=f_size, font_family="Helvetica", render_mode=3)
-                            added_words += 1
-                        except Exception:
-                            pass
+                        safe_insert_pdf_text(page, fitz.Point(x0, y1 - 2), txt, fontsize=10.0, font_family="Helvetica", render_mode=3)
+                        added += 1
 
                 self.doc.save(out_p, garbage=3, deflate=True)
-                self.after(0, lambda: (
-                    self.lbl_ribbon_status.config(text=f"✓ Searchable PDF created successfully ({added_words} text blocks embedded)!", fg="#047857"),
-                    messagebox.showinfo(
-                        "Searchable PDF Complete",
-                        f"✓ Successfully generated Searchable PDF!\n\nSaved to: {out_p}\n"
-                        f"Embedded {added_words} searchable text blocks across {total_pages} page(s)."
-                    )
-                ))
+                self.after(0, lambda: messagebox.showinfo("Complete", f"Searchable PDF saved to:\n{out_p}\n\nEmbedded {added} searchable text items."))
             except Exception as e:
-                err_msg = str(e)
-                self.after(0, lambda: (
-                    self.lbl_ribbon_status.config(text="❌ OCR conversion failed.", fg="#DC2626"),
-                    messagebox.showerror("OCR Error", f"Failed to generate searchable PDF: {err_msg}")
-                ))
+                err = str(e)
+                self.after(0, lambda: messagebox.showerror("OCR Error", f"Failed: {err}"))
 
-        threading.Thread(target=ocr_worker, daemon=True).start()
+        threading.Thread(target=worker, daemon=True).start()
 
-    def on_search_scope_toggled(self):
-        self.perform_ocr_search()
-
+    # =====================================================================
+    # SEARCH & OCR TEXT INSPECTOR
+    # =====================================================================
     def on_search_query_changed(self):
         self.perform_ocr_search()
 
@@ -3894,52 +4855,43 @@ class PdfVirtualEditor(tk.Frame):
         self.active_search_match_idx = -1
 
         if not query or not self.doc:
-            self.lbl_search_count.config(text="🔍 Search text on page / doc...", fg="#64748B")
+            self.lbl_search_count.config(text="🔍 Search PDF text...", fg="#64748B")
             return
 
         if not self.search_all_pages_var.get():
-            # Search Active Page
             for idx, s in enumerate(self.spans):
-                txt = s.get("text", "").lower()
-                if query in txt:
+                if query in s.get("text", "").lower():
                     self.search_matches.append(idx)
-
             count = len(self.search_matches)
             if count == 0:
-                self.lbl_search_count.config(text="0 matches on active page", fg="#DC2626")
+                self.lbl_search_count.config(text="0 matches on page", fg="#DC2626")
             else:
-                self.lbl_search_count.config(text=f"{count} match(es) on page", fg="#047857")
-                self._draw_search_highlights()
+                self.lbl_search_count.config(text=f"{count} match(es)", fg="#047857")
                 self.active_search_match_idx = 0
-                self._highlight_active_search_match()
+                self._draw_search_highlights()
         else:
-            # Search All Pages
-            all_matches = []
+            all_m = []
             for p_idx in range(len(self.doc)):
                 p = self.doc[p_idx]
-                blocks = p.get_text("blocks")
-                for b_idx, b in enumerate(blocks):
-                    txt = b[4].strip().lower()
-                    if query in txt:
-                        all_matches.append((p_idx, b[:4], b[4].strip()))
-
-            self.search_matches = all_matches
+                for b in p.get_text("blocks"):
+                    if query in b[4].strip().lower():
+                        all_m.append((p_idx, b[:4], b[4].strip()))
+            self.search_matches = all_m
             count = len(self.search_matches)
-            if count == 0:
-                self.lbl_search_count.config(text="0 matches across document", fg="#DC2626")
-            else:
-                self.lbl_search_count.config(text=f"{count} matches across {len(self.doc)} pages", fg="#047857")
+            self.lbl_search_count.config(text=f"{count} doc matches" if count > 0 else "0 matches", fg="#047857" if count > 0 else "#DC2626")
+            if count > 0:
                 self.active_search_match_idx = 0
                 self._highlight_active_search_match()
 
     def _draw_search_highlights(self):
         self.canvas.delete("search_match")
-        if not self.search_all_pages_var.get():
-            for m_idx in self.search_matches:
-                if 0 <= m_idx < len(self.spans):
-                    bbox = self.spans[m_idx].get("bbox", (0, 0, 0, 0))
-                    x0, y0, x1, y1 = bbox[0] * self.scale, bbox[1] * self.scale, bbox[2] * self.scale, bbox[3] * self.scale
-                    self.canvas.create_rectangle(x0 - 2, y0 - 2, x1 + 2, y1 + 2, fill="#FEF08A", stipple="gray25", outline="#EAB308", width=1.5, tags=("search_match",))
+        for m_idx in self.search_matches:
+            if 0 <= m_idx < len(self.spans):
+                bbox = self.spans[m_idx].get("bbox", (0, 0, 0, 0))
+                self.canvas.create_rectangle(
+                    bbox[0]*self.scale-2, bbox[1]*self.scale-2, bbox[2]*self.scale+2, bbox[3]*self.scale+2,
+                    fill="#FEF08A", stipple="gray25", outline="#EAB308", width=1.5, tags=("search_match",)
+                )
 
     def find_next_search_match(self):
         if not self.search_matches:
@@ -3956,595 +4908,284 @@ class PdfVirtualEditor(tk.Frame):
         self._highlight_active_search_match()
 
     def _highlight_active_search_match(self):
-        if self.active_search_match_idx < 0 or self.active_search_match_idx >= len(self.search_matches):
+        if not self.search_matches or self.active_search_match_idx < 0:
             return
-
         self.canvas.delete("active_search_match")
 
         if not self.search_all_pages_var.get():
-            span_idx = self.search_matches[self.active_search_match_idx]
-            if 0 <= span_idx < len(self.spans):
-                s = self.spans[span_idx]
-                bbox = s.get("bbox", (0, 0, 0, 0))
-                x0, y0, x1, y1 = bbox[0] * self.scale, bbox[1] * self.scale, bbox[2] * self.scale, bbox[3] * self.scale
-                self.canvas.create_rectangle(x0 - 3, y0 - 3, x1 + 3, y1 + 3, outline="#EA580C", width=2.5, tags=("active_search_match",))
-
-                # Scroll canvas to active match
-                try:
-                    c_h = max(1.0, float(self.canvas.cget("scrollregion").split()[3]))
-                    self.canvas.yview_moveto(max(0.0, (y0 - 50) / c_h))
-                except Exception:
-                    pass
-
-                # Select in tree
-                try:
-                    self.tree_spans.selection_set(str(span_idx))
-                    self.tree_spans.see(str(span_idx))
-                    self._select_span(span_idx)
-                except Exception:
-                    pass
-
+            s_idx = self.search_matches[self.active_search_match_idx]
+            if 0 <= s_idx < len(self.spans):
+                bbox = self.spans[s_idx].get("bbox", (0, 0, 0, 0))
+                self.canvas.create_rectangle(
+                    bbox[0]*self.scale-3, bbox[1]*self.scale-3, bbox[2]*self.scale+3, bbox[3]*self.scale+3,
+                    outline="#EA580C", width=2.5, tags=("active_search_match",)
+                )
                 self.lbl_search_count.config(text=f"Match {self.active_search_match_idx + 1} of {len(self.search_matches)}", fg="#EA580C")
         else:
-            # Multi-page match
-            item = self.search_matches[self.active_search_match_idx]
-            target_page, bbox, txt = item
-            if target_page != self.current_page:
-                self.current_page = target_page
+            p_idx, bbox, txt = self.search_matches[self.active_search_match_idx]
+            if p_idx != self.current_page:
+                self.current_page = p_idx
                 self.render_page()
                 self.scan_and_detect_text()
-
-            x0, y0, x1, y1 = bbox[0] * self.scale, bbox[1] * self.scale, bbox[2] * self.scale, bbox[3] * self.scale
-            self.canvas.create_rectangle(x0 - 3, y0 - 3, x1 + 3, y1 + 3, outline="#EA580C", width=2.5, tags=("active_search_match",))
-            try:
-                c_h = max(1.0, float(self.canvas.cget("scrollregion").split()[3]))
-                self.canvas.yview_moveto(max(0.0, (y0 - 50) / c_h))
-            except Exception:
-                pass
-            self.lbl_search_count.config(text=f"Match {self.active_search_match_idx + 1} of {len(self.search_matches)} (Page {target_page + 1})", fg="#EA580C")
-
-    def _draw_span_overlays(self):
-        self.canvas.delete("span_box")
-        if self.editor_mode != "edit":
-            return
-        for idx, s in enumerate(self.spans):
-            bbox = s.get("bbox", (0, 0, 0, 0))
-            c_x1 = bbox[0] * self.scale
-            c_y1 = bbox[1] * self.scale
-            c_x2 = bbox[2] * self.scale
-            c_y2 = bbox[3] * self.scale
-
-            tag = f"span_{idx}"
             self.canvas.create_rectangle(
-                c_x1, c_y1, c_x2, c_y2,
-                outline="#93C5FD", width=1, dash=(2, 2),
-                tags=("span_box", tag)
+                bbox[0]*self.scale-3, bbox[1]*self.scale-3, bbox[2]*self.scale+3, bbox[3]*self.scale+3,
+                outline="#EA580C", width=2.5, tags=("active_search_match",)
             )
-
-        # Restore active search highlights
-        if self.search_matches and not self.search_all_pages_var.get():
-            self._draw_search_highlights()
-            if 0 <= self.active_search_match_idx < len(self.search_matches):
-                s_idx = self.search_matches[self.active_search_match_idx]
-                if 0 <= s_idx < len(self.spans):
-                    bb = self.spans[s_idx].get("bbox", (0, 0, 0, 0))
-                    self.canvas.create_rectangle(bb[0]*self.scale-3, bb[1]*self.scale-3, bb[2]*self.scale+3, bb[3]*self.scale+3, outline="#EA580C", width=2.5, tags=("active_search_match",))
-
-    def _on_canvas_motion(self, event):
-        if self.editor_mode != "edit" or self.add_text_mode:
-            return
-        cur_x = self.canvas.canvasx(event.x) / self.scale
-        cur_y = self.canvas.canvasy(event.y) / self.scale
-
-        hovered = None
-        for idx, s in enumerate(self.spans):
-            bbox = s.get("bbox", (0, 0, 0, 0))
-            if bbox[0] <= cur_x <= bbox[2] and bbox[1] <= cur_y <= bbox[3]:
-                hovered = idx
-                break
-
-        if hovered != self.hover_span_idx:
-            self.hover_span_idx = hovered
-            self.canvas.delete("hover_box")
-            if hovered is not None and hovered != self.selected_span_idx:
-                bbox = self.spans[hovered].get("bbox", (0, 0, 0, 0))
-                self.canvas.create_rectangle(
-                    bbox[0] * self.scale - 1, bbox[1] * self.scale - 1,
-                    bbox[2] * self.scale + 1, bbox[3] * self.scale + 1,
-                    outline="#38BDF8", width=1.5, tags=("hover_box",)
-                )
-
-    def _on_canvas_mouse_down(self, event):
-        if not self.doc or len(self.doc) == 0:
-            return
-        cx = self.canvas.canvasx(event.x)
-        cy = self.canvas.canvasy(event.y)
-        self.click_down_cx = cx
-        self.click_down_cy = cy
-
-        if self.add_text_mode:
-            page = self.doc[self.current_page]
-            max_w = page.rect.width * self.scale
-            max_h = page.rect.height * self.scale
-            clamped_x = max(0.0, min(cx, max_w))
-            clamped_y = max(0.0, min(cy, max_h))
-            self.add_start_cx = clamped_x
-            self.add_start_cy = clamped_y
-            self.is_dragging_text_area = True
-
-            self.canvas.delete("add_area_rect")
-            self.canvas.delete("add_area_label")
-            self.canvas.delete("selected_add_area")
-
-            self.add_area_rect = self.canvas.create_rectangle(
-                clamped_x, clamped_y, clamped_x, clamped_y,
-                outline="#0284C7", width=2, dash=(4, 4), tags=("add_area_rect",)
-            )
-            self.add_area_label = self.canvas.create_text(
-                clamped_x + 5, max(15.0, clamped_y - 12.0),
-                text="Drag to select text box area...", fill="#0284C7",
-                font=get_sys_font(8, "bold"), anchor="w", tags=("add_area_label",)
-            )
-
-    def _on_canvas_mouse_drag(self, event):
-        if self.add_text_mode and getattr(self, "is_dragging_text_area", False) and getattr(self, "add_area_rect", None):
-            if not self.doc or len(self.doc) == 0:
-                return
-            cur_cx = self.canvas.canvasx(event.x)
-            cur_cy = self.canvas.canvasy(event.y)
-            page = self.doc[self.current_page]
-            max_w = page.rect.width * self.scale
-            max_h = page.rect.height * self.scale
-            clamped_x = max(0.0, min(cur_cx, max_w))
-            clamped_y = max(0.0, min(cur_cy, max_h))
-
-            self.canvas.coords(self.add_area_rect, self.add_start_cx, self.add_start_cy, clamped_x, clamped_y)
-            x1, x2 = sorted([self.add_start_cx, clamped_x])
-            y1, y2 = sorted([self.add_start_cy, clamped_y])
-            pt_w = int((x2 - x1) / self.scale)
-            pt_h = int((y2 - y1) / self.scale)
-            self.canvas.coords(self.add_area_label, x1 + 5, max(15.0, y1 - 12.0))
-            self.canvas.itemconfig(self.add_area_label, text=f"Area: {pt_w} x {pt_h} pt")
-
-    def _on_canvas_mouse_up(self, event):
-        if not self.doc or len(self.doc) == 0:
-            return
-        cur_cx = self.canvas.canvasx(event.x)
-        cur_cy = self.canvas.canvasy(event.y)
-
-        if self.add_text_mode and getattr(self, "is_dragging_text_area", False):
-            self.is_dragging_text_area = False
-            self.canvas.delete("add_area_rect")
-            self.canvas.delete("add_area_label")
-            self.add_area_rect = None
-            self.add_area_label = None
-
-            page = self.doc[self.current_page]
-            max_w = page.rect.width * self.scale
-            max_h = page.rect.height * self.scale
-            clamped_x = max(0.0, min(cur_cx, max_w))
-            clamped_y = max(0.0, min(cur_cy, max_h))
-
-            x1, x2 = sorted([self.add_start_cx, clamped_x])
-            y1, y2 = sorted([self.add_start_cy, clamped_y])
-
-            pdf_x1 = x1 / self.scale
-            pdf_y1 = y1 / self.scale
-            pdf_x2 = x2 / self.scale
-            pdf_y2 = y2 / self.scale
-
-            drag_w = pdf_x2 - pdf_x1
-            drag_h = pdf_y2 - pdf_y1
-
-            try:
-                f_size = float(self.font_size_var.get())
-            except ValueError:
-                f_size = 11.0
-
-            if drag_w >= 15.0 and drag_h >= 10.0:
-                target_rect = fitz.Rect(pdf_x1, pdf_y1, pdf_x2, pdf_y2)
-                is_box = True
-            else:
-                def_w = min(180.0, max(60.0, page.rect.width - pdf_x1 - 15.0))
-                def_h = min(60.0, max(25.0, f_size * 2.5))
-                target_rect = fitz.Rect(pdf_x1, pdf_y1, min(page.rect.width - 5.0, pdf_x1 + def_w), min(page.rect.height - 5.0, pdf_y1 + def_h))
-                is_box = False
-
-            self.toggle_add_text_mode()
-            self._prompt_and_add_text_in_rect(target_rect, is_box_mode=is_box)
-            return
-
-        # Normal edit mode selection (if moved less than 6px)
-        down_x = getattr(self, "click_down_cx", cur_cx)
-        down_y = getattr(self, "click_down_cy", cur_cy)
-        move_dist = ((cur_cx - down_x)**2 + (cur_cy - down_y)**2)**0.5
-        if move_dist < 6.0:
-            self._handle_normal_canvas_click(cur_cx, cur_cy)
-
-    def _handle_normal_canvas_click(self, cx, cy):
-        if self.editor_mode != "edit":
-            return
-        cur_x = cx / self.scale
-        cur_y = cy / self.scale
-
-        clicked_idx = None
-        for idx, s in enumerate(self.spans):
-            bbox = s.get("bbox", (0, 0, 0, 0))
-            if bbox[0] <= cur_x <= bbox[2] and bbox[1] <= cur_y <= bbox[3]:
-                clicked_idx = idx
-                break
-
-        if clicked_idx is not None:
-            self.tree_spans.selection_set(str(clicked_idx))
-            self.tree_spans.see(str(clicked_idx))
-            self._select_span(clicked_idx)
-        else:
-            self.selected_span_idx = None
-            self.canvas.delete("active_box")
-            self.canvas.delete("active_handle")
-
-    def _on_canvas_click(self, event):
-        cx = self.canvas.canvasx(event.x)
-        cy = self.canvas.canvasy(event.y)
-        self._handle_normal_canvas_click(cx, cy)
-
-    def _on_canvas_double_click(self, event):
-        if self.editor_mode != "edit" or getattr(self, "add_text_mode", False):
-            return
-        cx = self.canvas.canvasx(event.x)
-        cy = self.canvas.canvasy(event.y)
-        self._handle_normal_canvas_click(cx, cy)
-        if self.selected_span_idx is not None:
-            self.txt_editor.focus_set()
-            self.txt_editor.tag_add(tk.SEL, "1.0", tk.END)
-
-    def add_textbox_at_center(self):
-        """Adds a new text element right in the visible center of the active page."""
-        if not self.doc:
-            messagebox.showwarning("Warning", "Please open a PDF document first.")
-            return
-        page = self.doc[self.current_page]
-        f_size = 11.0
-        try:
-            f_size = float(self.font_size_var.get())
-        except ValueError:
-            pass
-        cx = page.rect.width / 2.0 - 90.0
-        cy = page.rect.height / 2.0 - 25.0
-        target_rect = fitz.Rect(cx, cy, cx + 180.0, cy + max(35.0, f_size * 2.5))
-        self._prompt_and_add_text_in_rect(target_rect, is_box_mode=True)
-
-    def _prompt_and_add_text_in_rect(self, target_rect, is_box_mode=False):
-        if not self.doc or len(self.doc) == 0:
-            return
-        page = self.doc[self.current_page]
-
-        # Highlight selected area on canvas while prompting
-        self.canvas.delete("selected_add_area")
-        self.canvas.create_rectangle(
-            target_rect.x0 * self.scale, target_rect.y0 * self.scale,
-            target_rect.x1 * self.scale, target_rect.y1 * self.scale,
-            outline="#0284C7", width=2, dash=(2, 2), tags=("selected_add_area",)
-        )
-        self.canvas.create_text(
-            target_rect.x0 * self.scale + 5, max(15.0, target_rect.y0 * self.scale - 12.0),
-            text=f"Selected Area: {int(target_rect.width)}x{int(target_rect.height)} pt",
-            fill="#0284C7", font=get_sys_font(8, "bold"), anchor="w", tags=("selected_add_area",)
-        )
-        self.update_idletasks()
-
-        pending = self.txt_editor.get("1.0", tk.END).strip()
-        default_val = pending if pending and pending != "Type text here" and pending != "New Text Box" else ""
-        try:
-            cur_sz = float(self.font_size_var.get())
-        except ValueError:
-            cur_sz = 11.0
-
-        dlg = AddTextDialog(
-            self,
-            initial_text=default_val,
-            target_rect=target_rect,
-            default_font=self.font_family_var.get(),
-            default_size=cur_sz,
-            default_color=self.text_color_hex,
-            bold=self.bold_var.get(),
-            italic=self.italic_var.get()
-        )
-        self.dialog_ref = dlg
-        self.wait_window(dlg.dialog)
-
-        self.canvas.delete("selected_add_area")
-
-        if not dlg.result:
-            return
-
-        new_text = dlg.result["text"]
-        f_fam = dlg.result["font"]
-        f_size = dlg.result["size"]
-        f_bold = dlg.result["bold"]
-        f_italic = dlg.result["italic"]
-        hex_c = dlg.result["color"].lstrip("#")
-        if len(hex_c) == 6:
-            color_rgb = (int(hex_c[0:2], 16)/255.0, int(hex_c[2:4], 16)/255.0, int(hex_c[4:6], 16)/255.0)
-        else:
-            color_rgb = (0.0, 0.0, 0.0)
-
-        self._save_undo_state()
-
-        try:
-            safe_insert_pdf_text(
-                page,
-                target_rect,
-                new_text,
-                font_family=f_fam,
-                fontsize=f_size,
-                color=color_rgb,
-                bold=f_bold,
-                italic=f_italic,
-                is_box=True
-            )
-
-            self.render_page()
-            self.scan_and_detect_text()
-            if self.spans:
-                self._select_span(len(self.spans) - 1)
-                self.txt_editor.focus_set()
-                self.txt_editor.tag_add(tk.SEL, "1.0", tk.END)
-            self.lbl_ribbon_status.config(text=f"✓ Added text in selected area: '{new_text[:30]}'", fg="#047857")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to add text in selected area: {e}")
-
-    def _handle_add_text_at(self, x, y, prompt_dialog=False):
-        f_size = 11.0
-        try:
-            f_size = float(self.font_size_var.get())
-        except ValueError:
-            pass
-        target_rect = fitz.Rect(x, y, x + 160.0, y + max(30.0, f_size * 2.2))
-        self._prompt_and_add_text_in_rect(target_rect, is_box_mode=False)
-
-    def _on_tree_select(self, event):
-        sel = self.tree_spans.selection()
-        if sel:
-            idx = int(sel[0])
-            self._select_span(idx)
-
-    def _select_span(self, idx):
-        if idx < 0 or idx >= len(self.spans):
-            return
-        self.selected_span_idx = idx
-        s = self.spans[idx]
-
-        self.txt_editor.delete("1.0", tk.END)
-        self.txt_editor.insert(tk.END, s.get("text", ""))
-
-        orig_font = s.get("font", "Helvetica")
-        fam_lower = orig_font.lower()
-        if "times" in fam_lower or "serif" in fam_lower:
-            self.font_family_var.set("Times-Roman")
-        elif "courier" in fam_lower or "mono" in fam_lower:
-            self.font_family_var.set("Courier")
-        elif "arial" in fam_lower:
-            self.font_family_var.set("Arial")
-        elif "calibri" in fam_lower:
-            self.font_family_var.set("Calibri")
-        else:
-            self.font_family_var.set("Helvetica")
-
-        size_val = round(float(s.get("size", 10.0)))
-        self.font_size_var.set(str(size_val))
-
-        # Check bold / italic from font flags
-        flags = s.get("flags", 0)
-        self.bold_var.set(bool(flags & 2 ** 4) or "bold" in fam_lower)
-        self.italic_var.set(bool(flags & 2 ** 1) or "oblique" in fam_lower or "italic" in fam_lower)
-
-        # Color
-        c_val = s.get("color", 0)
-        if isinstance(c_val, int):
-            r = (c_val >> 16) & 255
-            g = (c_val >> 8) & 255
-            b = c_val & 255
-            self.set_text_color(f"#{r:02x}{g:02x}{b:02x}")
-
-        self.lbl_font_info.config(
-            text=f"Font: {orig_font} ({s.get('size', 10.0):.1f}pt) | Origin: ({int(s.get('origin', (0,0))[0])}, {int(s.get('origin', (0,0))[1])})"
-        )
-
-        self._draw_selection_frame(s.get("bbox", (0, 0, 0, 0)))
-
-    def _draw_selection_frame(self, bbox):
-        self.canvas.delete("active_box")
-        self.canvas.delete("active_handle")
-
-        x1 = bbox[0] * self.scale - 2
-        y1 = bbox[1] * self.scale - 2
-        x2 = bbox[2] * self.scale + 2
-        y2 = bbox[3] * self.scale + 2
-
-        self.canvas.create_rectangle(
-            x1, y1, x2, y2,
-            outline="#2563EB", width=2, tags=("active_box",)
-        )
-
-        pts = [
-            (x1, y1), ((x1 + x2)/2, y1), (x2, y1),
-            (x2, (y1 + y2)/2),
-            (x2, y2), ((x1 + x2)/2, y2), (x1, y2),
-            (x1, (y1 + y2)/2)
-        ]
-        hs = 3.5
-        for px, py in pts:
-            self.canvas.create_rectangle(
-                px - hs, py - hs, px + hs, py + hs,
-                fill="#FFFFFF", outline="#2563EB", width=1.5,
-                tags=("active_handle", "active_box")
-            )
-
-    def _get_target_color_rgb(self):
-        hex_c = self.text_color_hex.lstrip("#")
-        if len(hex_c) == 6:
-            r = int(hex_c[0:2], 16) / 255.0
-            g = int(hex_c[2:4], 16) / 255.0
-            b = int(hex_c[4:6], 16) / 255.0
-            return (r, g, b)
-        return (0.0, 0.0, 0.0)
-
-    def apply_text_edit(self):
-        if not self.doc:
-            messagebox.showwarning("Warning", "Please open a PDF document first.")
-            return
-
-        if self.selected_span_idx is None:
-            pending = self.txt_editor.get("1.0", tk.END).strip()
-            if pending:
-                if messagebox.askyesno("Add as New Text?", "No text element is currently selected on the page.\n\nWould you like to insert this text as a new text box on the active page?"):
-                    self.add_textbox_at_center()
-                    return
-            messagebox.showwarning("Warning", "Please select a text block on canvas or list to edit.")
-            return
-
-        new_text = self.txt_editor.get("1.0", tk.END).strip()
-        s = self.spans[self.selected_span_idx]
-
-        page = self.doc[self.current_page]
-        bbox = fitz.Rect(s["bbox"])
-
-        try:
-            self._save_undo_state()
-
-            # 1. Seamless in-place redaction matching background pixel color
-            bg_rgb = s.get("bg_rgb")
-            if not bg_rgb:
-                bg_rgb = get_bbox_bg_color(page, bbox)
-
-            page.add_redact_annot(bbox, fill=bg_rgb)
-            page.apply_redactions()
-
-            # 2. Compute typography
-            try:
-                f_size = float(self.font_size_var.get())
-            except ValueError:
-                f_size = float(s.get("size", 10.0))
-
-            color_rgb = self._get_target_color_rgb()
-            origin = s.get("origin", (bbox.x0, bbox.y1 - 2))
-
-            # 3. Universal safe insertion (100% immune to 'need font file or buffer')
-            safe_insert_pdf_text(
-                page,
-                fitz.Point(origin[0], origin[1]),
-                new_text,
-                font_family=self.font_family_var.get(),
-                fontsize=f_size,
-                color=color_rgb,
-                bold=self.bold_var.get(),
-                italic=self.italic_var.get()
-            )
-
-            # Re-render & scan
-            self.render_page()
-            self.scan_and_detect_text()
-            self.lbl_ribbon_status.config(text="✓ Edit applied cleanly to PDF document!", fg="#047857")
-        except Exception as e:
-            messagebox.showerror("Edit Error", f"Failed to apply text edit: {e}")
-
-    def delete_selected_block(self):
-        if not self.doc or self.selected_span_idx is None:
-            messagebox.showwarning("Warning", "Please select a text block to delete.")
-            return
-
-        self._save_undo_state()
-        s = self.spans[self.selected_span_idx]
-        page = self.doc[self.current_page]
-        bbox = fitz.Rect(s["bbox"])
-
-        try:
-            bg_rgb = s.get("bg_rgb") or get_bbox_bg_color(page, bbox)
-            page.add_redact_annot(bbox, fill=bg_rgb)
-            page.apply_redactions()
-            self.selected_span_idx = None
-            self.txt_editor.delete("1.0", tk.END)
-            self.render_page()
-            self.scan_and_detect_text()
-            self.lbl_ribbon_status.config(text="✓ Selected text element redacted and removed.", fg="#047857")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete block: {e}")
-
-    def clear_pdf(self):
-        self.doc = None
-        self.pdf_path = None
-        self.current_page = 0
-        self.spans.clear()
-        self.selected_span_idx = None
-        self.hover_span_idx = None
-        self.undo_stack.clear()
-        self.canvas.delete("all")
-        self.lbl_page.config(text="Page: 0 / 0")
-        self.txt_editor.delete("1.0", tk.END)
-        for item in self.tree_spans.get_children():
-            self.tree_spans.delete(item)
-        self.lbl_font_info.config(text="No block selected")
-        self.lbl_ribbon_status.config(text="Cleared PDF document.")
-        if hasattr(self, 'btn_undo'):
-            self.btn_undo.config(state=tk.DISABLED)
-
+            self.lbl_search_count.config(text=f"Match {self.active_search_match_idx + 1}/{len(self.search_matches)} (P{p_idx+1})", fg="#EA580C")
+
+    # =====================================================================
+    # VIEWPORT & NAVIGATION
+    # =====================================================================
     def prev_page(self):
         if self.doc and self.current_page > 0:
             self.current_page -= 1
+            self.selected_elem_idx = None
+            self.selected_span_idx = None
             self.render_page()
             self.scan_and_detect_text()
+            self.scan_and_detect_forms()
+            self._refresh_elements_tree()
 
     def next_page(self):
         if self.doc and self.current_page < len(self.doc) - 1:
             self.current_page += 1
+            self.selected_elem_idx = None
+            self.selected_span_idx = None
             self.render_page()
             self.scan_and_detect_text()
+            self.scan_and_detect_forms()
+            self._refresh_elements_tree()
+
+    def _jump_to_entered_page(self):
+        if not self.doc:
+            return
+        try:
+            target = int(self.ent_page.get()) - 1
+            if 0 <= target < len(self.doc):
+                self.current_page = target
+                self.render_page()
+                self.scan_and_detect_text()
+                self.scan_and_detect_forms()
+                self._refresh_elements_tree()
+        except ValueError:
+            pass
+
+    def zoom_in(self):
+        self.scale = min(3.5, self.scale + 0.25)
+        self.lbl_zoom.config(text=f"{int(self.scale*100)}%")
+        self.render_page()
+
+    def zoom_out(self):
+        self.scale = max(0.5, self.scale - 0.25)
+        self.lbl_zoom.config(text=f"{int(self.scale*100)}%")
+        self.render_page()
+
+    def fit_width(self):
+        if not self.doc:
+            return
+        c_w = max(200, self.canvas.winfo_width() - 30)
+        p_w = self.doc[self.current_page].rect.width
+        if p_w > 0:
+            self.scale = max(0.4, min(3.5, c_w / p_w))
+            self.lbl_zoom.config(text=f"{int(self.scale*100)}%")
+            self.render_page()
+
+    def fit_page(self):
+        if not self.doc:
+            return
+        c_h = max(200, self.canvas.winfo_height() - 30)
+        p_h = self.doc[self.current_page].rect.height
+        if p_h > 0:
+            self.scale = max(0.4, min(3.5, c_h / p_h))
+            self.lbl_zoom.config(text=f"{int(self.scale*100)}%")
+            self.render_page()
 
     def _on_mouse_wheel(self, event):
         if self.doc:
-            if event.delta > 0:
-                self.canvas.yview_scroll(-1, "units")
-            else:
-                self.canvas.yview_scroll(1, "units")
+            self.canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
 
+    # =====================================================================
+    # UNDO & REDO ENGINE
+    # =====================================================================
+    def _save_undo_state(self):
+        if not self.doc:
+            return
+        try:
+            import copy
+            snapshot = (self.doc.tobytes(), self.current_page, copy.deepcopy(self.page_elements))
+            self.undo_stack.append(snapshot)
+            if len(self.undo_stack) > 15:
+                self.undo_stack.pop(0)
+            self.redo_stack.clear()
+            if hasattr(self, "btn_undo"):
+                self.btn_undo.config(state=tk.NORMAL)
+            if hasattr(self, "btn_redo"):
+                self.btn_redo.config(state=tk.DISABLED)
+        except Exception as e:
+            logger.debug(f"Undo save error: {e}")
+
+    def undo(self):
+        if not self.undo_stack:
+            return
+        try:
+            import copy
+            curr_snap = (self.doc.tobytes(), self.current_page, copy.deepcopy(self.page_elements))
+            self.redo_stack.append(curr_snap)
+
+            pdf_bytes, page_num, elems = self.undo_stack.pop()
+            self.doc = fitz.open("pdf", pdf_bytes)
+            self.current_page = min(page_num, len(self.doc) - 1)
+            self.page_elements = elems
+            self.selected_elem_idx = None
+            self.render_page()
+            self.scan_and_detect_text()
+            self.scan_and_detect_forms()
+            self._refresh_elements_tree()
+            self.lbl_ribbon_status.config(text="↩️ Undone.", fg="#1E40AF")
+
+            if not self.undo_stack and hasattr(self, "btn_undo"):
+                self.btn_undo.config(state=tk.DISABLED)
+            if hasattr(self, "btn_redo"):
+                self.btn_redo.config(state=tk.NORMAL)
+        except Exception as e:
+            messagebox.showerror("Undo Error", f"Failed: {e}")
+
+    def redo(self):
+        if not self.redo_stack:
+            return
+        try:
+            import copy
+            curr_snap = (self.doc.tobytes(), self.current_page, copy.deepcopy(self.page_elements))
+            self.undo_stack.append(curr_snap)
+
+            pdf_bytes, page_num, elems = self.redo_stack.pop()
+            self.doc = fitz.open("pdf", pdf_bytes)
+            self.current_page = min(page_num, len(self.doc) - 1)
+            self.page_elements = elems
+            self.selected_elem_idx = None
+            self.render_page()
+            self.scan_and_detect_text()
+            self.scan_and_detect_forms()
+            self._refresh_elements_tree()
+            self.lbl_ribbon_status.config(text="↪️ Redone.", fg="#1E40AF")
+
+            if not self.redo_stack and hasattr(self, "btn_redo"):
+                self.btn_redo.config(state=tk.DISABLED)
+            if hasattr(self, "btn_undo"):
+                self.btn_undo.config(state=tk.NORMAL)
+        except Exception as e:
+            messagebox.showerror("Redo Error", f"Failed: {e}")
+
+    # =====================================================================
+    # COMMIT & SAVE EDITED PDF
+    # =====================================================================
     def save_edited_pdf(self):
         if not self.doc:
-            messagebox.showwarning("Warning", "No open PDF to save.")
+            messagebox.showwarning("Warning", "No open PDF document to save.")
             return
+
         out_p = filedialog.asksaveasfilename(
             title="Save Edited PDF As",
             defaultextension=".pdf",
             filetypes=[("PDF Documents", "*.pdf")]
         )
-        if out_p:
-            try:
-                has_sigs = False
-                for p in self.doc:
-                    for w in p.widgets():
-                        if w.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE or w.is_signed:
-                            has_sigs = True
-                            break
-                    if has_sigs:
-                        break
+        if not out_p:
+            return
 
-                if has_sigs:
-                    preserve_signature_appearances_on_doc(self.doc, remove_broken_fields=True)
-                    self.doc.save(out_p, garbage=3, deflate=True)
-                else:
-                    self.doc.save(out_p, garbage=3, deflate=True)
+        try:
+            # 1. Commit all added vector elements and drawings onto the PDF pages
+            for p_idx, elems in self.page_elements.items():
+                if 0 <= p_idx < len(self.doc):
+                    page = self.doc[p_idx]
+                    for el in elems:
+                        t = el.get("type")
+                        r = el.get("rect")
+                        if not r:
+                            continue
 
-                self.lbl_ribbon_status.config(text=f"✓ Saved: {os.path.basename(out_p)}", fg="#047857")
-                messagebox.showinfo(
-                    "Success",
-                    f"Edited PDF saved successfully:\n{out_p}\n\n(All pages, annotations, and visual stamps cleanly preserved)"
-                )
-            except Exception as e:
-                try:
-                    self.doc.save(out_p, garbage=3, deflate=True)
-                    messagebox.showinfo("Success", f"Edited PDF saved successfully:\n{out_p}")
-                except Exception as save_err:
-                    messagebox.showerror("Save Error", f"Could not save PDF file: {save_err}")
+                        if t == "text":
+                            hex_c = el.get("color", "#000000").lstrip("#")
+                            col_rgb = (int(hex_c[0:2], 16)/255.0, int(hex_c[2:4], 16)/255.0, int(hex_c[4:6], 16)/255.0) if len(hex_c) == 6 else (0.0, 0.0, 0.0)
+                            bg_c = el.get("bg_color")
+                            bg_rgb = None
+                            if bg_c:
+                                bh = bg_c.lstrip("#")
+                                if len(bh) == 6:
+                                    bg_rgb = (int(bh[0:2], 16)/255.0, int(bh[2:4], 16)/255.0, int(bh[4:6], 16)/255.0)
+
+                            safe_insert_pdf_text(
+                                page, r, el.get("text", ""),
+                                font_family=el.get("font", "Helvetica"),
+                                fontsize=float(el.get("size", 12.0)),
+                                color=col_rgb,
+                                bold=el.get("bold", False),
+                                italic=el.get("italic", False),
+                                underline=el.get("underline", False),
+                                bg_color=bg_rgb,
+                                is_box=True
+                            )
+
+                        elif t == "rect":
+                            st_h = el.get("stroke_color", "#000000").lstrip("#")
+                            st_rgb = (int(st_h[0:2], 16)/255.0, int(st_h[2:4], 16)/255.0, int(st_h[4:6], 16)/255.0) if len(st_h) == 6 else (0, 0, 0)
+                            fl_h = el.get("fill_color", "").lstrip("#")
+                            fl_rgb = (int(fl_h[0:2], 16)/255.0, int(fl_h[2:4], 16)/255.0, int(fl_h[4:6], 16)/255.0) if len(fl_h) == 6 else None
+                            w = float(el.get("stroke_width", 2.0))
+                            page.draw_rect(r, color=st_rgb, fill=fl_rgb, width=w)
+
+                        elif t == "circle":
+                            st_h = el.get("stroke_color", "#000000").lstrip("#")
+                            st_rgb = (int(st_h[0:2], 16)/255.0, int(st_h[2:4], 16)/255.0, int(st_h[4:6], 16)/255.0) if len(st_h) == 6 else (0, 0, 0)
+                            fl_h = el.get("fill_color", "").lstrip("#")
+                            fl_rgb = (int(fl_h[0:2], 16)/255.0, int(fl_h[2:4], 16)/255.0, int(fl_h[4:6], 16)/255.0) if len(fl_h) == 6 else None
+                            w = float(el.get("stroke_width", 2.0))
+                            center = fitz.Point((r.x0 + r.x1)/2.0, (r.y0 + r.y1)/2.0)
+                            radius = min(r.width, r.height) / 2.0
+                            page.draw_circle(center, radius, color=st_rgb, fill=fl_rgb, width=w)
+
+                        elif t == "line":
+                            st_h = el.get("stroke_color", "#000000").lstrip("#")
+                            st_rgb = (int(st_h[0:2], 16)/255.0, int(st_h[2:4], 16)/255.0, int(st_h[4:6], 16)/255.0) if len(st_h) == 6 else (0, 0, 0)
+                            w = float(el.get("stroke_width", 2.0))
+                            page.draw_line(fitz.Point(r.x0, r.y0), fitz.Point(r.x1, r.y1), color=st_rgb, width=w)
+
+                        elif t == "image":
+                            b = el.get("bytes")
+                            if b:
+                                page.insert_image(r, stream=b)
+
+                        elif t == "draw":
+                            pts = el.get("points", [])
+                            if len(pts) >= 2:
+                                st_h = el.get("stroke_color", "#000000").lstrip("#")
+                                st_rgb = (int(st_h[0:2], 16)/255.0, int(st_h[2:4], 16)/255.0, int(st_h[4:6], 16)/255.0) if len(st_h) == 6 else (0, 0, 0)
+                                w = float(el.get("stroke_width", 2.0))
+                                fitz_pts = [fitz.Point(p[0], p[1]) for p in pts]
+                                page.draw_polyline(fitz_pts, color=st_rgb, width=w)
+
+            # Clear added elements cache once committed to avoid double-drawing
+            self.page_elements.clear()
+
+            # Preserve existing digital signature visual appearances if present
+            has_sigs = False
+            for p in self.doc:
+                for w in p.widgets():
+                    if w.field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE or w.is_signed:
+                        has_sigs = True; break
+                if has_sigs: break
+
+            if has_sigs:
+                preserve_signature_appearances_on_doc(self.doc, remove_broken_fields=True)
+
+            self.doc.save(out_p, garbage=3, deflate=True)
+            self.lbl_ribbon_status.config(text=f"✓ Saved: {os.path.basename(out_p)}", fg="#047857")
+            messagebox.showinfo(
+                "PDF Saved",
+                f"✓ Successfully saved edited PDF document:\n\n{out_p}\n\n"
+                "(All text, shapes, drawings, form fields, and signatures cleanly compiled)"
+            )
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save PDF: {e}")
 
 
 # 5. DIALOGS (SETTINGS, SHORTCUTS & BATCH)
@@ -6357,6 +6998,9 @@ class VisualPdfSignerApp:
                 except Exception as ren_e:
                     logger.debug(f"Widget rename notice: {ren_e}")
 
+                # Bake 300 DPI high-resolution visual appearance stamps so they remain crisp and visible,
+                # and clean orphaned signature widgets so Acrobat opens with zero errors!
+                preserve_signature_appearances_on_doc(sub_doc, remove_broken_fields=True)
                 merged.insert_pdf(sub_doc, annots=True)
                 sub_doc.close()
 
