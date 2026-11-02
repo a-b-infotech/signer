@@ -2311,6 +2311,7 @@ CORS(app)
 APP_VERSION = "2.2.0"
 APP_NAME = "A B INFOTECH - PDF Sign & All-in-One Power Suite"
 UPDATE_METADATA_URLS = [
+    "https://github.com/a-b-infotech/signer/blob/main/version.json?raw=true",
     "https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json",
     "https://github.com/a-b-infotech/signer/raw/main/version.json"
 ]
@@ -2423,8 +2424,11 @@ class SoftwareUpdateManager:
     def fetch_remote_version_info():
         for url in UPDATE_METADATA_URLS:
             try:
+                target_url = url
+                if "github.com" in target_url and "/blob/" in target_url and "?raw=true" not in target_url:
+                    target_url = target_url.replace("/blob/", "/raw/")
                 req = urllib.request.Request(
-                    url,
+                    target_url,
                     headers={"User-Agent": f"ABInfoSigner/{APP_VERSION} (Windows)"}
                 )
                 with urllib.request.urlopen(req, timeout=8) as resp:
@@ -5846,7 +5850,7 @@ class SettingsDialog:
 
         tk.Label(ver_box, text=f"Installed Version: v{APP_VERSION} PRO SUITE", font=get_sys_font(10, "bold"), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W)
         tk.Label(ver_box, text=f"Build Channel: Official Windows 64-bit Stable Release  |  OS: {CURRENT_OS}", font=get_sys_font(8), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 0))
-        tk.Label(ver_box, text=f"Update Server: https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F0FDF4").pack(anchor=tk.W, pady=(4, 0))
+        tk.Label(ver_box, text=f"Update Server: https://github.com/a-b-infotech/signer/blob/main/version.json", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F0FDF4").pack(anchor=tk.W, pady=(4, 0))
 
         tk.Checkbutton(
             card, text="Automatically Check for Updates on Application Startup",
