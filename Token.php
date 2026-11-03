@@ -639,6 +639,8 @@ body {
     padding: 10px 18px;
     background: rgba(10, 15, 28, 0.7);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
+    gap: 10px;
 }
 
 .canvas-viewport {
@@ -650,6 +652,39 @@ body {
     padding: 24px;
     background: radial-gradient(circle at 50% 50%, #151c2e 0%, #0a0f1d 100%);
     position: relative;
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: #0dcaf0 rgba(10, 15, 28, 0.95);
+}
+
+/* Custom 3D Glowing Scrollbars for PDF Viewport */
+.canvas-viewport::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+.canvas-viewport::-webkit-scrollbar-track {
+    background: rgba(10, 15, 28, 0.95);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.canvas-viewport::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #0284c7 0%, #0dcaf0 100%);
+    border-radius: 8px;
+    border: 2px solid #0b1120;
+    box-shadow: 0 0 10px rgba(13, 202, 240, 0.5);
+}
+.canvas-viewport::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #38bdf8 0%, #22d3ee 100%);
+    box-shadow: 0 0 16px rgba(13, 202, 240, 0.85);
+}
+
+/* Strict Scroll Lock when Drawing Signature Box */
+.canvas-viewport.drawing-locked {
+    overflow: hidden !important;
+    touch-action: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+    overscroll-behavior: none !important;
 }
 
 .pdf-bezel {
@@ -659,16 +694,69 @@ body {
     border-radius: 4px;
     overflow: hidden;
     transition: transform 0.2s ease;
+    margin: 0 auto;
+    flex-shrink: 0;
 }
 
 .interaction-layer {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
-    cursor: default;
+    cursor: grab;
 }
 
 .interaction-layer.active-selection {
-    cursor: crosshair;
+    cursor: crosshair !important;
+}
+
+/* Floating Smooth Scroll Navigator on Right Edge */
+.floating-scroll-dock {
+    position: absolute;
+    right: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 50;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 8px 6px;
+    border-radius: 24px;
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), 0 0 15px rgba(13, 202, 240, 0.2);
+    transition: all 0.25s ease;
+}
+
+.floating-scroll-dock.hidden-during-draw {
+    opacity: 0.2;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.9);
+}
+
+.btn-float-scroll {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(30, 41, 59, 0.9);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    color: #38bdf8;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
+.btn-float-scroll:hover {
+    background: linear-gradient(135deg, #0284c7 0%, #0dcaf0 100%);
+    color: #ffffff;
+    transform: scale(1.12);
+    box-shadow: 0 0 14px rgba(13, 202, 240, 0.7);
+    border-color: #38bdf8;
 }
 
 /* Watermark Preview Bar on Canvas Stage */
@@ -905,7 +993,7 @@ body {
             🔌 Local Signing Server Required
         </span>
         <h2 style="font-family:'Outfit',sans-serif; font-size:1.85rem; font-weight:800; margin-bottom:8px;">
-            A B INFOTECH Background Local Signer (Port 5000)
+            A B INFOTECH Background Local Signer 
         </h2>
         <p style="color:#94a3b8; font-size:0.92rem; max-width:680px; margin:0 auto 18px; line-height:1.5;">
             To digitally sign PDF documents using physical USB Cryptographic Tokens, the background signing service must be running on your machine.
@@ -1091,7 +1179,7 @@ body {
 
         <!-- Server Offline Warning Banner -->
         <div id="uploadOfflineBanner" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.4); border-radius:12px; padding:14px 18px; margin-bottom:20px; font-size:0.88rem; color:#f87171; text-align:center;">
-            🔌 <b>Local Signing Server is OFFLINE:</b> Physical USB tokens require the local signing service (Port 5000).<br>
+            🔌 <b>Local Signing Server is OFFLINE:</b> Physical USB tokens require the local signing service.<br>
             <div style="margin-top:8px;">
                 <button type="button" onclick="openOfflineModal()" class="btn-3d btn-cyan" style="padding:6px 16px; font-size:0.8rem;">
                     ⬇️ Download / Setup Desktop Client
@@ -1287,6 +1375,16 @@ if (fileInput) {
                 <button onclick="changeZoom(0.15)" class="btn-3d btn-tool" title="Zoom In">🔍 +</button>
             </div>
 
+            <!-- PDF Scroll Navigation Controls (Smooth Scroll / Lock Mode) -->
+            <div class="scroll-toolbar-group" style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.04); padding:4px 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.08);">
+                <span id="scrollStatusBadge" style="font-size:0.75rem; color:#38bdf8; font-weight:700; display:flex; align-items:center; gap:4px;">
+                    <span id="scrollModeIcon">📜</span> Scroll:
+                </span>
+                <button type="button" onclick="scrollPdfStage(-180)" class="btn-3d btn-tool" title="Scroll Up (or use mouse wheel / drag to pan)" style="padding:6px 10px; font-size:0.8rem;">▲ Up</button>
+                <button type="button" onclick="scrollPdfStage(180)" class="btn-3d btn-tool" title="Scroll Down (or use mouse wheel / drag to pan)" style="padding:6px 10px; font-size:0.8rem;">▼ Down</button>
+                <button type="button" onclick="fitPdfToView()" class="btn-3d btn-tool" title="Auto-Fit PDF to Viewport Width" style="padding:6px 10px; font-size:0.8rem;">⛶ Fit</button>
+            </div>
+
             <div style="display:flex; align-items:center; gap:8px;">
                 <button id="clearAreasBtn" class="btn-3d btn-red" style="padding:8px 14px; font-size:0.82rem;">
                     🗑️ Clear Areas
@@ -1297,8 +1395,16 @@ if (fileInput) {
             </div>
         </div>
 
-        <!-- Canvas Viewport -->
-        <div class="canvas-viewport">
+        <!-- Canvas Viewport with Floating Quick-Scroll Dock -->
+        <div class="canvas-viewport" id="canvasViewport">
+            <!-- Floating Quick Scroll Dock -->
+            <div class="floating-scroll-dock" id="floatingScrollDock" title="PDF Scroll Navigator">
+                <button type="button" onclick="scrollPdfToTop()" class="btn-float-scroll" title="Scroll to Top">⇱</button>
+                <button type="button" onclick="scrollPdfStage(-220)" class="btn-float-scroll" title="Scroll Up">▲</button>
+                <button type="button" onclick="scrollPdfStage(220)" class="btn-float-scroll" title="Scroll Down">▼</button>
+                <button type="button" onclick="scrollPdfToBottom()" class="btn-float-scroll" title="Scroll to Bottom">⇲</button>
+            </div>
+
             <!-- Subtle Watermark Notice Banner on Preview Stage -->
             <div id="canvasWatermarkBanner" class="stage-watermark-banner" style="display:none; max-width:620px;">
                 <span>🏷️ <b>4-Day Free Web Trial:</b> Stamping small <code>ABINFO SIGN DEMO</code> watermark at the bottom of each page.</span>
@@ -1438,6 +1544,107 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const canvasViewport = document.getElementById('canvasViewport') || document.querySelector('.canvas-viewport');
+
+    // Scroll Helper Functions
+    window.scrollPdfStage = function(amount) {
+        if (isSelecting) return; // STRICT: Do not scroll when drawing box
+        if (canvasViewport) {
+            canvasViewport.scrollBy({ top: amount, behavior: 'smooth' });
+        }
+    };
+
+    window.scrollPdfToTop = function() {
+        if (isSelecting) return;
+        if (canvasViewport) {
+            canvasViewport.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    };
+
+    window.scrollPdfToBottom = function() {
+        if (isSelecting) return;
+        if (canvasViewport) {
+            canvasViewport.scrollTo({ top: canvasViewport.scrollHeight, behavior: 'smooth' });
+        }
+    };
+
+    window.fitPdfToView = function() {
+        if (!pdfDoc || !canvas || !canvasViewport) return;
+        pdfDoc.getPage(pageNum).then(page => {
+            const unscaledViewport = page.getViewport({ scale: 1.0 });
+            const availableWidth = Math.max(300, canvasViewport.clientWidth - 80);
+            scale = Math.max(0.6, Math.min(2.5, availableWidth / unscaledViewport.width));
+            const zoomDisplay = document.getElementById('zoomLevelDisplay');
+            if (zoomDisplay) zoomDisplay.textContent = Math.round(scale * 100) + '%';
+            renderPage(pageNum);
+        });
+    };
+
+    // Strict Scroll Blocker Handler for Drawing Mode
+    function blockScrollEvent(e) {
+        if (isSelecting) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }
+
+    // Toggle Drawing Mode & Lock/Unlock Viewport Scroll
+    function setDrawingMode(active) {
+        isSelecting = active;
+        const selectBtn = document.getElementById('selectAreaBtn');
+        const scrollDock = document.getElementById('floatingScrollDock');
+        const scrollBadge = document.getElementById('scrollStatusBadge');
+
+        if (isSelecting) {
+            if (selectBtn) {
+                selectBtn.className = 'btn-3d btn-amber';
+                selectBtn.innerHTML = '✏️ Drag to Draw (Scroll Locked)';
+            }
+            if (interactionLayer) {
+                interactionLayer.classList.add('active-selection');
+                interactionLayer.style.cursor = 'crosshair';
+            }
+            if (canvasViewport) {
+                canvasViewport.classList.add('drawing-locked');
+                canvasViewport.addEventListener('wheel', blockScrollEvent, { passive: false });
+                canvasViewport.addEventListener('touchmove', blockScrollEvent, { passive: false });
+            }
+            window.addEventListener('wheel', blockScrollEvent, { passive: false });
+            if (scrollDock) scrollDock.classList.add('hidden-during-draw');
+            if (scrollBadge) {
+                scrollBadge.style.color = '#f59e0b';
+                scrollBadge.innerHTML = '<span id="scrollModeIcon">🔒</span> Locked (Draw Mode)';
+            }
+        } else {
+            if (selectBtn) {
+                selectBtn.className = 'btn-3d btn-cyan';
+                selectBtn.innerHTML = '✏️ Draw Signature Box';
+            }
+            if (interactionLayer) {
+                interactionLayer.classList.remove('active-selection');
+                interactionLayer.style.cursor = 'grab';
+            }
+            if (canvasViewport) {
+                canvasViewport.classList.remove('drawing-locked');
+                canvasViewport.removeEventListener('wheel', blockScrollEvent);
+                canvasViewport.removeEventListener('touchmove', blockScrollEvent);
+            }
+            window.removeEventListener('wheel', blockScrollEvent);
+            if (scrollDock) scrollDock.classList.remove('hidden-during-draw');
+            if (scrollBadge) {
+                scrollBadge.style.color = '#38bdf8';
+                scrollBadge.innerHTML = '<span id="scrollModeIcon">📜</span> Scroll:';
+            }
+        }
+    }
+
+    let isDrawingBox = false;
+    let isPanning = false;
+    let panStartX = 0, panStartY = 0;
+    let scrollStartLeft = 0, scrollStartTop = 0;
+    let startX = 0, startY = 0;
+
     const clearBtn = document.getElementById('clearAreasBtn');
     if (clearBtn) {
         clearBtn.addEventListener('click', function() {
@@ -1445,87 +1652,124 @@ document.addEventListener('DOMContentLoaded', function() {
             updateSignatureList();
             drawSavedAreas();
             if (tempBox) { tempBox.remove(); tempBox = null; }
-            currentArea = null; isSelecting = false;
-            if (interactionLayer) interactionLayer.classList.remove('active-selection');
-            const selectBtn = document.getElementById('selectAreaBtn');
-            if (selectBtn) {
-                selectBtn.className = 'btn-3d btn-cyan';
-                selectBtn.textContent = '✏️ Draw Signature Box';
-            }
+            currentArea = null;
+            isDrawingBox = false;
+            setDrawingMode(false);
         });
     }
 
     const selectBtn = document.getElementById('selectAreaBtn');
     if (selectBtn) {
         selectBtn.addEventListener('click', function() {
-            isSelecting = !isSelecting;
-            if (isSelecting) {
-                this.className = 'btn-3d btn-amber';
-                this.textContent = '✏️ Drag Box on Canvas...';
-            } else {
-                this.className = 'btn-3d btn-cyan';
-                this.textContent = '✏️ Draw Signature Box';
-            }
-            if (interactionLayer) interactionLayer.classList.toggle('active-selection');
+            setDrawingMode(!isSelecting);
         });
     }
 
-    let startX, startY;
-
     if (interactionLayer) {
+        // Mousedown on interaction layer: Handles either Drawing Box (locked) or Panning / Scrolling
         interactionLayer.addEventListener('mousedown', e => {
-            if (!isSelecting) return;
-            const rect = interactionLayer.getBoundingClientRect();
-            startX = e.clientX - rect.left;
-            startY = e.clientY - rect.top;
-            currentArea = { x: startX, y: startY, width: 0, height: 0 };
-            tempBox = document.createElement('div');
-            tempBox.className = 'selection-ghost';
-            interactionLayer.appendChild(tempBox);
-        });
+            if (isSelecting) {
+                // STRICT DRAWING MODE: ZERO SCROLL
+                e.preventDefault();
+                e.stopPropagation();
+                isDrawingBox = true;
 
-        interactionLayer.addEventListener('mousemove', e => {
-            if (!isSelecting || !currentArea || !tempBox) return;
+                const rect = interactionLayer.getBoundingClientRect();
+                startX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                startY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+                currentArea = { x: startX, y: startY, width: 0, height: 0 };
+
+                if (tempBox) tempBox.remove();
+                tempBox = document.createElement('div');
+                tempBox.className = 'selection-ghost';
+                tempBox.style.left = startX + 'px';
+                tempBox.style.top = startY + 'px';
+                tempBox.style.width = '0px';
+                tempBox.style.height = '0px';
+                interactionLayer.appendChild(tempBox);
+            } else {
+                // NORMAL MODE: DRAG TO PAN / SCROLL PDF
+                if (e.button === 0 && canvasViewport) {
+                    isPanning = true;
+                    panStartX = e.clientX;
+                    panStartY = e.clientY;
+                    scrollStartLeft = canvasViewport.scrollLeft;
+                    scrollStartTop = canvasViewport.scrollTop;
+                    interactionLayer.style.cursor = 'grabbing';
+                }
+            }
+        });
+    }
+
+    // Window mousemove handles both Drawing and Panning smoothly without edge-jumping
+    window.addEventListener('mousemove', e => {
+        if (isSelecting && isDrawingBox && currentArea && tempBox && interactionLayer) {
+            e.preventDefault();
+            e.stopPropagation();
+
             const rect = interactionLayer.getBoundingClientRect();
-            currentArea.width = (e.clientX - rect.left) - startX;
-            currentArea.height = (e.clientY - rect.top) - startY;
-            tempBox.style.left = (currentArea.width < 0 ? startX + currentArea.width : startX) + 'px';
-            tempBox.style.top = (currentArea.height < 0 ? startY + currentArea.height : startY) + 'px';
+            // Strict clamping inside PDF canvas bounds prevents browser viewport auto-scrolling
+            const curX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+            const curY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+
+            currentArea.width = curX - startX;
+            currentArea.height = curY - startY;
+
+            tempBox.style.left = (currentArea.width < 0 ? curX : startX) + 'px';
+            tempBox.style.top = (currentArea.height < 0 ? curY : startY) + 'px';
             tempBox.style.width = Math.abs(currentArea.width) + 'px';
             tempBox.style.height = Math.abs(currentArea.height) + 'px';
-        });
+        } else if (isPanning && canvasViewport) {
+            const dx = e.clientX - panStartX;
+            const dy = e.clientY - panStartY;
+            canvasViewport.scrollLeft = scrollStartLeft - dx;
+            canvasViewport.scrollTop = scrollStartTop - dy;
+        }
+    });
 
-        interactionLayer.addEventListener('mouseup', () => {
-            if (!currentArea) return;
+    // Window mouseup completes drawing or panning
+    window.addEventListener('mouseup', e => {
+        if (isPanning) {
+            isPanning = false;
+            if (interactionLayer) {
+                interactionLayer.style.cursor = isSelecting ? 'crosshair' : 'grab';
+            }
+        }
 
-            const x = currentArea.width < 0 ? startX + currentArea.width : startX;
-            const y = currentArea.height < 0 ? startY + currentArea.height : startY;
-            const w = Math.abs(currentArea.width);
-            const h = Math.abs(currentArea.height);
+        if (isSelecting && isDrawingBox) {
+            isDrawingBox = false;
 
-            if (w > 12 && h > 12) {
-                signatureAreas.push({
-                    page: pageNum,
-                    x: x / scale,
-                    y: (currentPdfHeight - y - h) / scale,
-                    width: w / scale,
-                    height: h / scale
-                });
+            if (currentArea && interactionLayer) {
+                const rect = interactionLayer.getBoundingClientRect();
+                const curX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                const curY = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
+
+                const w = Math.abs(curX - startX);
+                const h = Math.abs(curY - startY);
+                const x = Math.min(startX, curX);
+                const y = Math.min(startY, curY);
+
+                if (w > 15 && h > 15) {
+                    signatureAreas.push({
+                        page: pageNum,
+                        x: x / scale,
+                        y: (currentPdfHeight - y - h) / scale,
+                        width: w / scale,
+                        height: h / scale
+                    });
+                }
             }
 
-            updateSignatureList();
             currentArea = null;
             if (tempBox) tempBox.remove();
             tempBox = null;
-            isSelecting = false;
-            interactionLayer.classList.remove('active-selection');
-            if (selectBtn) {
-                selectBtn.className = 'btn-3d btn-cyan';
-                selectBtn.textContent = '✏️ Draw Signature Box';
-            }
+
+            // DRAWING BOX COMPLETE: RESTORE SCROLL IMMEDIATELY!
+            setDrawingMode(false);
+            updateSignatureList();
             drawSavedAreas();
-        });
-    }
+        }
+    });
 
     function drawSavedAreas() {
         if (!interactionLayer) return;
@@ -1894,7 +2138,7 @@ async function checkBackgroundServer() {
         }
     } catch (e) {
         if (pill) pill.className = 'status-pill offline';
-        if (pillText) pillText.textContent = 'Local Server: OFFLINE (Port 5000)';
+        if (pillText) pillText.textContent = 'Local Server: OFFLINE';
         if (!userDismissedOfflineModal) {
             const offModal = document.getElementById('offline-overlay');
             if (offModal) offModal.style.display = 'flex';
