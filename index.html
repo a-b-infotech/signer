@@ -220,7 +220,7 @@
 <body>
 
     <div class="download-container">
-        <span class="badge">Version 2.0 • Multi-OS Ready</span>
+        <span class="badge" id="versionBadge">Version 2.2.0 • Multi-OS Ready</span>
         <h1>Download ABInfo Digital PDF Signer</h1>
         <p class="subtitle">Select your operating system to download the standalone client with USB Token (PKCS#11) and Software Certificate (.pfx/.p12) support.</p>
 
@@ -260,5 +260,30 @@
         </div>
     </div>
 
+<script>
+async function loadGitVersion() {
+    const urls = [
+        'https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json',
+        'https://github.com/a-b-infotech/signer/raw/main/version.json',
+        'version.json'
+    ];
+    for (const url of urls) {
+        try {
+            const res = await fetch(url);
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.version) {
+                    const badge = document.getElementById('versionBadge');
+                    if (badge) {
+                        badge.textContent = `Version ${data.version} • Multi-OS Ready`;
+                    }
+                    break;
+                }
+            }
+        } catch (e) {}
+    }
+}
+loadGitVersion();
+</script>
 </body>
 </html>

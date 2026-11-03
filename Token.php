@@ -8,20 +8,23 @@ date_default_timezone_set('Asia/Kolkata');
 // 1. DATABASE CONFIGURATION FOR LICENSE CHECK
 // ==========================================
 $db_host = 'sql302.ezyro.com';
-$db_user = 'ezyro_37092101';            // DB username
-$db_pass = 'abhi@123';                // DB password
-$db_name = 'ezyro_37092101_fj';       // DB name
-$table_name = 'license_keys';         // Table name
+$db_user = 'ezyro_37092101';  // DB username
+$db_pass = 'abhi@123';  // DB password
+$db_name = 'ezyro_37092101_fj';  // DB name
+$table_name = 'license_keys';  // Table name
 
-function getDbConnection($db_host, $db_user, $db_pass, $db_name) {
+function getDbConnection($db_host, $db_user, $db_pass, $db_name)
+{
     try {
         $conn = mysqli_init();
-        if (!$conn) return null;
+        if (!$conn)
+            return null;
         $conn->options(MYSQLI_OPT_CONNECT_TIMEOUT, 3);
         if (@$conn->real_connect($db_host, $db_user, $db_pass, $db_name)) {
             return $conn;
         }
-    } catch (Exception $e) {}
+    } catch (Exception $e) {
+    }
     return null;
 }
 
@@ -90,14 +93,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
 
     $stmt = $conn->prepare("SELECT status, expiredate, license_tier FROM $table_name WHERE license_key = ? LIMIT 1");
     if ($stmt) {
-        $stmt->bind_param("s", $key);
+        $stmt->bind_param('s', $key);
         $stmt->execute();
         $result = $stmt->get_result();
 
         if ($row = $result->fetch_assoc()) {
             if ($row['status'] !== 'active') {
                 echo json_encode(['status' => 'inactive']);
-            } 
+            }
             // Checks Date AND EXACT Time (Hours:Minutes:Seconds) against current IST time
             elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
                 echo json_encode(['status' => 'expired']);
@@ -112,7 +115,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
     } else {
         echo json_encode(['status' => 'error', 'message' => 'Query error']);
     }
-    
+
     $conn->close();
     exit;
 }
@@ -122,14 +125,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
 // ====================================================================
 if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
     $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
-    
+
     if (empty($license_key)) {
-        header("Location: http://127.0.0.1:5000/api/sync_callback?status=invalid");
+        header('Location: http://127.0.0.1:5000/api/sync_callback?status=invalid');
         exit;
     }
 
     if ($license_key === 'ABI-MASTER-PASS') {
-        header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=ABI-MASTER-PASS&status_val=active&tier=pro&client_email=" . urlencode("sales@a-b-infotech.in") . "&activated_at=" . urlencode(date('Y-m-d H:i:s')) . "&expiredate=never");
+        header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=ABI-MASTER-PASS&status_val=active&tier=pro&client_email=' . urlencode('sales@a-b-infotech.in') . '&activated_at=' . urlencode(date('Y-m-d H:i:s')) . '&expiredate=never');
         exit;
     }
 
@@ -137,18 +140,18 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
     if ($conn) {
         $stmt = $conn->prepare("SELECT id, license_key, status, expiredate, license_tier, client_email, activated_at FROM $table_name WHERE license_key = ? LIMIT 1");
         if ($stmt) {
-            $stmt->bind_param("s", $license_key);
+            $stmt->bind_param('s', $license_key);
             $stmt->execute();
             $result = $stmt->get_result();
 
             if ($row = $result->fetch_assoc()) {
                 $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-                
+
                 if (strtolower($row['status']) === 'inactive') {
                     if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
                         $upd = $conn->prepare("UPDATE $table_name SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = ?");
                         if ($upd) {
-                            $upd->bind_param("i", $row['id']);
+                            $upd->bind_param('i', $row['id']);
                             $upd->execute();
                             $upd->close();
                         }
@@ -156,7 +159,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
                     } else {
                         $upd = $conn->prepare("UPDATE $table_name SET status = 'active', activated_at = NOW() WHERE id = ?");
                         if ($upd) {
-                            $upd->bind_param("i", $row['id']);
+                            $upd->bind_param('i', $row['id']);
                             $upd->execute();
                             $upd->close();
                         }
@@ -171,11 +174,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
                 $id = $row['id'];
 
                 if ($row['status'] !== 'active') {
-                    header("Location: http://127.0.0.1:5000/api/sync_callback?status=" . urlencode($row['status']) . "&id=" . urlencode($id) . "&key=" . urlencode($license_key) . "&tier=" . urlencode($tier) . "&client_email=" . urlencode($client_email) . "&activated_at=" . urlencode($activated_at) . "&expiredate=" . urlencode($expiredate));
+                    header('Location: http://127.0.0.1:5000/api/sync_callback?status=' . urlencode($row['status']) . '&id=' . urlencode($id) . '&key=' . urlencode($license_key) . '&tier=' . urlencode($tier) . '&client_email=' . urlencode($client_email) . '&activated_at=' . urlencode($activated_at) . '&expiredate=' . urlencode($expiredate));
                 } elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                    header("Location: http://127.0.0.1:5000/api/sync_callback?status=expired&id=" . urlencode($id) . "&key=" . urlencode($license_key) . "&tier=" . urlencode($tier) . "&client_email=" . urlencode($client_email) . "&activated_at=" . urlencode($activated_at) . "&expiredate=" . urlencode($expiredate));
+                    header('Location: http://127.0.0.1:5000/api/sync_callback?status=expired&id=' . urlencode($id) . '&key=' . urlencode($license_key) . '&tier=' . urlencode($tier) . '&client_email=' . urlencode($client_email) . '&activated_at=' . urlencode($activated_at) . '&expiredate=' . urlencode($expiredate));
                 } else {
-                    header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=" . urlencode($id) . "&key=" . urlencode($license_key) . "&status_val=" . urlencode($row['status']) . "&tier=" . urlencode($tier) . "&client_email=" . urlencode($client_email) . "&activated_at=" . urlencode($activated_at) . "&expiredate=" . urlencode($expiredate));
+                    header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=' . urlencode($id) . '&key=' . urlencode($license_key) . '&status_val=' . urlencode($row['status']) . '&tier=' . urlencode($tier) . '&client_email=' . urlencode($client_email) . '&activated_at=' . urlencode($activated_at) . '&expiredate=' . urlencode($expiredate));
                 }
                 $stmt->close();
                 $conn->close();
@@ -186,7 +189,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
         $conn->close();
     }
 
-    header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=" . urlencode($license_key) . "&status_val=active&tier=pro&client_email=" . urlencode("sales@a-b-infotech.in") . "&activated_at=" . urlencode(date('Y-m-d H:i:s')) . "&expiredate=never");
+    header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=' . urlencode($license_key) . '&status_val=active&tier=pro&client_email=' . urlencode('sales@a-b-infotech.in') . '&activated_at=' . urlencode(date('Y-m-d H:i:s')) . '&expiredate=never');
     exit;
 }
 
@@ -203,7 +206,8 @@ if (!is_dir($config['uploadDir'])) {
     mkdir($config['uploadDir'], 0755, true);
 }
 
-function sanitizeInput($input) {
+function sanitizeInput($input)
+{
     return htmlspecialchars(trim($input), ENT_QUOTES, 'UTF-8');
 }
 
@@ -212,7 +216,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'reset') {
         @unlink($_SESSION['pdfPath']);
     }
     unset($_SESSION['pdfPath'], $_SESSION['fileName']);
-    header("Location: " . $_SERVER['PHP_SELF']);
+    header('Location: ' . $_SERVER['PHP_SELF']);
     exit;
 }
 
@@ -223,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['pdfFile'])) {
     $fileExtension = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
 
     if ($fileExtension !== 'pdf') {
-        $uploadError = "Only valid PDF documents are allowed.";
+        $uploadError = 'Only valid PDF documents are allowed.';
     } else {
         $uniqueFileName = uniqid('pdf_', true) . '.pdf';
         $filePath = $config['uploadDir'] . $uniqueFileName;
@@ -231,7 +235,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['pdfFile'])) {
         if (move_uploaded_file($_FILES['pdfFile']['tmp_name'], $filePath)) {
             $_SESSION['pdfPath'] = $filePath;
             $_SESSION['fileName'] = $fileName;
-            header("Location: " . $_SERVER['PHP_SELF']);
+            header('Location: ' . $_SERVER['PHP_SELF']);
             exit;
         }
     }
@@ -565,12 +569,17 @@ body {
 }
 
 .upload-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
     border: 2px dashed rgba(13, 202, 240, 0.5);
     border-radius: 20px;
-    padding: 45px 30px;
+    padding: 45px 24px;
     background: rgba(13, 202, 240, 0.03);
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     margin-bottom: 25px;
     box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.3);
 }
@@ -848,7 +857,7 @@ body {
 <header class="top-nav">
     <a href="Token.php" class="brand-section">
         <div class="logo-badge">
-            <img src="icon.ico" alt="A B INFOTECH" onerror="this.src='app_icon.png'">
+            <img src="app_icon.png" alt="A B INFOTECH" style="height:36px; width:36px; object-fit:contain;">
         </div>
         <div>
             <div class="brand-title">A B INFOTECH</div>
@@ -863,8 +872,8 @@ body {
             <span id="trialBadgeText">🎁 4-Day Free Trial</span>
         </span>
 
-        <!-- Local Server Status Pill -->
-        <div id="serverStatusPill" class="status-pill offline">
+        <!-- Local Server Status Pill (Clickable to Reopen Download Modal) -->
+        <div id="serverStatusPill" class="status-pill offline" onclick="openOfflineModal()" style="cursor:pointer;" title="Click to view software setup & download options">
             <span class="status-dot"></span>
             <span id="serverStatusText">Local Server: OFFLINE</span>
         </div>
@@ -890,7 +899,8 @@ body {
      Includes the Exact Multi-OS Cards Grid
      ==================================================================== -->
 <div id="offline-overlay" class="overlay-backdrop">
-    <div class="glass-3d modal-3d">
+    <div class="glass-3d modal-3d" style="position:relative;">
+        <button type="button" onclick="closeOfflineModal()" style="position:absolute; top:16px; right:18px; background:rgba(255,255,255,0.1); border:none; color:#cbd5e1; font-size:1.1rem; width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" title="Close popup">✕</button>
         <span class="modal-badge" style="background: rgba(239, 68, 68, 0.15); color:#f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
             🔌 Local Signing Server Required
         </span>
@@ -1079,6 +1089,16 @@ body {
             🎁 <b>4-Day Free Web Trial Active:</b> You can sign documents using your USB Hardware Token. In trial mode, documents include a small <code>ABINFO SIGN DEMO</code> watermark on each page.
         </div>
 
+        <!-- Server Offline Warning Banner -->
+        <div id="uploadOfflineBanner" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.4); border-radius:12px; padding:14px 18px; margin-bottom:20px; font-size:0.88rem; color:#f87171; text-align:center;">
+            🔌 <b>Local Signing Server is OFFLINE:</b> Physical USB tokens require the local signing service (Port 5000).<br>
+            <div style="margin-top:8px;">
+                <button type="button" onclick="openOfflineModal()" class="btn-3d btn-cyan" style="padding:6px 16px; font-size:0.8rem;">
+                    ⬇️ Download / Setup Desktop Client
+                </button>
+            </div>
+        </div>
+
         <?php if ($uploadError): ?>
             <div style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:10px; border-radius:10px; margin-bottom:20px; font-size:0.9rem;">
                 <?= $uploadError ?>
@@ -1197,6 +1217,34 @@ if (fileInput) {
                     <label><input type="checkbox" id="chkLocation" checked> Location</label>
                     <label><input type="checkbox" id="chkTick" checked> Green Tick</label>
                     <label><input type="checkbox" id="chkBorder" checked> Box Border</label>
+                </div>
+
+                <!-- ALL PAGES SIGN CHECKBOX -->
+                <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08);">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:700; color:#38bdf8; cursor:pointer;">
+                        <input type="checkbox" id="chkAllPages" name="allPages" style="width:16px; height:16px;">
+                        📑 Sign on All Pages
+                    </label>
+                    <div id="allPagesNote" style="display:none; font-size:0.72rem; color:#94a3b8; margin-top:3px; margin-left:24px;">
+                        ✓ Stamp will be placed at this exact position on every page.
+                    </div>
+                </div>
+            </div>
+
+            <!-- CUSTOM LOGO SECTION -->
+            <div style="background:rgba(10,15,28,0.45); padding:10px 12px; border-radius:10px; margin-bottom:14px; border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:0.72rem; color:#64748b; font-weight:700; margin-bottom:6px;">CUSTOM STAMP LOGO (OPTIONAL)</div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <label for="customLogoInput" class="btn-3d btn-tool" style="cursor:pointer; font-size:0.78rem; padding:6px 12px; margin:0;">
+                        📁 Choose Logo...
+                    </label>
+                    <input type="file" id="customLogoInput" accept="image/png,image/jpeg" style="display:none;">
+                    <span id="logoFileNameDisplay" style="font-size:0.75rem; color:#94a3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:130px;">Default Seal</span>
+                    <button type="button" id="removeLogoBtn" style="display:none; background:transparent; border:none; color:#f87171; cursor:pointer; font-size:0.85rem;" title="Remove Custom Logo">✕</button>
+                </div>
+                <div id="logoPreviewBox" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+                    <img id="customLogoPreview" src="" alt="Logo Preview" style="height:32px; max-width:70px; object-fit:contain; border-radius:4px; background:#ffffff; padding:2px; border:1px solid #38bdf8;">
+                    <span style="font-size:0.72rem; color:#34d399; font-weight:600;">✓ Custom logo active</span>
                 </div>
             </div>
 
@@ -1331,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Render PDF Document
     <?php if (isset($_SESSION['pdfPath'])): ?>
-    pdfjsLib.getDocument('<?= str_replace("\\", "/", $_SESSION["pdfPath"]) ?>').promise.then(pdf => {
+    pdfjsLib.getDocument('<?= str_replace('\\', '/', $_SESSION['pdfPath']) ?>').promise.then(pdf => {
         pdfDoc = pdf;
         const totalPgs = document.getElementById('totalPages');
         if (totalPgs) totalPgs.textContent = pdf.numPages;
@@ -1541,15 +1589,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
             try {
                 const formData = new FormData();
-                const fileBlob = await fetch('<?= str_replace("\\", "/", $_SESSION["pdfPath"] ?? "") ?>').then(r => r.blob());
+                const fileBlob = await fetch('<?= str_replace('\\', '/', $_SESSION['pdfPath'] ?? '') ?>').then(r => r.blob());
 
-                formData.append('file', fileBlob, '<?= sanitizeInput($_SESSION["fileName"] ?? "document.pdf") ?>');
+                formData.append('file', fileBlob, '<?= sanitizeInput($_SESSION['fileName'] ?? 'document.pdf') ?>');
                 formData.append('certificate', JSON.stringify({ alias: certVal }));
                 formData.append('areas', JSON.stringify(signatureAreas));
                 formData.append('password', passVal);
                 formData.append('driver_name', driverVal);
                 formData.append('reason', reasonVal);
                 formData.append('location', locationVal);
+
+                // Pass All Pages Sign option
+                const chkAllPages = document.getElementById('chkAllPages');
+                if (chkAllPages && chkAllPages.checked) {
+                    formData.append('all_pages', 'true');
+                }
+
+                // Pass Custom Stamp Logo if selected
+                const logoInput = document.getElementById('customLogoInput');
+                if (logoInput && logoInput.files && logoInput.files[0]) {
+                    formData.append('custom_logo', logoInput.files[0]);
+                }
 
                 const response = await fetch(`${LOCAL_SERVER}/api/sign`, { method: 'POST', body: formData });
 
@@ -1573,6 +1633,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 signBtn.innerHTML = oldHtml;
                 signBtn.disabled = signatureAreas.length === 0;
             }
+        });
+    }
+
+    // All Pages Sign Checkbox Handler
+    const chkAllPages = document.getElementById('chkAllPages');
+    const allPagesNote = document.getElementById('allPagesNote');
+    if (chkAllPages && allPagesNote) {
+        chkAllPages.addEventListener('change', function() {
+            allPagesNote.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    // Custom Stamp Logo Upload Handler
+    const logoInput = document.getElementById('customLogoInput');
+    const logoDisplay = document.getElementById('logoFileNameDisplay');
+    const logoPreviewBox = document.getElementById('logoPreviewBox');
+    const logoPreviewImg = document.getElementById('customLogoPreview');
+    const removeLogoBtn = document.getElementById('removeLogoBtn');
+
+    if (logoInput) {
+        logoInput.addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                const file = this.files[0];
+                logoDisplay.textContent = file.name;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    logoPreviewImg.src = e.target.result;
+                    logoPreviewBox.style.display = 'flex';
+                    removeLogoBtn.style.display = 'inline-block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    if (removeLogoBtn) {
+        removeLogoBtn.addEventListener('click', function() {
+            if (logoInput) logoInput.value = '';
+            logoDisplay.textContent = 'Default Seal';
+            logoPreviewBox.style.display = 'none';
+            removeLogoBtn.style.display = 'none';
         });
     }
 
@@ -1709,6 +1810,20 @@ async function fetchLatestGithubVersion() {
     return '2.2.0';
 }
 
+let userDismissedOfflineModal = false;
+
+window.openOfflineModal = function() {
+    userDismissedOfflineModal = false;
+    const modal = document.getElementById('offline-overlay');
+    if (modal) modal.style.display = 'flex';
+};
+
+window.closeOfflineModal = function() {
+    userDismissedOfflineModal = true;
+    const modal = document.getElementById('offline-overlay');
+    if (modal) modal.style.display = 'none';
+};
+
 async function checkBackgroundServer() {
     const pill = document.getElementById('serverStatusPill');
     const pillText = document.getElementById('serverStatusText');
@@ -1716,9 +1831,14 @@ async function checkBackgroundServer() {
     const licenseTierText = document.getElementById('licenseTierText');
 
     try {
-        const res = await fetch('http://127.0.0.1:5000/api/health', { mode: 'cors' });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+        const res = await fetch('http://127.0.0.1:5000/api/health', { mode: 'cors', signal: controller.signal });
+        clearTimeout(timeoutId);
         if (res.ok) {
             document.getElementById('offline-overlay').style.display = 'none';
+            const upOff = document.getElementById('uploadOfflineBanner');
+            if (upOff) upOff.style.display = 'none';
             const data = await res.json();
             
             pill.className = 'status-pill';
@@ -1773,18 +1893,23 @@ async function checkBackgroundServer() {
             throw new Error('Local server offline');
         }
     } catch (e) {
-        pill.className = 'status-pill offline';
-        pillText.textContent = 'Local Server: OFFLINE (Port 5000)';
-        document.getElementById('offline-overlay').style.display = 'flex';
-        document.getElementById('update-overlay').style.display = 'none';
+        if (pill) pill.className = 'status-pill offline';
+        if (pillText) pillText.textContent = 'Local Server: OFFLINE (Port 5000)';
+        if (!userDismissedOfflineModal) {
+            const offModal = document.getElementById('offline-overlay');
+            if (offModal) offModal.style.display = 'flex';
+        }
+        const upOff = document.getElementById('uploadOfflineBanner');
+        if (upOff) upOff.style.display = 'block';
+        const updModal = document.getElementById('update-overlay');
+        if (updModal) updModal.style.display = 'none';
     }
 }
 
-window.addEventListener('load', () => {
-    fetchLatestGithubVersion();
-    checkBackgroundServer();
-    setInterval(checkBackgroundServer, 2500);
-});
+// Immediate execution so offline modal & version check trigger without delay
+checkBackgroundServer();
+fetchLatestGithubVersion();
+setInterval(checkBackgroundServer, 2500);
 </script>
 </body>
 </html>

@@ -2919,6 +2919,7 @@ def apply_demo_watermark(pdf_bytes, text="ABINFO SIGN DEMO"):
 
 @app.route('/api/sign', methods=['POST'])
 def sign_pdf():
+    temp_logo_path = None
     try:
         is_activated = LicenseManager.is_activated()
         exp_status = LicenseManager.check_expiration_local() if is_activated else "inactive"
@@ -2929,9 +2930,30 @@ def sign_pdf():
         signature_areas = json.loads(request.form.get('areas', '[]'))
         cert_meta = json.loads(request.form.get('certificate', '{}'))
         serial_number = cert_meta.get('alias')
-        
-        for area in signature_areas:
-            area['page'] = int(area.get('page', 1)) - 1
+        reason_val = request.form.get('reason', '')
+        location_val = request.form.get('location', '')
+        all_pages = request.form.get('all_pages') in ['true', '1', 'True']
+
+        # Handle Custom Logo Upload from Web
+        custom_logo_file = request.files.get('custom_logo')
+        if custom_logo_file and custom_logo_file.filename:
+            temp_logo_path = os.path.join(tempfile.gettempdir(), f"abinfo_web_logo_{uuid.uuid4().hex[:8]}.png")
+            custom_logo_file.save(temp_logo_path)
+
+        # Handle "Sign on All Pages"
+        base_reader = PdfReader(io.BytesIO(pdf_data))
+        num_doc_pages = len(base_reader.pages)
+        if all_pages and signature_areas:
+            first_box = signature_areas[0]
+            replicated = []
+            for p_i in range(num_doc_pages):
+                box_copy = dict(first_box)
+                box_copy['page'] = p_i
+                replicated.append(box_copy)
+            signature_areas = replicated
+        else:
+            for area in signature_areas:
+                area['page'] = int(area.get('page', 1)) - 1
 
         client_driver = request.form.get('driver_name')
         if client_driver and client_driver in DRIVER_MAP:
@@ -2960,7 +2982,11 @@ def sign_pdf():
             if not cert_id: raise ValueError("Certificate not found. Check PIN.")
             signer = PKCS11Signer(pkcs11_session=session, cert_id=cert_id)
 
-            visual_pdf_data = draw_reportlab_layer(pdf_data, signature_areas, cert_parsed)
+            visual_pdf_data = draw_reportlab_layer(
+                pdf_data, signature_areas, cert_parsed,
+                reason=reason_val, location=location_val,
+                logo_path=temp_logo_path
+            )
             # In Web Demo / 4-Day Trial mode without active license, apply small demo watermark on every page
             if is_demo:
                 visual_pdf_data = apply_demo_watermark(visual_pdf_data, text="ABINFO SIGN DEMO")
@@ -3006,6 +3032,10 @@ def sign_pdf():
     except Exception as e:
         logger.error(f"WEB API SIGNING ERROR: {str(e)}\n{traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        if temp_logo_path and os.path.exists(temp_logo_path):
+            try: os.remove(temp_logo_path)
+            except Exception: pass
 
 gui_root = None
 gui_app = None
@@ -8362,30 +8392,25 @@ def main():
                     gui_root.after(0, lambda: SoftwareUpdateManager.check_for_updates(parent=gui_root, silent=False))
 
                 menu_items = [
-                    item('🏠 Open A B INFOTECH Suite', _open_app, default=True),
+                    item('Open A B INFOTECH Suite', _open_app, default=True),
                     pystray.Menu.SEPARATOR,
-                    item('✍️ Sign PDF', _nav('tab_sign')),
-                    item('🗜️ Compress PDF', _nav('tab_compress')),
-                    item('📑 Merge PDF', _nav('tab_merge')),
-                    item('🛡️ Verify Signatures', _nav('tab_verify')),
-                    item('🛠️ PDF Tools Suite', _nav('tab_tools')),
-                    item('📖 OCR & Edit PDF', _nav('tab_ocr_edit')),
+                    item('Sign PDF Document', _nav('tab_sign')),
+                    item('Compress PDF Document', _nav('tab_compress')),
+                    item('Merge PDF Documents', _nav('tab_merge')),
+                    item('Verify Signatures', _nav('tab_verify')),
+                    item('PDF Tools Suite', _nav('tab_tools')),
+                    item('OCR && Edit PDF (TrueEdit)', _nav('tab_ocr_edit')),
                     pystray.Menu.SEPARATOR,
-                    item(lambda itm: "⏹️ Stop Local API Server" if local_api_server.is_running else "▶️ Start Local API Server", _toggle_server),
-                    item('🔄 Check for Software Updates', _check_upd),
+                    item(lambda itm: "Stop Local API Server (Port 5000)" if local_api_server.is_running else "Start Local API Server (Port 5000)", _toggle_server),
+                    item('Check for Software Updates...', _check_upd),
+                    pystray.Menu.SEPARATOR,
+                    item('Settings && License...', _open_settings),
+                    item('Token Driver Shortcuts...', _open_shortcuts),
+                    item('WhatsApp Support (+91 7016797720)', _open_wa),
+                    item('Buy DSC / License Online...', _open_buy),
+                    pystray.Menu.SEPARATOR,
+                    item('Exit Application', _exit_app)
                 ]
-                if LicenseManager.is_pro():
-                    menu_items.append(item('📖 OCR & Edit PDF (Pro)', _nav('tab_ocr_edit')))
-                
-                menu_items.extend([
-                    pystray.Menu.SEPARATOR,
-                    item('⚙️ Settings & License', _open_settings),
-                    item('🔌 Token Driver Shortcuts', _open_shortcuts),
-                    item('💬 WhatsApp Support (+91 7016797720)', _open_wa),
-                    item('🛒 Buy DSC / License', _open_buy),
-                    pystray.Menu.SEPARATOR,
-                    item('🚪 Exit Application', _exit_app)
-                ])
 
                 tray_icon = pystray.Icon(
                     "abinfo_signer",
