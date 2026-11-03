@@ -3,15 +3,17 @@
   "name": "A B INFOTECH - PDF Sign & All-in-One Power Suite",
   "release_date": "2026-11-02",
   "download_url": "https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe",
+  "android_download_url": "https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Android.apk",
   "fallback_url": "https://github.com/a-b-infotech/signer/releases/download/v1.1/Abinfo_Signer_Windows_Setup.exe",
   "offline_installer_url": "https://github.com/a-b-infotech/my-software/releases/download/1.0/Abinfo_Signer_Offline.exe",
-  "min_os": "Windows 10 / 11 (32-bit & 64-bit)",
+  "min_os": "Windows 10 / 11 (32-bit & 64-bit), macOS, Linux, Android 8.0+",
   "changelog": [
     "Full-featured Web PDF Signer workspace (Token.php) with interactive signature placement, USB token PIN validation, and instant download",
     "Completely resolved 'need font file or buffer' error in PDF Text Editor (TrueEdit / OCR & Edit) with resilient 5-tier font fallback engine",
     "Added one-click 'Apply Edit' and 'Redact / Delete' action buttons directly inside the top formatting ribbon",
     "Full typography support for Hindi/Devanagari, custom TrueType fonts, and Unicode symbols with overflow-protected box fitting",
     "Seamless signature preservation across compression and merge tools with high-res 300 DPI stamps",
-    "Background Local API Server (Port 5000) controls and automated live update installer system"
+    "Background Local API Server (Port 5000) controls and automated live update installer system",
+    "Official Android Server APK with background foreground service on Port 5000, .pfx/.p12 certificate signing engine, and built-in Web Studio"
   ]
 }

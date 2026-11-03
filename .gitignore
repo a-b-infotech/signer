@@ -23,6 +23,12 @@ downloads/
 WhatsApp_Browser_Data/
 test_stamp_*.png
 
+# Android build outputs & local keystore
+android/build_output/
+android/**/build/
+android/.gradle/
+*.keystore
+
 # Local OS metadata
 Thumbs.db
 .DS_Store

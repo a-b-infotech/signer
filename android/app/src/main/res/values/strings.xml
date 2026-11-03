@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">A B INFOTECH Signer</string>
+    <string name="server_title">Local Signing Server (Port 5000)</string>
+    <string name="server_desc">Background service allowing web studio and local apps to sign PDFs</string>
+    <string name="btn_start_server">Start Server</string>
+    <string name="btn_stop_server">Stop Server</string>
+    <string name="btn_open_studio">🚀 Open Web Signing Studio</string>
+    <string name="cert_manager_title">Digital Certificate Storage (.pfx / .p12)</string>
+    <string name="btn_import_cert">📁 Import Digital Certificate</string>
+    <string name="license_title">Software License &amp; Activation</string>
+    <string name="btn_activate">Activate License</string>
+</resources>

@@ -35,32 +35,32 @@ if (!isset($pdo) || !$pdo) {
 // ====================================================================
 if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
     $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
-    
+
     if (empty($license_key)) {
-        header("Location: http://127.0.0.1:5000/api/sync_callback?status=invalid");
+        header('Location: http://127.0.0.1:5000/api/sync_callback?status=invalid');
         exit;
     }
 
     // Developer bypass
     if ($license_key === 'ABI-MASTER-PASS') {
-        header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=pro");
+        header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=pro');
         exit;
     }
 
     try {
         if (!$pdo) {
-            header("Location: http://127.0.0.1:5000/api/sync_callback?status=error");
+            header('Location: http://127.0.0.1:5000/api/sync_callback?status=error');
             exit;
         }
 
-        $stmt = $pdo->prepare("SELECT id, status, expiredate, license_tier, activated_at FROM license_keys WHERE license_key = :key LIMIT 1");
+        $stmt = $pdo->prepare('SELECT id, status, expiredate, license_tier, activated_at FROM license_keys WHERE license_key = :key LIMIT 1');
         $stmt->bindParam(':key', $license_key);
         $stmt->execute();
 
         if ($stmt->rowCount() > 0) {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-            
+
             // If key status is inactive, activate key and set starting date and time as current system time
             if (strtolower($row['status']) === 'inactive') {
                 if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
@@ -75,18 +75,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
             }
 
             if ($row['status'] !== 'active') {
-                header("Location: http://127.0.0.1:5000/api/sync_callback?status=inactive");
-            } 
-            elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                header("Location: http://127.0.0.1:5000/api/sync_callback?status=expired");
+                header('Location: http://127.0.0.1:5000/api/sync_callback?status=inactive');
+            } elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
+                header('Location: http://127.0.0.1:5000/api/sync_callback?status=expired');
             } else {
-                header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=" . urlencode($tier));
+                header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=' . urlencode($tier));
             }
         } else {
-            header("Location: http://127.0.0.1:5000/api/sync_callback?status=invalid");
+            header('Location: http://127.0.0.1:5000/api/sync_callback?status=invalid');
         }
     } catch (Exception $e) {
-        header("Location: http://127.0.0.1:5000/api/sync_callback?status=error");
+        header('Location: http://127.0.0.1:5000/api/sync_callback?status=error');
     }
     exit;
 }
@@ -114,18 +113,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
             exit;
         }
 
-        $stmt = $pdo->prepare("SELECT status, expiredate, license_tier FROM license_keys WHERE license_key = :key LIMIT 1");
+        $stmt = $pdo->prepare('SELECT status, expiredate, license_tier FROM license_keys WHERE license_key = :key LIMIT 1');
         $stmt->bindParam(':key', $key);
         $stmt->execute();
 
         if ($stmt->rowCount() > 0) {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-            
+
             if ($row['status'] !== 'active') {
                 echo json_encode(['status' => 'inactive']);
-            } 
-            elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
+            } elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
                 echo json_encode(['status' => 'expired']);
             } else {
                 echo json_encode([
@@ -150,30 +148,30 @@ if (isset($_REQUEST['key'])) {
     $license_key = trim($_REQUEST['key']);
 
     if (empty($license_key)) {
-        header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("No license key provided. Please contact +91 7016797720 or sales@a-b-infotech.in"));
+        header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('No license key provided. Please contact +91 7016797720 or sales@a-b-infotech.in'));
         exit;
     }
 
     // Developer Bypass
     if ($license_key === 'ABI-MASTER-PASS') {
-        header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=ABI-MASTER-PASS&expiredate=never&tier=pro");
+        header('Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=ABI-MASTER-PASS&expiredate=never&tier=pro');
         exit;
     }
 
     try {
         if (!$pdo) {
-            header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Error: Could not connect to database"));
+            header('Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=' . urlencode('Database Error: Could not connect to database'));
             exit;
         }
 
-        $query = "SELECT id, status, expiredate, license_tier, activated_at FROM license_keys WHERE license_key = :key LIMIT 1";
+        $query = 'SELECT id, status, expiredate, license_tier, activated_at FROM license_keys WHERE license_key = :key LIMIT 1';
         $stmt = $pdo->prepare($query);
         $stmt->bindParam(':key', $license_key);
         $stmt->execute();
 
         if ($stmt->rowCount() > 0) {
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            
+
             // If key status in database is inactive: activate key and set starting date and time as current system date and time
             if (strtolower($row['status']) === 'inactive') {
                 if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
@@ -190,34 +188,34 @@ if (isset($_REQUEST['key'])) {
 
             // Block if suspended, revoked or blocked
             if ($row['status'] !== 'active') {
-                header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("This license key is " . $row['status'] . ". Please contact +91 7016797720 (sales@a-b-infotech.in) to activate."));
+                header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('This license key is ' . $row['status'] . '. Please contact +91 7016797720 (sales@a-b-infotech.in) to activate.'));
                 exit;
             }
 
             // Block if expired
             if (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("This license key has expired. Please contact +91 7016797720 (sales@a-b-infotech.in) to renew."));
+                header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('This license key has expired. Please contact +91 7016797720 (sales@a-b-infotech.in) to renew.'));
                 exit;
             }
 
             // Update activated_at if first time activated and empty
             if (empty($row['activated_at']) || $row['activated_at'] === '0000-00-00 00:00:00') {
-                $upd = $pdo->prepare("UPDATE license_keys SET activated_at = NOW() WHERE id = :id");
+                $upd = $pdo->prepare('UPDATE license_keys SET activated_at = NOW() WHERE id = :id');
                 $upd->execute([':id' => $row['id']]);
             }
 
             $exp_date = !empty($row['expiredate']) ? $row['expiredate'] : 'never';
             $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
 
-            header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=" . urlencode($license_key) . "&expiredate=" . urlencode($exp_date) . "&tier=" . urlencode($tier));
+            header('Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=' . urlencode($license_key) . '&expiredate=' . urlencode($exp_date) . '&tier=' . urlencode($tier));
             exit;
         } else {
             // If license key not found: send error
-            header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("License key not found! Please check your license key or contact +91 7016797720 / sales@a-b-infotech.in."));
+            header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('License key not found! Please check your license key or contact +91 7016797720 / sales@a-b-infotech.in.'));
             exit;
         }
     } catch (Exception $e) {
-        header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Error: " . $e->getMessage()));
+        header('Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=' . urlencode('Database Error: ' . $e->getMessage()));
         exit;
     }
 }
@@ -960,6 +958,9 @@ body {
 .btn-linux {
     background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
 }
+.btn-android {
+    background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+}
 
 .file-info {
     font-size: 0.72rem;
@@ -1018,7 +1019,7 @@ body {
 <header class="top-nav">
     <a href="Token.php" class="brand-section">
         <div class="logo-badge">
-            <img src="app_icon.png" alt="A B INFOTECH" style="height:36px; width:36px; object-fit:contain;">
+            <img src="abinfo.png" alt="A B INFOTECH" style="height:36px; width:36px; object-fit:contain;">
         </div>
         <div>
             <div class="brand-title">A B INFOTECH</div>
@@ -1107,6 +1108,17 @@ body {
                 </a>
                 <span class="file-info">Abinfo_Signer_Linux.tar.gz</span>
             </div>
+
+            <!-- Android Card -->
+            <div class="os-card" style="border-color: rgba(16, 185, 129, 0.4); background: rgba(6, 78, 59, 0.25);">
+                <div class="os-icon">🤖</div>
+                <h2 class="os-title">Android APK</h2>
+                <p class="os-desc">Android 8.0 to 14+ (ARM / x86)<br><strong>Mobile Server & Signer App</strong><br>Port 5000 Service + Web Studio</p>
+                <a href="https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Android.apk" class="btn-download btn-android">
+                    <span>⬇️ Download Android APK</span>
+                </a>
+                <span class="file-info">Abinfo_Signer_Android.apk</span>
+            </div>
         </div>
 
         <div style="margin-top: 10px;">
@@ -1165,6 +1177,17 @@ body {
                     <span>⬇️ Download for Linux</span>
                 </a>
                 <span class="file-info">Abinfo_Signer_Linux.tar.gz</span>
+            </div>
+
+            <!-- Android Card -->
+            <div class="os-card" style="border-color: rgba(16, 185, 129, 0.4); background: rgba(6, 78, 59, 0.25);">
+                <div class="os-icon">🤖</div>
+                <h2 class="os-title">Android APK</h2>
+                <p class="os-desc">Android 8.0 to 14+ (ARM / x86)<br><strong>Mobile Server & Signer App</strong><br>Port 5000 Service + Web Studio</p>
+                <a href="https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Android.apk" class="btn-download btn-android">
+                    <span>⬇️ Download Android APK</span>
+                </a>
+                <span class="file-info">Abinfo_Signer_Android.apk</span>
             </div>
         </div>
 

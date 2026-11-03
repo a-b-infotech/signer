@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.AbinfoSigner" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg_dark</item>
+        <item name="android:statusBarColor">#070A14</item>
+        <item name="android:navigationBarColor">#070A14</item>
+    </style>
+</resources>

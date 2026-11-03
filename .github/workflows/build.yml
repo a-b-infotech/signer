@@ -157,11 +157,43 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------
-  # 6. DIRECT DOWNLOAD RELEASE PUBLISHER
+  # 6. BUILD ANDROID APK
+  # -------------------------------------------------------------
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build Android APK
+        run: |
+          python build_apk.py
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Abinfo_Signer_Android
+          path: dist/Abinfo_Signer_Android.apk
+          if-no-files-found: error
+
+  # -------------------------------------------------------------
+  # 7. DIRECT DOWNLOAD RELEASE PUBLISHER
   # -------------------------------------------------------------
   release:
     name: Publish Public Direct Download Release
-    needs: [build]
+    needs: [build, build-android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -175,23 +207,24 @@ jobs:
         run: |
           mkdir -p release_assets
           cp artifacts/Abinfo_Signer_Windows_Setup/Abinfo_Signer_Windows_Setup.exe release_assets/Abinfo_Signer_Windows_Setup.exe || true
-          cp artifacts/Abinfo_Signer_Linux_x64/Abinfo_Signer_Linux_x64.tar.gz release_assets/Abinfo_Signer_Linux.tar.gz
-          cp artifacts/Abinfo_Signer_macOS/Abinfo_Signer_macOS.zip release_assets/Abinfo_Signer_macOS.zip
+          cp artifacts/Abinfo_Signer_Linux_x64/Abinfo_Signer_Linux_x64.tar.gz release_assets/Abinfo_Signer_Linux.tar.gz || true
+          cp artifacts/Abinfo_Signer_macOS/Abinfo_Signer_macOS.zip release_assets/Abinfo_Signer_macOS.zip || true
+          cp artifacts/Abinfo_Signer_Android/Abinfo_Signer_Android.apk release_assets/Abinfo_Signer_Android.apk || true
           ls -la release_assets
 
       - name: Publish or Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1
-          name: "ABInfo Digital Signer v1.1 (Multi-OS)"
+          tag_name: v2.2.0
+          name: "ABInfo Digital Signer v2.2.0 (Multi-OS & Android)"
           draft: false
           prerelease: false
           make_latest: true
           body: |
-            ## ABInfo Digital PDF Signer v1.1
+            ## ABInfo Digital PDF Signer v2.2.0 (Multi-OS Suite & Android)
             Direct download links for official website integration:
-            - **Windows Setup Installer**: [Abinfo_Signer_Windows_Setup.exe](https://github.com/a-b-infotech/abinfo-signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe)
-            - **macOS Bundle**: [Abinfo_Signer_macOS.zip](https://github.com/a-b-infotech/abinfo-signer/releases/latest/download/Abinfo_Signer_macOS.zip)
-            - **Linux Package**: [Abinfo_Signer_Linux.tar.gz](https://github.com/a-b-infotech/abinfo-signer/releases/latest/download/Abinfo_Signer_Linux.tar.gz)
+            - **Windows Setup Installer**: [Abinfo_Signer_Windows_Setup.exe](https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe)
+            - **Android APK (Mobile Server & Signer)**: [Abinfo_Signer_Android.apk](https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Android.apk)
+            - **macOS Bundle**: [Abinfo_Signer_macOS.zip](https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_macOS.zip)
+            - **Linux Package**: [Abinfo_Signer_Linux.tar.gz](https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Linux.tar.gz)
           files: release_assets/*
-
