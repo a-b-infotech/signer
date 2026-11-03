@@ -1,4 +1,7 @@
 <?php
+// A B INFOTECH - Unified Digital Signer & PDF Power Suite License API
+ini_set('display_errors', 0);
+error_reporting(0);
 session_start();
 
 // Set Timezone to India to ensure EXACT time matching for expiration
@@ -38,6 +41,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
         exit;
     }
 
+    // Developer bypass
     if ($license_key === 'ABI-MASTER-PASS') {
         header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=pro");
         exit;
@@ -142,7 +146,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
 // ====================================================================
 // 3. HANDLE BROWSER ACTIVATION (When User enters key in Desktop App)
 // ====================================================================
-if (isset($_REQUEST['key']) && (!isset($_GET['action']) || $_GET['action'] === 'activate' || $_GET['action'] === 'browser_activate')) {
+if (isset($_REQUEST['key'])) {
     $license_key = trim($_REQUEST['key']);
 
     if (empty($license_key)) {
@@ -150,6 +154,7 @@ if (isset($_REQUEST['key']) && (!isset($_GET['action']) || $_GET['action'] === '
         exit;
     }
 
+    // Developer Bypass
     if ($license_key === 'ABI-MASTER-PASS') {
         header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=ABI-MASTER-PASS&expiredate=never&tier=pro");
         exit;
@@ -157,7 +162,7 @@ if (isset($_REQUEST['key']) && (!isset($_GET['action']) || $_GET['action'] === '
 
     try {
         if (!$pdo) {
-            header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Connection Error"));
+            header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Error: Could not connect to database"));
             exit;
         }
 

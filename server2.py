@@ -701,10 +701,9 @@ class LicenseManager:
 
         urls_to_try = [
             f"http://127.0.0.1/abinfo_signer/Token.php?action=verify_license&key={urllib.parse.quote(key)}",
-            f"http://127.0.0.1/abinfo_signer/activate_web.php?action=verify_license&key={urllib.parse.quote(key)}",
             f"{LicenseManager.WEBSITE_URL}?action=verify_license&key={urllib.parse.quote(key)}",
             f"https://sign.a-b-infotech.in/Token?action=verify_license&key={urllib.parse.quote(key)}",
-            f"https://sign.a-b-infotech.in/activate_web.php?action=verify_license&key={urllib.parse.quote(key)}"
+            f"https://sign.a-b-infotech.in/Token.php?action=verify_license&key={urllib.parse.quote(key)}"
         ]
         for url in urls_to_try:
             try:
