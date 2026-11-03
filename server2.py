@@ -505,7 +505,7 @@ def apply_app_icon(window):
 # ==========================================
 class LicenseManager:
     LICENSE_FILE = os.path.join(APP_DIR, "system_cache.ico")
-    WEBSITE_URL = "https://sign.a-b-infotech.in/Token"
+    WEBSITE_URL = "https://sign.a-b-infotech.in/Token.php"
     MAGIC_DELIMITER = b"---ABI_SECRET_KEY---"
     activation_error = None
 
@@ -701,7 +701,10 @@ class LicenseManager:
 
         urls_to_try = [
             f"http://127.0.0.1/abinfo_signer/Token.php?action=verify_license&key={urllib.parse.quote(key)}",
-            f"{LicenseManager.WEBSITE_URL}?action=verify_license&key={urllib.parse.quote(key)}"
+            f"http://127.0.0.1/abinfo_signer/activate_web.php?action=verify_license&key={urllib.parse.quote(key)}",
+            f"{LicenseManager.WEBSITE_URL}?action=verify_license&key={urllib.parse.quote(key)}",
+            f"https://sign.a-b-infotech.in/Token?action=verify_license&key={urllib.parse.quote(key)}",
+            f"https://sign.a-b-infotech.in/activate_web.php?action=verify_license&key={urllib.parse.quote(key)}"
         ]
         for url in urls_to_try:
             try:
@@ -6466,6 +6469,7 @@ class VisualPdfSignerApp:
             return
 
         self.btn_activate.config(state=tk.DISABLED, text="Waiting for Browser...")
+        LicenseManager.activation_error = None
         safe_key = urllib.parse.quote(user_key)
         url = f"{LicenseManager.WEBSITE_URL}?key={safe_key}"
         self._open_url_in_app_mode(url, hide_window=False)

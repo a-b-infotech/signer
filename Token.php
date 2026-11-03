@@ -4,32 +4,221 @@ session_start();
 // Set Timezone to India to ensure EXACT time matching for expiration
 date_default_timezone_set('Asia/Kolkata');
 
-// ==========================================
-// 1. DATABASE CONFIGURATION FOR LICENSE CHECK
-// ==========================================
-$db_host = 'sql302.ezyro.com';
-$db_user = 'ezyro_37092101';  // DB username
-$db_pass = 'abhi@123';  // DB password
-$db_name = 'ezyro_37092101_fj';  // DB name
-$table_name = 'license_keys';  // Table name
+// ====================================================================
+// DATABASE CONFIGURATION (Supports db.php with Fallback PDO)
+// ====================================================================
+if (file_exists(__DIR__ . '/db.php')) {
+    require_once __DIR__ . '/db.php';
+}
 
-function getDbConnection($db_host, $db_user, $db_pass, $db_name)
-{
+if (!isset($pdo) || !$pdo) {
+    $db_host = 'sql302.ezyro.com';
+    $db_user = 'ezyro_37092101';
+    $db_pass = 'abhi@123';
+    $db_name = 'ezyro_37092101_fj';
     try {
-        $conn = mysqli_init();
-        if (!$conn)
-            return null;
-        $conn->options(MYSQLI_OPT_CONNECT_TIMEOUT, 3);
-        if (@$conn->real_connect($db_host, $db_user, $db_pass, $db_name)) {
-            return $conn;
-        }
+        $pdo = new PDO("mysql:host=$db_host;dbname=$db_name;charset=utf8mb4", $db_user, $db_pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_TIMEOUT => 5
+        ]);
     } catch (Exception $e) {
+        $pdo = null;
     }
-    return null;
 }
 
 // ====================================================================
-// 2. AJAX ENDPOINT: FETCH LATEST VERSION METADATA FROM GITHUB
+// 1. HANDLE BROWSER SYNC (Opens in browser, redirects to Python)
+// ====================================================================
+if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
+    $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
+    
+    if (empty($license_key)) {
+        header("Location: http://127.0.0.1:5000/api/sync_callback?status=invalid");
+        exit;
+    }
+
+    if ($license_key === 'ABI-MASTER-PASS') {
+        header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=pro");
+        exit;
+    }
+
+    try {
+        if (!$pdo) {
+            header("Location: http://127.0.0.1:5000/api/sync_callback?status=error");
+            exit;
+        }
+
+        $stmt = $pdo->prepare("SELECT id, status, expiredate, license_tier, activated_at FROM license_keys WHERE license_key = :key LIMIT 1");
+        $stmt->bindParam(':key', $license_key);
+        $stmt->execute();
+
+        if ($stmt->rowCount() > 0) {
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
+            
+            // If key status is inactive, activate key and set starting date and time as current system time
+            if (strtolower($row['status']) === 'inactive') {
+                if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
+                    $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = :id");
+                    $upd->execute([':id' => $row['id']]);
+                    $row['expiredate'] = date('Y-m-d H:i:s', strtotime('+1 year'));
+                } else {
+                    $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW() WHERE id = :id");
+                    $upd->execute([':id' => $row['id']]);
+                }
+                $row['status'] = 'active';
+            }
+
+            if ($row['status'] !== 'active') {
+                header("Location: http://127.0.0.1:5000/api/sync_callback?status=inactive");
+            } 
+            elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
+                header("Location: http://127.0.0.1:5000/api/sync_callback?status=expired");
+            } else {
+                header("Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=" . urlencode($tier));
+            }
+        } else {
+            header("Location: http://127.0.0.1:5000/api/sync_callback?status=invalid");
+        }
+    } catch (Exception $e) {
+        header("Location: http://127.0.0.1:5000/api/sync_callback?status=error");
+    }
+    exit;
+}
+
+// ====================================================================
+// 2. HANDLE BACKGROUND API VERIFICATION
+// ====================================================================
+if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
+    header('Content-Type: application/json');
+    $key = $_REQUEST['key'] ?? '';
+
+    // Developer Bypass
+    if ($key === 'ABI-MASTER-PASS') {
+        echo json_encode([
+            'status' => 'active',
+            'tier' => 'pro',
+            'expiredate' => 'never'
+        ]);
+        exit;
+    }
+
+    try {
+        if (!$pdo) {
+            echo json_encode(['status' => 'error', 'message' => 'Database Error']);
+            exit;
+        }
+
+        $stmt = $pdo->prepare("SELECT status, expiredate, license_tier FROM license_keys WHERE license_key = :key LIMIT 1");
+        $stmt->bindParam(':key', $key);
+        $stmt->execute();
+
+        if ($stmt->rowCount() > 0) {
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
+            
+            if ($row['status'] !== 'active') {
+                echo json_encode(['status' => 'inactive']);
+            } 
+            elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
+                echo json_encode(['status' => 'expired']);
+            } else {
+                echo json_encode([
+                    'status' => 'active',
+                    'tier' => $tier,
+                    'expiredate' => !empty($row['expiredate']) ? $row['expiredate'] : 'never'
+                ]);
+            }
+        } else {
+            echo json_encode(['status' => 'invalid', 'message' => 'License key not found!']);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['status' => 'error', 'message' => 'Database Error']);
+    }
+    exit;
+}
+
+// ====================================================================
+// 3. HANDLE BROWSER ACTIVATION (When User enters key in Desktop App)
+// ====================================================================
+if (isset($_REQUEST['key']) && (!isset($_GET['action']) || $_GET['action'] === 'activate' || $_GET['action'] === 'browser_activate')) {
+    $license_key = trim($_REQUEST['key']);
+
+    if (empty($license_key)) {
+        header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("No license key provided. Please contact +91 7016797720 or sales@a-b-infotech.in"));
+        exit;
+    }
+
+    if ($license_key === 'ABI-MASTER-PASS') {
+        header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=ABI-MASTER-PASS&expiredate=never&tier=pro");
+        exit;
+    }
+
+    try {
+        if (!$pdo) {
+            header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Connection Error"));
+            exit;
+        }
+
+        $query = "SELECT id, status, expiredate, license_tier, activated_at FROM license_keys WHERE license_key = :key LIMIT 1";
+        $stmt = $pdo->prepare($query);
+        $stmt->bindParam(':key', $license_key);
+        $stmt->execute();
+
+        if ($stmt->rowCount() > 0) {
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // If key status in database is inactive: activate key and set starting date and time as current system date and time
+            if (strtolower($row['status']) === 'inactive') {
+                if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
+                    $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = :id");
+                    $upd->execute([':id' => $row['id']]);
+                    $row['expiredate'] = date('Y-m-d H:i:s', strtotime('+1 year'));
+                } else {
+                    $upd = $pdo->prepare("UPDATE license_keys SET status = 'active', activated_at = NOW() WHERE id = :id");
+                    $upd->execute([':id' => $row['id']]);
+                }
+                $row['status'] = 'active';
+                $row['activated_at'] = date('Y-m-d H:i:s');
+            }
+
+            // Block if suspended, revoked or blocked
+            if ($row['status'] !== 'active') {
+                header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("This license key is " . $row['status'] . ". Please contact +91 7016797720 (sales@a-b-infotech.in) to activate."));
+                exit;
+            }
+
+            // Block if expired
+            if (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
+                header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("This license key has expired. Please contact +91 7016797720 (sales@a-b-infotech.in) to renew."));
+                exit;
+            }
+
+            // Update activated_at if first time activated and empty
+            if (empty($row['activated_at']) || $row['activated_at'] === '0000-00-00 00:00:00') {
+                $upd = $pdo->prepare("UPDATE license_keys SET activated_at = NOW() WHERE id = :id");
+                $upd->execute([':id' => $row['id']]);
+            }
+
+            $exp_date = !empty($row['expiredate']) ? $row['expiredate'] : 'never';
+            $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
+
+            header("Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=" . urlencode($license_key) . "&expiredate=" . urlencode($exp_date) . "&tier=" . urlencode($tier));
+            exit;
+        } else {
+            // If license key not found: send error
+            header("Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=" . urlencode("License key not found! Please check your license key or contact +91 7016797720 / sales@a-b-infotech.in."));
+            exit;
+        }
+    } catch (Exception $e) {
+        header("Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=" . urlencode("Database Error: " . $e->getMessage()));
+        exit;
+    }
+}
+
+// ====================================================================
+// 4. AJAX ENDPOINT: FETCH LATEST VERSION METADATA FROM GITHUB
 // Source: https://github.com/a-b-infotech/signer/blob/main/version.json
 // ====================================================================
 if (isset($_GET['action']) && $_GET['action'] === 'get_latest_version') {
@@ -51,9 +240,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_latest_version') {
                 'verify_peer_name' => false
             ]
         ]);
-        $content = @file_get_contents($vurl, false, $ctx);
-        if ($content) {
-            $parsed = @json_decode($content, true);
+        $v_content = @file_get_contents($vurl, false, $ctx);
+        if ($v_content) {
+            $parsed = @json_decode($v_content, true);
             if ($parsed && isset($parsed['version'])) {
                 $data = $parsed;
                 break;
@@ -69,127 +258,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_latest_version') {
             'download_url' => 'https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe'
         ]);
     }
-    exit;
-}
-
-// ====================================================================
-// 3. AJAX ENDPOINT: VERIFY LICENSE FROM DATABASE
-// ====================================================================
-if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
-    header('Content-Type: application/json');
-    $key = $_POST['key'] ?? ($_GET['key'] ?? '');
-
-    // Developer Bypass
-    if ($key === 'ABI-MASTER-PASS') {
-        echo json_encode(['status' => 'active', 'tier' => 'pro']);
-        exit;
-    }
-
-    $conn = getDbConnection($db_host, $db_user, $db_pass, $db_name);
-    if (!$conn || $conn->connect_error) {
-        echo json_encode(['status' => 'error', 'message' => 'DB Connection failed']);
-        exit;
-    }
-
-    $stmt = $conn->prepare("SELECT status, expiredate, license_tier FROM $table_name WHERE license_key = ? LIMIT 1");
-    if ($stmt) {
-        $stmt->bind_param('s', $key);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($row = $result->fetch_assoc()) {
-            if ($row['status'] !== 'active') {
-                echo json_encode(['status' => 'inactive']);
-            }
-            // Checks Date AND EXACT Time (Hours:Minutes:Seconds) against current IST time
-            elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                echo json_encode(['status' => 'expired']);
-            } else {
-                $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-                echo json_encode(['status' => 'active', 'tier' => $tier]);
-            }
-        } else {
-            echo json_encode(['status' => 'invalid']);
-        }
-        $stmt->close();
-    } else {
-        echo json_encode(['status' => 'error', 'message' => 'Query error']);
-    }
-
-    $conn->close();
-    exit;
-}
-
-// ====================================================================
-// 4. DESKTOP APP BROWSER SYNC ENDPOINT
-// ====================================================================
-if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
-    $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
-
-    if (empty($license_key)) {
-        header('Location: http://127.0.0.1:5000/api/sync_callback?status=invalid');
-        exit;
-    }
-
-    if ($license_key === 'ABI-MASTER-PASS') {
-        header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=ABI-MASTER-PASS&status_val=active&tier=pro&client_email=' . urlencode('sales@a-b-infotech.in') . '&activated_at=' . urlencode(date('Y-m-d H:i:s')) . '&expiredate=never');
-        exit;
-    }
-
-    $conn = getDbConnection($db_host, $db_user, $db_pass, $db_name);
-    if ($conn) {
-        $stmt = $conn->prepare("SELECT id, license_key, status, expiredate, license_tier, client_email, activated_at FROM $table_name WHERE license_key = ? LIMIT 1");
-        if ($stmt) {
-            $stmt->bind_param('s', $license_key);
-            $stmt->execute();
-            $result = $stmt->get_result();
-
-            if ($row = $result->fetch_assoc()) {
-                $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
-
-                if (strtolower($row['status']) === 'inactive') {
-                    if (empty($row['expiredate']) || $row['expiredate'] === '0000-00-00 00:00:00') {
-                        $upd = $conn->prepare("UPDATE $table_name SET status = 'active', activated_at = NOW(), expiredate = DATE_ADD(NOW(), INTERVAL 1 YEAR) WHERE id = ?");
-                        if ($upd) {
-                            $upd->bind_param('i', $row['id']);
-                            $upd->execute();
-                            $upd->close();
-                        }
-                        $row['expiredate'] = date('Y-m-d H:i:s', strtotime('+1 year'));
-                    } else {
-                        $upd = $conn->prepare("UPDATE $table_name SET status = 'active', activated_at = NOW() WHERE id = ?");
-                        if ($upd) {
-                            $upd->bind_param('i', $row['id']);
-                            $upd->execute();
-                            $upd->close();
-                        }
-                    }
-                    $row['status'] = 'active';
-                    $row['activated_at'] = date('Y-m-d H:i:s');
-                }
-
-                $client_email = $row['client_email'] ?? '';
-                $activated_at = $row['activated_at'] ?? '';
-                $expiredate = !empty($row['expiredate']) ? $row['expiredate'] : 'never';
-                $id = $row['id'];
-
-                if ($row['status'] !== 'active') {
-                    header('Location: http://127.0.0.1:5000/api/sync_callback?status=' . urlencode($row['status']) . '&id=' . urlencode($id) . '&key=' . urlencode($license_key) . '&tier=' . urlencode($tier) . '&client_email=' . urlencode($client_email) . '&activated_at=' . urlencode($activated_at) . '&expiredate=' . urlencode($expiredate));
-                } elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                    header('Location: http://127.0.0.1:5000/api/sync_callback?status=expired&id=' . urlencode($id) . '&key=' . urlencode($license_key) . '&tier=' . urlencode($tier) . '&client_email=' . urlencode($client_email) . '&activated_at=' . urlencode($activated_at) . '&expiredate=' . urlencode($expiredate));
-                } else {
-                    header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=' . urlencode($id) . '&key=' . urlencode($license_key) . '&status_val=' . urlencode($row['status']) . '&tier=' . urlencode($tier) . '&client_email=' . urlencode($client_email) . '&activated_at=' . urlencode($activated_at) . '&expiredate=' . urlencode($expiredate));
-                }
-                $stmt->close();
-                $conn->close();
-                exit;
-            }
-            $stmt->close();
-        }
-        $conn->close();
-    }
-
-    header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&id=1&key=' . urlencode($license_key) . '&status_val=active&tier=pro&client_email=' . urlencode('sales@a-b-infotech.in') . '&activated_at=' . urlencode(date('Y-m-d H:i:s')) . '&expiredate=never');
     exit;
 }
 
