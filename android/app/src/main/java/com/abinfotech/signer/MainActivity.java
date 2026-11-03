@@ -15,6 +15,9 @@ import android.widget.Toast;
 import java.io.InputStream;
 
 public class MainActivity extends Activity {
+
+    private static final int REQ_IMPORT_CERT = 1001;
+
     private TextView tvHeaderStatus;
     private TextView tvServerIp;
     private TextView tvLanIp;
@@ -25,8 +28,6 @@ public class MainActivity extends Activity {
     private Button btnImportCert;
     private Button btnActivate;
     private EditText etLicenseKey;
-
-    private static final int REQ_IMPORT_CERT = 1002;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,6 +44,9 @@ public class MainActivity extends Activity {
         btnImportCert = (Button) findViewById(R.id.btnImportCert);
         btnActivate = (Button) findViewById(R.id.btnActivate);
         etLicenseKey = (EditText) findViewById(R.id.etLicenseKey);
+
+        // Load USB Token drivers & native libraries
+        UsbTokenManager.tryLoadNativeLibraries();
 
         // Auto-start background local server
         startServerService();
@@ -159,7 +163,8 @@ public class MainActivity extends Activity {
             tvLanIp.setText("Wi-Fi IP: 127.0.0.1:5000");
         }
 
-        tvCertCount.setText("Installed Certificates: " + CertificateManager.getCertCount(this));
+        String tokenSummary = UsbTokenManager.getConnectedTokenSummary(this);
+        tvCertCount.setText("Certs: " + CertificateManager.getCertCount(this) + " | " + tokenSummary);
         tvLicenseStatus.setText("Status: " + LicenseManager.getLicenseStatus(this));
         if (LicenseManager.isActivated(this)) {
             tvLicenseStatus.setTextColor(0xFF10B981);

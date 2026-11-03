@@ -106,11 +106,15 @@ public class LocalSignerServer {
                 obj.put("port", port);
                 obj.put("licensed", LicenseManager.isActivated(context));
                 sendJsonResponse(out, 200, obj.toString());
+                obj.put("usb_token", UsbTokenManager.getConnectedTokenSummary(context));
             } else if (path.equals("/api/drivers")) {
                 JSONArray arr = new JSONArray();
+                arr.put("HYP2003 / ePass2003 (USB OTG - libcastle.so)");
+                arr.put("mToken / CryptoID (USB OTG - libcryptoid_pkcs11.so)");
+                arr.put("InnaIT Precision (USB OTG - libinnait_pkcs11.so)");
+                arr.put("Watchdata ProxKey (USB OTG - libWatchdataPKCS11.so)");
                 arr.put("Software Certificate (.pfx / .p12)");
                 arr.put("Android System KeyStore");
-                arr.put("Hardware Token (USB OTG)");
                 sendJsonResponse(out, 200, arr.toString());
             } else if (path.equals("/api/certificates")) {
                 JSONArray certs = CertificateManager.listCertificatesJson(context, "");
