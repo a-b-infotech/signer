@@ -42,6 +42,10 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_latest_version') {
             'http' => [
                 'timeout' => 5,
                 'header' => "User-Agent: ABInfoSigner-Web/2.2.0\r\nAccept: application/json\r\n"
+            ],
+            'ssl' => [
+                'verify_peer' => false,
+                'verify_peer_name' => false
             ]
         ]);
         $content = @file_get_contents($vurl, false, $ctx);
@@ -240,7 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['pdfFile'])) {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>A B INFOTECH - Digital Signer & Web Signing Suite</title>
 
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <!-- Google Tag Manager & Microsoft Clarity Scripts -->
@@ -267,14 +271,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['pdfFile'])) {
 <style>
 :root {
     --bg-dark: #080d1a;
-    --card-bg: rgba(22, 30, 49, 0.85);
+    --card-bg: rgba(18, 25, 44, 0.82);
+    --card-hover-bg: rgba(26, 36, 62, 0.88);
     --border-light: rgba(255, 255, 255, 0.12);
+    --border-glow: rgba(13, 202, 240, 0.45);
     --primary-cyan: #0dcaf0;
-    --primary-hover: #0baccc;
+    --primary-glow: rgba(13, 202, 240, 0.5);
+    --accent-emerald: #10b981;
+    --emerald-glow: rgba(16, 185, 129, 0.45);
     --win-color: #0078d4;
     --mac-color: #9333ea;
     --linux-color: #ea580c;
-    --accent-emerald: #10b981;
+    --amber-color: #f59e0b;
+    --red-color: #ef4444;
+    --light-x: 50%;
+    --light-y: 20%;
 }
 
 * {
@@ -285,39 +296,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['pdfFile'])) {
 }
 
 body {
-    background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0b0f19 80%);
+    background: radial-gradient(1100px circle at var(--light-x) var(--light-y), rgba(13, 202, 240, 0.13), transparent 45%),
+                radial-gradient(900px circle at 85% 85%, rgba(16, 185, 129, 0.09), transparent 40%),
+                radial-gradient(700px circle at 15% 90%, rgba(147, 51, 234, 0.08), transparent 40%),
+                #080d1a;
     color: #f8fafc;
     min-height: 100vh;
     overflow-x: hidden;
     position: relative;
+    transition: background 0.05s ease-out;
 }
 
 #bg-img {
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
-    object-fit: cover; z-index: -2; opacity: 0.35; pointer-events: none;
+    object-fit: cover; z-index: -2; opacity: 0.25; pointer-events: none;
 }
 
-/* 3D Glassmorphism Cards */
+/* 3D Glassmorphism Cards with Specular Lighting Highlight */
 .glass-3d {
     background: var(--card-bg);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border: 1px solid var(--border-light);
     border-radius: 20px;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.15);
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 
+                inset 0 1px 1px 0 rgba(255, 255, 255, 0.22),
+                inset 0 -1px 1px 0 rgba(0, 0, 0, 0.4);
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.25s ease, border-color 0.25s ease;
 }
 
-/* Top Navigation Bar */
+.glass-3d::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    pointer-events: none;
+}
+
+/* Top Navigation Bar with Specular Lighting */
 .top-nav {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 28px;
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 12px 28px;
+    background: rgba(11, 17, 33, 0.88);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
     position: sticky;
     top: 0;
     z-index: 100;
@@ -339,7 +367,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .logo-badge img {
@@ -356,13 +384,15 @@ body {
     background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
+    text-shadow: 0 2px 10px rgba(255, 255, 255, 0.1);
 }
 
 .brand-subtitle {
     font-size: 0.75rem;
     color: #0dcaf0;
-    font-weight: 600;
+    font-weight: 700;
     letter-spacing: 0.4px;
+    text-shadow: 0 0 12px rgba(13, 202, 240, 0.6);
 }
 
 .nav-actions {
@@ -371,6 +401,7 @@ body {
     gap: 12px;
 }
 
+/* 3D Glowing Status Pills */
 .status-pill {
     display: inline-flex;
     align-items: center;
@@ -381,15 +412,23 @@ body {
     font-weight: 700;
     background: rgba(16, 185, 129, 0.15);
     color: #34d399;
-    border: 1px solid rgba(16, 185, 129, 0.3);
-    box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .status-pill.offline {
     background: rgba(239, 68, 68, 0.15);
     color: #f87171;
-    border-color: rgba(239, 68, 68, 0.3);
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.35);
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.status-pill.trial {
+    background: rgba(245, 158, 11, 0.18);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.4);
+    box-shadow: 0 0 14px rgba(245, 158, 11, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    animation: pulseGlow 2.5s infinite;
 }
 
 .status-dot {
@@ -397,10 +436,15 @@ body {
     height: 8px;
     border-radius: 50%;
     background: currentColor;
-    box-shadow: 0 0 8px currentColor;
+    box-shadow: 0 0 10px currentColor;
 }
 
-/* 3D Modern Interactive Buttons */
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 14px rgba(245, 158, 11, 0.3); }
+    50% { box-shadow: 0 0 22px rgba(245, 158, 11, 0.65); }
+}
+
+/* 3D Tactile Extruded Push Buttons */
 .btn-3d {
     display: inline-flex;
     align-items: center;
@@ -413,13 +457,26 @@ body {
     cursor: pointer;
     text-decoration: none;
     border: none;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    position: relative;
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35), 0 8px 18px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.btn-3d:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 12px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .btn-3d:active {
-    transform: translateY(2px);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    transform: translateY(3px);
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.35), 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.btn-3d:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 .btn-cyan {
@@ -428,7 +485,7 @@ body {
 }
 .btn-cyan:hover {
     background: linear-gradient(135deg, #38bdf8 0%, #0369a1 100%);
-    box-shadow: 0 6px 20px rgba(13, 202, 240, 0.45);
+    box-shadow: 0 6px 0 #0369a1, 0 12px 25px rgba(13, 202, 240, 0.45);
     color: #000000;
 }
 
@@ -438,7 +495,7 @@ body {
 }
 .btn-green:hover {
     background: linear-gradient(135deg, #34d399 0%, #047857 100%);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.45);
+    box-shadow: 0 6px 0 #047857, 0 12px 25px rgba(16, 185, 129, 0.45);
 }
 
 .btn-red {
@@ -447,7 +504,7 @@ body {
 }
 .btn-red:hover {
     background: linear-gradient(135deg, #f87171 0%, #b91c1c 100%);
-    box-shadow: 0 6px 20px rgba(239, 68, 68, 0.45);
+    box-shadow: 0 6px 0 #b91c1c, 0 12px 25px rgba(239, 68, 68, 0.45);
 }
 
 .btn-amber {
@@ -456,7 +513,7 @@ body {
 }
 .btn-amber:hover {
     background: linear-gradient(135deg, #fbbf24 0%, #b45309 100%);
-    box-shadow: 0 6px 20px rgba(245, 158, 11, 0.45);
+    box-shadow: 0 6px 0 #b45309, 0 12px 25px rgba(245, 158, 11, 0.45);
 }
 
 .btn-tool {
@@ -465,32 +522,33 @@ body {
     border: 1px solid rgba(255, 255, 255, 0.15);
     padding: 8px 16px;
     font-size: 0.85rem;
+    box-shadow: 0 3px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 .btn-tool:hover {
-    background: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.18);
     color: #ffffff;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3), 0 6px 15px rgba(0, 0, 0, 0.4);
 }
 
 /* 3D Glass Form Inputs */
 .glass-input {
     width: 100%;
-    padding: 12px 14px;
+    padding: 11px 14px;
     border-radius: 10px;
-    border: 1px solid rgba(13, 202, 240, 0.3);
-    background: rgba(10, 15, 28, 0.6);
+    border: 1px solid rgba(13, 202, 240, 0.28);
+    background: rgba(10, 15, 28, 0.65);
     color: #ffffff;
-    font-size: 0.9rem;
-    margin-bottom: 14px;
+    font-size: 0.88rem;
+    margin-bottom: 12px;
     outline: none;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.08);
     transition: all 0.2s ease;
 }
 
 .glass-input:focus {
     border-color: #0dcaf0;
-    background: rgba(10, 15, 28, 0.85);
-    box-shadow: 0 0 14px rgba(13, 202, 240, 0.4), inset 0 2px 4px rgba(0, 0, 0, 0.4);
+    background: rgba(10, 15, 28, 0.9);
+    box-shadow: 0 0 15px rgba(13, 202, 240, 0.4), inset 0 2px 4px rgba(0, 0, 0, 0.5);
 }
 
 .glass-input option {
@@ -500,35 +558,35 @@ body {
 
 /* 3D Drag & Drop Upload Zone */
 .upload-card-wrapper {
-    max-width: 640px;
-    margin: 6vh auto;
+    max-width: 660px;
+    margin: 5vh auto;
     padding: 40px;
     text-align: center;
 }
 
 .upload-dropzone {
     border: 2px dashed rgba(13, 202, 240, 0.5);
-    border-radius: 18px;
+    border-radius: 20px;
     padding: 45px 30px;
     background: rgba(13, 202, 240, 0.03);
     cursor: pointer;
     transition: all 0.3s ease;
     margin-bottom: 25px;
-    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.2);
+    box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
 .upload-dropzone:hover {
     border-color: #0dcaf0;
-    background: rgba(13, 202, 240, 0.08);
-    transform: translateY(-2px);
-    box-shadow: 0 10px 25px rgba(13, 202, 240, 0.2);
+    background: rgba(13, 202, 240, 0.09);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 30px rgba(13, 202, 240, 0.25), inset 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
 .upload-icon-pulse {
-    font-size: 3.5rem;
+    font-size: 3.8rem;
     margin-bottom: 14px;
     display: inline-block;
-    filter: drop-shadow(0 4px 10px rgba(13, 202, 240, 0.5));
+    filter: drop-shadow(0 4px 14px rgba(13, 202, 240, 0.55));
     animation: floatIcon 3s ease-in-out infinite;
 }
 
@@ -545,295 +603,303 @@ body {
     gap: 20px;
     width: 96%;
     max-width: 1540px;
-    margin: 20px auto;
-    height: calc(100vh - 100px);
+    margin: 16px auto;
+    height: calc(100vh - 95px);
 }
 
 .sidebar-panel {
-    flex: 0 0 360px;
-    padding: 22px;
-    overflow-y: auto;
+    width: 360px;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
+    padding: 18px;
+    overflow-y: auto;
 }
 
 .editor-stage {
     flex: 1;
-    min-width: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
 
 .stage-toolbar {
-    padding: 12px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    padding: 10px 18px;
+    background: rgba(10, 15, 28, 0.7);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    flex-wrap: wrap;
-    gap: 12px;
 }
 
 .canvas-viewport {
     flex: 1;
     overflow: auto;
-    padding: 25px;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    background: rgba(10, 15, 28, 0.4);
+    flex-direction: column;
+    align-items: center;
+    padding: 24px;
+    background: radial-gradient(circle at 50% 50%, #151c2e 0%, #0a0f1d 100%);
+    position: relative;
 }
 
 .pdf-bezel {
     position: relative;
-    display: inline-block;
     background: #ffffff;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85), 0 0 30px rgba(13, 202, 240, 0.15);
     border-radius: 4px;
-    box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+    transition: transform 0.2s ease;
 }
 
 .interaction-layer {
     position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
+    top: 0; left: 0; width: 100%; height: 100%;
+    cursor: default;
 }
 
-.active-selection {
+.interaction-layer.active-selection {
     cursor: crosshair;
-    background: rgba(13, 202, 240, 0.08);
+}
+
+/* Watermark Preview Bar on Canvas Stage */
+.stage-watermark-banner {
+    width: 100%;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    padding: 6px 14px;
+    margin-bottom: 14px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    color: #fbbf24;
+    box-shadow: 0 2px 10px rgba(245, 158, 11, 0.15);
 }
 
 .selection-ghost {
     position: absolute;
     border: 2px dashed #0dcaf0;
-    background: rgba(13, 202, 240, 0.25);
-    box-shadow: 0 0 15px rgba(13, 202, 240, 0.4);
+    background: rgba(13, 202, 240, 0.2);
+    pointer-events: none;
+    border-radius: 4px;
 }
 
 .signature-stamp-box {
     position: absolute;
     border: 2px solid #10b981;
-    background: rgba(16, 185, 129, 0.2);
-    color: #065f46;
+    background: rgba(16, 185, 129, 0.18);
+    color: #10b981;
     font-weight: 700;
-    font-size: 12px;
+    font-size: 11px;
+    padding: 6px;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    justify-content: center;
     align-items: center;
+    justify-content: center;
     text-align: center;
-    border-radius: 4px;
-    backdrop-filter: blur(2px);
+    border-radius: 6px;
     box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
 }
 
-/* ====================================================================
-   3D MULTI-OS DOWNLOAD CARDS GRID (Windows, macOS, Linux)
-   Exact match to official installer specification
-   ==================================================================== */
+/* 3D Multi-OS Download Cards Grid (Exact Specifications) */
 .cards-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
     margin: 20px 0;
-    width: 100%;
-    text-align: center;
+}
+
+@media (max-width: 900px) {
+    .cards-grid { grid-template-columns: 1fr; }
+    .workspace-container { flex-direction: column; height: auto; }
+    .sidebar-panel { width: 100%; }
 }
 
 .os-card {
-    background: rgba(15, 23, 42, 0.85);
+    background: rgba(15, 23, 42, 0.7);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 20px;
-    padding: 26px 20px;
+    border-radius: 16px;
+    padding: 24px 18px;
+    text-align: center;
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     align-items: center;
+    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
 }
 
 .os-card:hover {
-    transform: translateY(-8px);
-    border-color: rgba(255, 255, 255, 0.25);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
+    transform: translateY(-6px);
+    border-color: rgba(13, 202, 240, 0.5);
+    box-shadow: 0 20px 45px rgba(0, 0, 0, 0.7), 0 0 25px rgba(13, 202, 240, 0.25);
 }
 
 .os-icon {
-    font-size: 2.8rem;
+    font-size: 3rem;
     margin-bottom: 12px;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
 }
 
 .os-title {
     font-family: 'Outfit', sans-serif;
-    font-size: 1.25rem;
+    font-size: 1.35rem;
     font-weight: 800;
     margin-bottom: 6px;
     color: #ffffff;
 }
 
 .os-desc {
-    font-size: 0.82rem;
+    font-size: 0.8rem;
     color: #94a3b8;
-    margin-bottom: 20px;
-    line-height: 1.45;
+    line-height: 1.5;
+    margin-bottom: 18px;
+    min-height: 48px;
 }
 
 .btn-download {
-    width: 100%;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 12px 18px;
-    border-radius: 12px;
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 700;
     text-decoration: none;
     color: #ffffff;
-    font-weight: 700;
-    font-size: 0.9rem;
-    transition: all 0.25s ease;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-    margin-top: auto;
+    box-shadow: 0 4px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transition: all 0.2s ease;
+}
+
+.btn-download:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.4);
 }
 
 .btn-win {
     background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
-    border: 1px solid #2b88d8;
 }
-.btn-win:hover {
-    background: linear-gradient(135deg, #1084d8 0%, #0066b3 100%);
-    box-shadow: 0 6px 20px rgba(0, 120, 212, 0.55);
-    transform: translateY(-2px);
-}
-
 .btn-mac {
     background: linear-gradient(135deg, #9333ea 0%, #6b21a8 100%);
-    border: 1px solid #a855f7;
 }
-.btn-mac:hover {
-    background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
-    box-shadow: 0 6px 20px rgba(168, 85, 247, 0.55);
-    transform: translateY(-2px);
-}
-
 .btn-linux {
     background: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
-    border: 1px solid #f97316;
-}
-.btn-linux:hover {
-    background: linear-gradient(135deg, #f97316 0%, #d946ef 100%);
-    box-shadow: 0 6px 20px rgba(234, 88, 12, 0.55);
-    transform: translateY(-2px);
 }
 
 .file-info {
-    display: block;
     font-size: 0.72rem;
     color: #64748b;
-    margin-top: 8px;
-    font-family: monospace;
+    margin-top: 10px;
+    word-break: break-all;
 }
 
-/* Modals & Fullscreen Overlays */
+/* 3D Modal Overlays */
 .overlay-backdrop {
-    display: none;
     position: fixed;
     top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(8, 13, 26, 0.92);
+    background: rgba(4, 7, 15, 0.85);
     backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    z-index: 9999;
-    justify-content: center;
+    display: none;
     align-items: center;
+    justify-content: center;
+    z-index: 1000;
     padding: 20px;
 }
 
 .modal-3d {
-    max-width: 920px;
+    max-width: 780px;
     width: 100%;
-    padding: 35px 30px;
+    padding: 34px 28px;
     text-align: center;
-    max-height: 90vh;
-    overflow-y: auto;
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 30px 70px rgba(0, 0, 0, 0.9), 0 0 40px rgba(13, 202, 240, 0.2);
+    animation: modalPop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes modalPop {
+    from { transform: scale(0.9) translateY(20px); opacity: 0; }
+    to { transform: scale(1) translateY(0); opacity: 1; }
 }
 
 .modal-badge {
     display: inline-block;
     padding: 5px 14px;
     border-radius: 9999px;
-    font-size: 0.8rem;
-    font-weight: 700;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.5px;
     margin-bottom: 12px;
-    text-transform: uppercase;
-}
-
-@media(max-width: 992px) {
-    .workspace-container {
-        flex-direction: column;
-        height: auto;
-        min-height: 100vh;
-    }
-    .sidebar-panel { flex: none; width: 100%; order: 2; }
-    .editor-stage { flex: none; height: 70vh; order: 1; }
-    .top-nav { flex-direction: column; gap: 10px; align-items: stretch; }
-    .nav-actions { justify-content: space-between; }
 }
 </style>
 </head>
 <body>
 
-<!-- Google AdSense Container -->
-<div class="ad-container" style="display:none; text-align:center; margin: 10px auto; max-width: 95%;">
-    <ins class="adsbygoogle"
-         style="display:block"
-         data-ad-client="ca-pub-4544316411176795"
-         data-ad-slot="YOUR_AD_SLOT_ID"
-         data-ad-format="auto"
-         data-full-width-responsive="true"></ins>
-</div>
+<img id="bg-img" src="image_546aa0.png" alt="A B INFOTECH Background" onerror="this.style.display='none'">
 
 <!-- ====================================================================
-     TOP NAVIGATION & LIVE SERVER STATUS
+     TOP NAVIGATION BAR WITH 3D LIGHT EFFECT & TRIAL STATUS
      ==================================================================== -->
 <header class="top-nav">
     <a href="Token.php" class="brand-section">
         <div class="logo-badge">
-            <img src="abinfo.png" alt="A B INFOTECH" onerror="this.src='app_icon.png';">
+            <img src="icon.ico" alt="A B INFOTECH" onerror="this.src='app_icon.png'">
         </div>
         <div>
             <div class="brand-title">A B INFOTECH</div>
-            <div class="brand-subtitle">Digital Signer & Web Signing Suite</div>
+            <div class="brand-subtitle">WEB DIGITAL SIGNER SUITE</div>
         </div>
     </a>
+
     <div class="nav-actions">
-        <div id="serverStatusPill" class="status-pill offline" title="Background Local API Server status">
+        <!-- 4-Day Free Web Trial Badge -->
+        <span id="trialBadge" class="status-pill trial" style="display:none;" title="Click for trial info">
             <span class="status-dot"></span>
-            <span id="serverStatusText">Local Server: Connecting...</span>
+            <span id="trialBadgeText">🎁 4-Day Free Trial</span>
+        </span>
+
+        <!-- Local Server Status Pill -->
+        <div id="serverStatusPill" class="status-pill offline">
+            <span class="status-dot"></span>
+            <span id="serverStatusText">Local Server: OFFLINE</span>
         </div>
-        <div id="licensePill" class="status-pill" style="display:none; background: rgba(59,130,246,0.15); color:#60a5fa; border-color: rgba(59,130,246,0.3);">
+
+        <!-- License Tier Pill -->
+        <div id="licensePill" class="status-pill" style="display:none; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border-color: rgba(59, 130, 246, 0.35);">
+            <span class="status-dot"></span>
             <span id="licenseTierText">PRO SUITE</span>
         </div>
-        <a href="https://api.whatsapp.com/send?phone=917016797720&text=Digital%20Signer%20Support" target="_blank" class="btn-3d btn-tool">
-            💬 WhatsApp: +91 7016797720
+
+        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-3d btn-amber" style="padding: 7px 14px; font-size: 0.8rem;">
+            🛒 Buy License
+        </a>
+
+        <a href="https://api.whatsapp.com/send?phone=917016797720&text=Hi%20A%20B%20INFOTECH%20Team" target="_blank" class="btn-3d btn-green" style="padding: 7px 14px; font-size: 0.8rem;">
+            💬 Support
         </a>
     </div>
 </header>
 
 <!-- ====================================================================
-     OVERLAY 1: OFFLINE SERVER (Requires Background Desktop Tool)
+     OVERLAY 1: LOCAL API SERVER REQUIRED
      Includes the Exact Multi-OS Cards Grid
      ==================================================================== -->
 <div id="offline-overlay" class="overlay-backdrop">
     <div class="glass-3d modal-3d">
         <span class="modal-badge" style="background: rgba(239, 68, 68, 0.15); color:#f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
-            ⚠️ Background Software Required
+            🔌 Local Signing Server Required
         </span>
-        <h2 style="font-family:'Outfit',sans-serif; font-size:1.9rem; font-weight:800; margin-bottom:10px;">
-            Connect Your USB Hardware Token
+        <h2 style="font-family:'Outfit',sans-serif; font-size:1.85rem; font-weight:800; margin-bottom:8px;">
+            A B INFOTECH Background Local Signer (Port 5000)
         </h2>
-        <p style="color:#94a3b8; font-size:0.95rem; max-width:680px; margin:0 auto 20px; line-height:1.6;">
-            Web browsers cannot directly communicate with physical USB Cryptographic Hardware Tokens (ePass2003, Watchdata, mToken, TrustKey) due to browser security sandboxes. Please download and run the background A B INFOTECH Signer tool on your PC.
+        <p style="color:#94a3b8; font-size:0.92rem; max-width:680px; margin:0 auto 18px; line-height:1.5;">
+            To digitally sign PDF documents using physical USB Cryptographic Tokens, the background signing service must be running on your machine.
+            If you already installed it, please launch <b>A B INFOTECH SIGNER</b> from your desktop or start menu.
         </p>
 
         <!-- EXACT DOWNLOAD CARDS GRID (Windows, macOS, Linux) -->
@@ -872,7 +938,7 @@ body {
             </div>
         </div>
 
-        <div style="margin-top: 15px;">
+        <div style="margin-top: 10px;">
             <button onclick="checkBackgroundServer()" class="btn-3d btn-cyan" style="min-width: 220px;">
                 ↻ Retry Server Connection
             </button>
@@ -881,18 +947,17 @@ body {
 </div>
 
 <!-- ====================================================================
-     OVERLAY 2: SOFTWARE UPDATE REQUIRED
-     Includes the Exact Multi-OS Cards Grid
+     OVERLAY 2: SOFTWARE UPDATE REQUIRED (CHECKED FROM GITHUB VERSION.JSON)
      ==================================================================== -->
 <div id="update-overlay" class="overlay-backdrop">
     <div class="glass-3d modal-3d">
         <span class="modal-badge" style="background: rgba(245, 158, 11, 0.15); color:#fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
             🔄 Version Update Required
         </span>
-        <h2 style="font-family:'Outfit',sans-serif; font-size:1.9rem; font-weight:800; margin-bottom:10px;">
+        <h2 style="font-family:'Outfit',sans-serif; font-size:1.85rem; font-weight:800; margin-bottom:8px;">
             Update Your A B INFOTECH Signer Suite
         </h2>
-        <p id="updateVersionDetails" style="color:#94a3b8; font-size:0.95rem; max-width:680px; margin:0 auto 20px; line-height:1.6;">
+        <p id="updateVersionDetails" style="color:#94a3b8; font-size:0.92rem; max-width:680px; margin:0 auto 18px; line-height:1.5;">
             A newer release of A B INFOTECH Signer is available on GitHub (checked live from <code>version.json</code>). Please install the updated package to maintain PDF signing security and token driver compliance.
         </p>
 
@@ -932,7 +997,7 @@ body {
             </div>
         </div>
 
-        <div style="margin-top: 15px;">
+        <div style="margin-top: 10px;">
             <button onclick="checkBackgroundServer()" class="btn-3d btn-cyan" style="min-width: 220px;">
                 ↻ Re-check Version & Connect
             </button>
@@ -941,64 +1006,56 @@ body {
 </div>
 
 <!-- ====================================================================
-     OVERLAY 3: LICENSE EXPIRED
+     OVERLAY 3: 4-DAY FREE TRIAL EXPIRED (WEB TRIAL LIMIT REACHED)
      ==================================================================== -->
-<div id="expired-overlay" class="overlay-backdrop">
+<div id="trial-expired-overlay" class="overlay-backdrop">
     <div class="glass-3d modal-3d" style="max-width: 520px;">
         <span class="modal-badge" style="background: rgba(239, 68, 68, 0.15); color:#f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
-            ⏳ License Expired
+            ⏳ 4-Day Free Trial Expired
         </span>
         <h2 style="font-family:'Outfit',sans-serif; font-size:1.8rem; font-weight:800; margin-bottom:12px;">
-            License Renewal Required
+            Trial Period Ended
         </h2>
-        <p style="color:#94a3b8; font-size:0.95rem; line-height:1.6; margin-bottom: 24px;">
-            Your A B INFOTECH Digital Signer license subscription has expired. Please renew your key to continue signing documents without restrictions.
+        <p style="color:#94a3b8; font-size:0.92rem; line-height:1.6; margin-bottom: 22px;">
+            Your <b>4-day free trial</b> of A B INFOTECH Web Signer has expired. To continue signing your PDF documents with USB tokens and remove the demo trial watermark, please purchase an active license key.
         </p>
 
-        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-3d btn-amber" style="width: 100%; font-size: 1rem; margin-bottom: 14px;">
-            💳 Renew / Purchase License Online
+        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-3d btn-amber" style="width: 100%; font-size: 1rem; margin-bottom: 12px;">
+            💳 Buy / Activate License Key Online
         </a>
 
-        <div style="background: rgba(10, 15, 28, 0.6); padding: 18px; border-radius: 14px; margin-bottom: 16px; border: 1px solid rgba(255, 255, 255, 0.08);">
-            <div style="color: #64748b; font-size: 0.8rem; margin-bottom: 4px;">Direct Helpdesk Support:</div>
-            <div style="font-size: 1.15rem; font-weight: 700; color: #34d399; margin-bottom: 4px;">
-                📞 <a href="tel:7016797720" style="color: inherit; text-decoration: none;">+91 7016797720</a>
-            </div>
-            <div style="font-size: 0.95rem; font-weight: 600; color: #38bdf8;">
-                ✉️ <a href="mailto:sales@a-b-infotech.in" style="color: inherit; text-decoration: none;">sales@a-b-infotech.in</a>
-            </div>
+        <a href="https://api.whatsapp.com/send?phone=917016797720&text=Hi%20A%20B%20INFOTECH%20Team%2C%20My%204-day%20free%20trial%20expired%20and%20I%20want%20to%20buy%20a%20license" target="_blank" class="btn-3d btn-green" style="width: 100%; margin-bottom: 14px;">
+            💬 WhatsApp Support (+91 7016797720)
+        </a>
+
+        <div style="background: rgba(10, 15, 28, 0.6); padding: 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.8rem; color: #64748b;">
+            Helpline: <b style="color:#38bdf8;">+91 7016797720</b> | Email: <b style="color:#38bdf8;">sales@a-b-infotech.in</b>
         </div>
-
-        <a href="https://api.whatsapp.com/send?phone=917016797720&text=I%20want%20to%20renew%20my%20PDF%20Signer%20License" target="_blank" class="btn-3d btn-green" style="width: 100%;">
-            💬 Renew on WhatsApp
-        </a>
     </div>
 </div>
 
 <!-- ====================================================================
-     MODAL 4: DEMO RESTRICTION NOTICE
+     OVERLAY 4: SERVER LICENSE EXPIRED
      ==================================================================== -->
-<div id="licenseModal" class="overlay-backdrop">
-    <div class="glass-3d modal-3d" style="max-width: 480px;">
-        <span class="modal-badge" style="background: rgba(245, 158, 11, 0.15); color:#fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
-            DEMO VERSION ACTIVE
+<div id="expired-overlay" class="overlay-backdrop">
+    <div class="glass-3d modal-3d" style="max-width: 520px;">
+        <span class="modal-badge" style="background: rgba(239, 68, 68, 0.15); color:#f87171; border: 1px solid rgba(239, 68, 68, 0.3);">
+            ⏳ License Subscription Expired
         </span>
-        <h2 style="font-family:'Outfit',sans-serif; font-size:1.6rem; font-weight:800; margin-bottom:12px;">
-            Single Signature Box Limit
+        <h2 style="font-family:'Outfit',sans-serif; font-size:1.8rem; font-weight:800; margin-bottom:12px;">
+            License Renewal Required
         </h2>
-        <p style="color:#94a3b8; font-size:0.92rem; line-height:1.6; margin-bottom:20px;">
-            In Demo Mode, only <b>one signature area</b> is allowed per document. To unlock multi-page placement, bulk batch signing, and custom stamps, please activate a Pro license.
+        <p style="color:#94a3b8; font-size:0.92rem; line-height:1.6; margin-bottom: 22px;">
+            Your A B INFOTECH Digital Signer license subscription has expired. Please renew your key to continue signing documents without restrictions.
         </p>
 
-        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-3d btn-amber" style="width: 100%; margin-bottom: 12px;">
-            💳 Purchase Pro License Online
+        <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-3d btn-amber" style="width: 100%; font-size: 1rem; margin-bottom: 12px;">
+            💳 Renew / Purchase License Online
         </a>
-        <a href="https://api.whatsapp.com/send?phone=917016797720&text=Licence%20PDF%20Key" target="_blank" class="btn-3d btn-green" style="width: 100%; margin-bottom: 14px;">
-            💬 Contact on WhatsApp (+91 7016797720)
+
+        <a href="https://api.whatsapp.com/send?phone=917016797720&text=I%20want%20to%20renew%20my%20PDF%20Signer%20License" target="_blank" class="btn-3d btn-green" style="width: 100%;">
+            💬 Renew on WhatsApp (+91 7016797720)
         </a>
-        <button onclick="document.getElementById('licenseModal').style.display='none';" class="btn-3d btn-tool" style="width: 100%;">
-            Continue with 1 Signature Box
-        </button>
     </div>
 </div>
 
@@ -1010,12 +1067,17 @@ body {
 <main class="upload-card-wrapper">
     <div class="glass-3d" style="padding: 40px 30px;">
         <div class="upload-icon-pulse">📑</div>
-        <h1 style="font-family:'Outfit',sans-serif; font-size:2rem; font-weight:800; margin-bottom:8px;">
+        <h1 style="font-family:'Outfit',sans-serif; font-size:2.1rem; font-weight:800; margin-bottom:8px;">
             Open PDF for Digital Signing
         </h1>
-        <p style="color:#94a3b8; font-size:0.95rem; margin-bottom: 28px;">
+        <p style="color:#94a3b8; font-size:0.95rem; margin-bottom: 26px;">
             Select any PDF document to position your digital signature visually on any page.
         </p>
+
+        <!-- 4-Day Trial Notice Badge -->
+        <div id="uploadTrialBanner" style="display:none; background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.3); border-radius:12px; padding:12px 16px; margin-bottom:20px; font-size:0.85rem; color:#fbbf24; text-align:center;">
+            🎁 <b>4-Day Free Web Trial Active:</b> You can sign documents using your USB Hardware Token. In trial mode, documents include a small <code>ABINFO SIGN DEMO</code> watermark on each page.
+        </div>
 
         <?php if ($uploadError): ?>
             <div style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); padding:10px; border-radius:10px; margin-bottom:20px; font-size:0.9rem;">
@@ -1025,7 +1087,7 @@ body {
 
         <form method="POST" enctype="multipart/form-data">
             <label for="pdfFile" class="upload-dropzone">
-                <div style="font-size: 2rem; margin-bottom: 8px;">📂</div>
+                <div style="font-size: 2.2rem; margin-bottom: 8px;">📂</div>
                 <div id="fileChosenText" style="font-weight: 700; font-size: 1.05rem; color: #38bdf8;">
                     Click here or Drag & Drop PDF
                 </div>
@@ -1045,12 +1107,14 @@ body {
 <script>
 const fileInput = document.getElementById('pdfFile');
 const chosenText = document.getElementById('fileChosenText');
-fileInput.addEventListener('change', function() {
-    if (this.files && this.files[0]) {
-        const sizeMb = (this.files[0].size / (1024 * 1024)).toFixed(2);
-        chosenText.innerHTML = `✓ ${this.files[0].name} <span style="font-size:0.8rem; color:#94a3b8;">(${sizeMb} MB)</span>`;
-    }
-});
+if (fileInput) {
+    fileInput.addEventListener('change', function() {
+        if (this.files && this.files[0]) {
+            const sizeMb = (this.files[0].size / (1024 * 1024)).toFixed(2);
+            chosenText.innerHTML = `✓ ${this.files[0].name} <span style="font-size:0.8rem; color:#94a3b8;">(${sizeMb} MB)</span>`;
+        }
+    });
+}
 </script>
 
 <!-- ====================================================================
@@ -1061,29 +1125,35 @@ fileInput.addEventListener('change', function() {
 <div class="workspace-container">
     <!-- LEFT SIDEBAR: Comprehensive Signature Settings -->
     <aside class="glass-3d sidebar-panel">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:10px;">
             <h3 style="font-family:'Outfit',sans-serif; font-size:1.15rem; font-weight:700; color:#38bdf8;">
                 ⚙️ Signature Settings
             </h3>
-            <span class="status-pill" style="padding:3px 10px; font-size:0.7rem;">Active</span>
+            <span id="workspaceLicenseTag" class="status-pill" style="padding:3px 10px; font-size:0.7rem;">Active</span>
         </div>
 
-        <div style="background:rgba(10,15,28,0.5); padding:10px 12px; border-radius:10px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.06);">
-            <div style="font-size:0.75rem; color:#64748b; font-weight:600;">ACTIVE DOCUMENT</div>
-            <div style="word-break:break-all; font-size:0.88rem; font-weight:600; color:#e2e8f0;">
+        <div style="background:rgba(10,15,28,0.5); padding:10px 12px; border-radius:10px; margin-bottom:14px; border:1px solid rgba(255,255,255,0.06);">
+            <div style="font-size:0.72rem; color:#64748b; font-weight:600;">ACTIVE DOCUMENT</div>
+            <div style="word-break:break-all; font-size:0.85rem; font-weight:600; color:#e2e8f0;">
                 <?= sanitizeInput($_SESSION['fileName']) ?>
             </div>
         </div>
 
+        <!-- 4-Day Trial Sidebar Notice -->
+        <div id="trialSidebarNotice" style="display:none; background:rgba(245, 158, 11, 0.12); border:1px solid rgba(245, 158, 11, 0.3); border-radius:10px; padding:10px; margin-bottom:14px; font-size:0.78rem; color:#fbbf24;">
+            🎁 <b>4-Day Free Web Trial:</b> <span id="trialDaysRemainingText">4 days remaining</span>.<br>
+            Signed document will contain small <code>ABINFO SIGN DEMO</code> watermark at the bottom of each page.
+        </div>
+
         <form id="signForm" style="display:flex; flex-direction:column; flex:1;">
             <!-- 1. Driver Selection -->
-            <label style="font-size:0.8rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
+            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
                 1. USB Token Driver
             </label>
             <select class="glass-input" id="driverDropdownWorkspace"></select>
 
             <!-- 2. Certificate Selection -->
-            <label style="font-size:0.8rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
+            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
                 2. Digital Certificate
             </label>
             <select class="glass-input" name="certAlias" required>
@@ -1091,10 +1161,10 @@ fileInput.addEventListener('change', function() {
             </select>
 
             <!-- 3. Hardware Token PIN -->
-            <label style="font-size:0.8rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
+            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
                 3. USB Hardware Token PIN
             </label>
-            <div style="position:relative; margin-bottom:14px;">
+            <div style="position:relative; margin-bottom:12px;">
                 <input type="password" class="glass-input" id="tokenPinInput" name="tokenPassword" placeholder="Enter Token User PIN" style="margin-bottom:0;" required>
                 <button type="button" onclick="togglePinVisibility()" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:#94a3b8; cursor:pointer; font-size:0.85rem;">
                     👁️
@@ -1102,7 +1172,7 @@ fileInput.addEventListener('change', function() {
             </div>
 
             <!-- 4. Signature Metadata & Appearance -->
-            <label style="font-size:0.8rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
+            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
                 4. Signing Reason
             </label>
             <select class="glass-input" id="signReasonSelect" name="signReason">
@@ -1112,15 +1182,15 @@ fileInput.addEventListener('change', function() {
                 <option value="Verified and Approved">Verified and Approved</option>
             </select>
 
-            <label style="font-size:0.8rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
+            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
                 5. Signer Location / Address
             </label>
             <input type="text" class="glass-input" id="signLocationInput" name="signLocation" placeholder="e.g. Gujarat, India">
 
             <!-- Checkbox Options Cluster -->
-            <div style="background:rgba(10,15,28,0.4); padding:10px; border-radius:10px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.06);">
-                <div style="font-size:0.75rem; color:#64748b; font-weight:700; margin-bottom:6px;">DISPLAY ELEMENTS IN STAMP</div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; font-size:0.8rem;">
+            <div style="background:rgba(10,15,28,0.4); padding:10px; border-radius:10px; margin-bottom:14px; border:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:0.72rem; color:#64748b; font-weight:700; margin-bottom:6px;">DISPLAY ELEMENTS IN STAMP</div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; font-size:0.78rem;">
                     <label><input type="checkbox" id="chkName" checked> Signer Name</label>
                     <label><input type="checkbox" id="chkDate" checked> Timestamp</label>
                     <label><input type="checkbox" id="chkReason" checked> Reason</label>
@@ -1132,25 +1202,19 @@ fileInput.addEventListener('change', function() {
 
             <!-- Placed Signature Areas Summary -->
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <span style="font-size:0.8rem; color:#94a3b8; font-weight:700;">PLACED SIGNATURE BOXES</span>
+                <span style="font-size:0.78rem; color:#94a3b8; font-weight:700;">PLACED SIGNATURE BOXES</span>
                 <span id="placedCountBadge" style="font-size:0.75rem; color:#38bdf8; font-weight:700;">0 Boxes</span>
             </div>
-            <div id="signatureList" style="min-height:75px; max-height:140px; overflow-y:auto; background:rgba(10,15,28,0.5); padding:10px; border-radius:10px; margin-bottom:16px; border:1px solid rgba(255,255,255,0.06); font-size:0.8rem;">
+            <div id="signatureList" style="min-height:70px; max-height:120px; overflow-y:auto; background:rgba(10,15,28,0.5); padding:8px 10px; border-radius:10px; margin-bottom:14px; border:1px solid rgba(255,255,255,0.06); font-size:0.78rem;">
                 No signatures drawn yet. Click 'Draw Signature Box' on right.
-            </div>
-
-            <!-- Demo Mode Box Warning -->
-            <div id="demoWarningMsg" style="display:none; color:#f87171; font-size:0.8rem; margin-bottom:14px; text-align:center; border:1px solid rgba(239,68,68,0.3); padding:10px; border-radius:10px; background:rgba(239,68,68,0.1);">
-                <b>DEMO VERSION</b> (Max 1 Signature Box)<br>
-                <a href="https://pay.a-b-infotech.in/license.php" target="_blank" style="color:#fbbf24; text-decoration:underline;">Upgrade to Pro Suite</a>
             </div>
 
             <!-- Action Buttons -->
             <div style="margin-top:auto;">
-                <button type="submit" class="btn-3d btn-green" id="finalSignBtn" disabled style="width: 100%; font-size: 1rem; padding: 14px; margin-bottom: 10px;">
+                <button type="submit" class="btn-3d btn-green" id="finalSignBtn" disabled style="width: 100%; font-size: 0.95rem; padding: 13px; margin-bottom: 8px;">
                     ✍️ Sign Document Now
                 </button>
-                <a href="?action=reset" class="btn-3d btn-red" style="width: 100%; font-size: 0.85rem; padding: 10px;">
+                <a href="?action=reset" class="btn-3d btn-red" style="width: 100%; font-size: 0.82rem; padding: 8px;">
                     🗑️ Reset / Close Document
                 </a>
             </div>
@@ -1187,6 +1251,12 @@ fileInput.addEventListener('change', function() {
 
         <!-- Canvas Viewport -->
         <div class="canvas-viewport">
+            <!-- Subtle Watermark Notice Banner on Preview Stage -->
+            <div id="canvasWatermarkBanner" class="stage-watermark-banner" style="display:none; max-width:620px;">
+                <span>🏷️ <b>4-Day Free Web Trial:</b> Stamping small <code>ABINFO SIGN DEMO</code> watermark at the bottom of each page.</span>
+                <a href="https://pay.a-b-infotech.in/license.php" target="_blank" style="color:#38bdf8; text-decoration:underline; font-weight:700;">Remove Watermark</a>
+            </div>
+
             <div class="pdf-bezel" id="pdfWrapper">
                 <canvas id="pdfCanvas"></canvas>
                 <div class="interaction-layer" id="interactionLayer"></div>
@@ -1201,10 +1271,9 @@ fileInput.addEventListener('change', function() {
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const LOCAL_SERVER = 'http://127.0.0.1:5000';
-    const GITHUB_VERSION_URL = 'https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json';
     const pdfjsLib = window['pdfjs-dist/build/pdf'];
     const canvas = document.getElementById('pdfCanvas');
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas ? canvas.getContext('2d') : null;
     const interactionLayer = document.getElementById('interactionLayer');
     const pdfWrapper = document.getElementById('pdfWrapper');
 
@@ -1217,8 +1286,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentArea = null;
     let tempBox = null;
     let scale = 1.3;
-
-    window.isDemoMode = false;
 
     // Load Token Drivers from Local Server
     async function loadDrivers() {
@@ -1247,6 +1314,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const response = await fetch(`${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}`);
             const certs = await response.json();
             const certSelect = document.querySelector('select[name="certAlias"]');
+            if (!certSelect) return;
             
             certSelect.innerHTML = '<option value="">-- Choose Certificate --</option>';
             certs.forEach(cert => {
@@ -1262,13 +1330,17 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Render PDF Document
+    <?php if (isset($_SESSION['pdfPath'])): ?>
     pdfjsLib.getDocument('<?= str_replace("\\", "/", $_SESSION["pdfPath"]) ?>').promise.then(pdf => {
         pdfDoc = pdf;
-        document.getElementById('totalPages').textContent = pdf.numPages;
+        const totalPgs = document.getElementById('totalPages');
+        if (totalPgs) totalPgs.textContent = pdf.numPages;
         renderPage(pageNum);
     });
+    <?php endif; ?>
 
     function renderPage(num) {
+        if (!pdfDoc || !canvas) return;
         pageRendering = true;
         pdfDoc.getPage(num).then(page => {
             const viewport = page.getViewport({ scale });
@@ -1283,7 +1355,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 drawSavedAreas();
             });
         });
-        document.getElementById('currentPageNum').textContent = num;
+        const curEl = document.getElementById('currentPageNum');
+        if (curEl) curEl.textContent = num;
     }
 
     window.changeZoom = function(delta) {
@@ -1291,120 +1364,123 @@ document.addEventListener('DOMContentLoaded', function() {
         if (newScale < 0.6) newScale = 0.6;
         if (newScale > 2.5) newScale = 2.5;
         scale = newScale;
-        document.getElementById('zoomLevelDisplay').textContent = Math.round(scale * 100) + '%';
+        const zoomDisplay = document.getElementById('zoomLevelDisplay');
+        if (zoomDisplay) zoomDisplay.textContent = Math.round(scale * 100) + '%';
         renderPage(pageNum);
     };
 
     window.togglePinVisibility = function() {
         const pinInput = document.getElementById('tokenPinInput');
-        pinInput.type = (pinInput.type === 'password') ? 'text' : 'password';
+        if (pinInput) pinInput.type = (pinInput.type === 'password') ? 'text' : 'password';
     };
 
-    document.getElementById('prevPageBtn').addEventListener('click', () => {
-        if (pageNum <= 1) return;
-        pageNum--; renderPage(pageNum);
-    });
+    const prevBtn = document.getElementById('prevPageBtn');
+    if (prevBtn) {
+        prevBtn.addEventListener('click', () => {
+            if (pageNum <= 1) return;
+            pageNum--; renderPage(pageNum);
+        });
+    }
 
-    document.getElementById('nextPageBtn').addEventListener('click', () => {
-        if (pageNum >= pdfDoc.numPages) return;
-        pageNum++; renderPage(pageNum);
-    });
+    const nextBtn = document.getElementById('nextPageBtn');
+    if (nextBtn) {
+        nextBtn.addEventListener('click', () => {
+            if (!pdfDoc || pageNum >= pdfDoc.numPages) return;
+            pageNum++; renderPage(pageNum);
+        });
+    }
 
-    document.getElementById('clearAreasBtn').addEventListener('click', function() {
-        signatureAreas = [];
-        updateSignatureList();
-        drawSavedAreas();
-        if (tempBox) { tempBox.remove(); tempBox = null; }
-        currentArea = null; isSelecting = false;
-        interactionLayer.classList.remove('active-selection');
-        const selectBtn = document.getElementById('selectAreaBtn');
-        selectBtn.className = 'btn-3d btn-cyan';
-        selectBtn.textContent = '✏️ Draw Signature Box';
-    });
+    const clearBtn = document.getElementById('clearAreasBtn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            signatureAreas = [];
+            updateSignatureList();
+            drawSavedAreas();
+            if (tempBox) { tempBox.remove(); tempBox = null; }
+            currentArea = null; isSelecting = false;
+            if (interactionLayer) interactionLayer.classList.remove('active-selection');
+            const selectBtn = document.getElementById('selectAreaBtn');
+            if (selectBtn) {
+                selectBtn.className = 'btn-3d btn-cyan';
+                selectBtn.textContent = '✏️ Draw Signature Box';
+            }
+        });
+    }
 
-    document.getElementById('selectAreaBtn').addEventListener('click', function() {
-        if (window.isDemoMode && signatureAreas.length >= 1) {
-            document.getElementById('licenseModal').style.display = 'flex';
-            return;
-        }
-        isSelecting = !isSelecting;
-        if (isSelecting) {
-            this.className = 'btn-3d btn-amber';
-            this.textContent = '✏️ Drag Box on Canvas...';
-        } else {
-            this.className = 'btn-3d btn-cyan';
-            this.textContent = '✏️ Draw Signature Box';
-        }
-        interactionLayer.classList.toggle('active-selection');
-    });
+    const selectBtn = document.getElementById('selectAreaBtn');
+    if (selectBtn) {
+        selectBtn.addEventListener('click', function() {
+            isSelecting = !isSelecting;
+            if (isSelecting) {
+                this.className = 'btn-3d btn-amber';
+                this.textContent = '✏️ Drag Box on Canvas...';
+            } else {
+                this.className = 'btn-3d btn-cyan';
+                this.textContent = '✏️ Draw Signature Box';
+            }
+            if (interactionLayer) interactionLayer.classList.toggle('active-selection');
+        });
+    }
 
     let startX, startY;
 
-    interactionLayer.addEventListener('mousedown', e => {
-        if (!isSelecting) return;
-        const rect = interactionLayer.getBoundingClientRect();
-        startX = e.clientX - rect.left;
-        startY = e.clientY - rect.top;
-        currentArea = { x: startX, y: startY, width: 0, height: 0 };
-        tempBox = document.createElement('div');
-        tempBox.className = 'selection-ghost';
-        interactionLayer.appendChild(tempBox);
-    });
+    if (interactionLayer) {
+        interactionLayer.addEventListener('mousedown', e => {
+            if (!isSelecting) return;
+            const rect = interactionLayer.getBoundingClientRect();
+            startX = e.clientX - rect.left;
+            startY = e.clientY - rect.top;
+            currentArea = { x: startX, y: startY, width: 0, height: 0 };
+            tempBox = document.createElement('div');
+            tempBox.className = 'selection-ghost';
+            interactionLayer.appendChild(tempBox);
+        });
 
-    interactionLayer.addEventListener('mousemove', e => {
-        if (!isSelecting || !currentArea) return;
-        const rect = interactionLayer.getBoundingClientRect();
-        currentArea.width = (e.clientX - rect.left) - startX;
-        currentArea.height = (e.clientY - rect.top) - startY;
-        tempBox.style.left = (currentArea.width < 0 ? startX + currentArea.width : startX) + 'px';
-        tempBox.style.top = (currentArea.height < 0 ? startY + currentArea.height : startY) + 'px';
-        tempBox.style.width = Math.abs(currentArea.width) + 'px';
-        tempBox.style.height = Math.abs(currentArea.height) + 'px';
-    });
+        interactionLayer.addEventListener('mousemove', e => {
+            if (!isSelecting || !currentArea || !tempBox) return;
+            const rect = interactionLayer.getBoundingClientRect();
+            currentArea.width = (e.clientX - rect.left) - startX;
+            currentArea.height = (e.clientY - rect.top) - startY;
+            tempBox.style.left = (currentArea.width < 0 ? startX + currentArea.width : startX) + 'px';
+            tempBox.style.top = (currentArea.height < 0 ? startY + currentArea.height : startY) + 'px';
+            tempBox.style.width = Math.abs(currentArea.width) + 'px';
+            tempBox.style.height = Math.abs(currentArea.height) + 'px';
+        });
 
-    interactionLayer.addEventListener('mouseup', () => {
-        if (!currentArea) return;
+        interactionLayer.addEventListener('mouseup', () => {
+            if (!currentArea) return;
 
-        if (window.isDemoMode && signatureAreas.length >= 1) {
+            const x = currentArea.width < 0 ? startX + currentArea.width : startX;
+            const y = currentArea.height < 0 ? startY + currentArea.height : startY;
+            const w = Math.abs(currentArea.width);
+            const h = Math.abs(currentArea.height);
+
+            if (w > 12 && h > 12) {
+                signatureAreas.push({
+                    page: pageNum,
+                    x: x / scale,
+                    y: (currentPdfHeight - y - h) / scale,
+                    width: w / scale,
+                    height: h / scale
+                });
+            }
+
+            updateSignatureList();
             currentArea = null;
             if (tempBox) tempBox.remove();
             tempBox = null;
             isSelecting = false;
             interactionLayer.classList.remove('active-selection');
-            document.getElementById('selectAreaBtn').className = 'btn-3d btn-cyan';
-            document.getElementById('selectAreaBtn').textContent = '✏️ Draw Signature Box';
-            document.getElementById('licenseModal').style.display = 'flex';
-            return;
-        }
-
-        const x = currentArea.width < 0 ? startX + currentArea.width : startX;
-        const y = currentArea.height < 0 ? startY + currentArea.height : startY;
-        const w = Math.abs(currentArea.width);
-        const h = Math.abs(currentArea.height);
-
-        if (w > 12 && h > 12) {
-            signatureAreas.push({
-                page: pageNum,
-                x: x / scale,
-                y: (currentPdfHeight - y - h) / scale,
-                width: w / scale,
-                height: h / scale
-            });
-        }
-
-        updateSignatureList();
-        currentArea = null;
-        if (tempBox) tempBox.remove();
-        tempBox = null;
-        isSelecting = false;
-        interactionLayer.classList.remove('active-selection');
-        const selectBtn = document.getElementById('selectAreaBtn');
-        selectBtn.className = 'btn-3d btn-cyan';
-        selectBtn.textContent = '✏️ Draw Signature Box';
-        drawSavedAreas();
-    });
+            if (selectBtn) {
+                selectBtn.className = 'btn-3d btn-cyan';
+                selectBtn.textContent = '✏️ Draw Signature Box';
+            }
+            drawSavedAreas();
+        });
+    }
 
     function drawSavedAreas() {
+        if (!interactionLayer) return;
         interactionLayer.querySelectorAll('.signature-stamp-box, .selection-ghost').forEach(el => el.remove());
         signatureAreas.forEach((area, idx) => {
             if (area.page !== pageNum) return;
@@ -1422,77 +1498,83 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateSignatureList() {
         const list = document.getElementById('signatureList');
         const countBadge = document.getElementById('placedCountBadge');
-        countBadge.textContent = `${signatureAreas.length} Boxes`;
+        if (countBadge) countBadge.textContent = `${signatureAreas.length} Boxes`;
 
-        list.innerHTML = '';
-        if (signatureAreas.length === 0) {
-            list.innerHTML = 'No signatures drawn yet. Click "Draw Signature Box" on right.';
-        } else {
-            signatureAreas.forEach((a, i) => {
-                list.innerHTML += `<div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.06);"><span>Page ${a.page}</span><span style="color:#38bdf8;">Box #${i+1} (${Math.round(a.width)}x${Math.round(a.height)} pt)</span></div>`;
-            });
+        if (list) {
+            list.innerHTML = '';
+            if (signatureAreas.length === 0) {
+                list.innerHTML = 'No signatures drawn yet. Click "Draw Signature Box" on right.';
+            } else {
+                signatureAreas.forEach((a, i) => {
+                    list.innerHTML += `<div style="display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.06);"><span>Page ${a.page}</span><span style="color:#38bdf8;">Box #${i+1} (${Math.round(a.width)}x${Math.round(a.height)} pt)</span></div>`;
+                });
+            }
         }
-        document.getElementById('finalSignBtn').disabled = signatureAreas.length === 0;
+        const signBtn = document.getElementById('finalSignBtn');
+        if (signBtn) signBtn.disabled = signatureAreas.length === 0;
     }
 
     // Submit Document Signing to Local Server (Port 5000)
-    document.getElementById('signForm').addEventListener('submit', async function(e) {
-        e.preventDefault();
-        const certVal = document.querySelector('[name="certAlias"]').value;
-        const passVal = document.getElementById('tokenPinInput').value;
-        const driverVal = document.getElementById('driverDropdownWorkspace').value;
-        const reasonVal = document.getElementById('signReasonSelect').value;
-        const locationVal = document.getElementById('signLocationInput').value;
+    const signForm = document.getElementById('signForm');
+    if (signForm) {
+        signForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const certVal = document.querySelector('[name="certAlias"]').value;
+            const passVal = document.getElementById('tokenPinInput').value;
+            const driverVal = document.getElementById('driverDropdownWorkspace').value;
+            const reasonVal = document.getElementById('signReasonSelect').value;
+            const locationVal = document.getElementById('signLocationInput').value;
 
-        if (!certVal) {
-            alert("Please choose a Digital Certificate from the dropdown.");
-            return;
-        }
-        if (!passVal) {
-            alert("Please enter your USB Hardware Token PIN / Password.");
-            return;
-        }
-
-        const signBtn = document.getElementById('finalSignBtn');
-        const oldHtml = signBtn.innerHTML;
-        signBtn.innerHTML = "⏳ Signing with Hardware Token...";
-        signBtn.disabled = true;
-
-        try {
-            const formData = new FormData();
-            const fileBlob = await fetch('<?= str_replace("\\", "/", $_SESSION["pdfPath"]) ?>').then(r => r.blob());
-
-            formData.append('file', fileBlob, '<?= sanitizeInput($_SESSION["fileName"]) ?>');
-            formData.append('certificate', JSON.stringify({ alias: certVal }));
-            formData.append('areas', JSON.stringify(signatureAreas));
-            formData.append('password', passVal);
-            formData.append('driver_name', driverVal);
-            formData.append('reason', reasonVal);
-            formData.append('location', locationVal);
-
-            const response = await fetch(`${LOCAL_SERVER}/api/sign`, { method: 'POST', body: formData });
-
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({}));
-                throw new Error(err.error || `Signing failed with HTTP code ${response.status}`);
+            if (!certVal) {
+                alert("Please choose a Digital Certificate from the dropdown.");
+                return;
+            }
+            if (!passVal) {
+                alert("Please enter your USB Hardware Token PIN / Password.");
+                return;
             }
 
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'Signed_' + Date.now() + '.pdf';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            alert("✓ Success! The PDF document has been digitally signed using your USB Hardware Token.");
-        } catch (err) {
-            alert("Digital Signature Error:\n" + err.message);
-        } finally {
-            signBtn.innerHTML = oldHtml;
-            signBtn.disabled = signatureAreas.length === 0;
-        }
-    });
+            const signBtn = document.getElementById('finalSignBtn');
+            const oldHtml = signBtn.innerHTML;
+            signBtn.innerHTML = "⏳ Signing with Hardware Token...";
+            signBtn.disabled = true;
+
+            try {
+                const formData = new FormData();
+                const fileBlob = await fetch('<?= str_replace("\\", "/", $_SESSION["pdfPath"] ?? "") ?>').then(r => r.blob());
+
+                formData.append('file', fileBlob, '<?= sanitizeInput($_SESSION["fileName"] ?? "document.pdf") ?>');
+                formData.append('certificate', JSON.stringify({ alias: certVal }));
+                formData.append('areas', JSON.stringify(signatureAreas));
+                formData.append('password', passVal);
+                formData.append('driver_name', driverVal);
+                formData.append('reason', reasonVal);
+                formData.append('location', locationVal);
+
+                const response = await fetch(`${LOCAL_SERVER}/api/sign`, { method: 'POST', body: formData });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.error || `Signing failed with HTTP code ${response.status}`);
+                }
+
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Signed_' + Date.now() + '.pdf';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                alert("✓ Success! The PDF document has been digitally signed using your USB Hardware Token.");
+            } catch (err) {
+                alert("Digital Signature Error:\n" + err.message);
+            } finally {
+                signBtn.innerHTML = oldHtml;
+                signBtn.disabled = signatureAreas.length === 0;
+            }
+        });
+    }
 
     loadDrivers();
 });
@@ -1500,10 +1582,88 @@ document.addEventListener('DOMContentLoaded', function() {
 <?php endif; ?>
 
 <!-- ====================================================================
-     GLOBAL SYSTEM CHECKS: LOCAL SERVER & GITHUB VERSION.JSON COMPARISON
+     GLOBAL SYSTEM CHECKS: 3D LIGHTING TRACKER, 4-DAY FREE TRIAL & GITHUB VERSION CHECK
      Checked from: https://github.com/a-b-infotech/signer/blob/main/version.json
      ==================================================================== -->
 <script>
+// 1. Dynamic 3D Ambient Light Tracker
+window.addEventListener('mousemove', e => {
+    document.documentElement.style.setProperty('--light-x', e.clientX + 'px');
+    document.documentElement.style.setProperty('--light-y', e.clientY + 'px');
+});
+
+// 2. 4-Day Free Web Trial Manager
+const TRIAL_DURATION_DAYS = 4;
+const TRIAL_MS = TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000;
+
+function getTrialInfo() {
+    let startTs = localStorage.getItem('abinfo_web_trial_start');
+    if (!startTs) {
+        startTs = Date.now().toString();
+        localStorage.setItem('abinfo_web_trial_start', startTs);
+    }
+    const elapsed = Date.now() - parseInt(startTs);
+    const remainingMs = Math.max(0, TRIAL_MS - elapsed);
+    const remainingDays = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+    const isExpired = remainingMs <= 0;
+    return { isExpired, remainingDays, remainingMs };
+}
+
+function updateTrialVisuals(isServerDemo) {
+    const trial = getTrialInfo();
+    const trialBadge = document.getElementById('trialBadge');
+    const trialBadgeText = document.getElementById('trialBadgeText');
+    const uploadTrialBanner = document.getElementById('uploadTrialBanner');
+    const trialSidebarNotice = document.getElementById('trialSidebarNotice');
+    const trialDaysRemainingText = document.getElementById('trialDaysRemainingText');
+    const canvasWatermarkBanner = document.getElementById('canvasWatermarkBanner');
+    const workspaceLicenseTag = document.getElementById('workspaceLicenseTag');
+
+    if (isServerDemo) {
+        if (trial.isExpired) {
+            // 4-Day Trial Expired: Show Trial Expired Overlay
+            document.getElementById('trial-expired-overlay').style.display = 'flex';
+            if (trialBadge) {
+                trialBadge.style.display = 'inline-flex';
+                trialBadge.className = 'status-pill offline';
+                trialBadgeText.textContent = '⏳ Trial Expired';
+            }
+            const signBtn = document.getElementById('finalSignBtn');
+            if (signBtn) signBtn.disabled = true;
+        } else {
+            // Free Trial Active
+            document.getElementById('trial-expired-overlay').style.display = 'none';
+            if (trialBadge) {
+                trialBadge.style.display = 'inline-flex';
+                trialBadge.className = 'status-pill trial';
+                trialBadgeText.textContent = `🎁 Free Trial (${trial.remainingDays}d Left)`;
+            }
+            if (uploadTrialBanner) uploadTrialBanner.style.display = 'block';
+            if (trialSidebarNotice) {
+                trialSidebarNotice.style.display = 'block';
+                if (trialDaysRemainingText) trialDaysRemainingText.textContent = `${trial.remainingDays} day(s) remaining`;
+            }
+            if (canvasWatermarkBanner) canvasWatermarkBanner.style.display = 'flex';
+            if (workspaceLicenseTag) {
+                workspaceLicenseTag.textContent = '4-Day Trial (Demo Watermark)';
+                workspaceLicenseTag.style.color = '#fbbf24';
+            }
+        }
+    } else {
+        // Licensed Active Suite: Hide all trial banners and watermark indicators
+        document.getElementById('trial-expired-overlay').style.display = 'none';
+        if (trialBadge) trialBadge.style.display = 'none';
+        if (uploadTrialBanner) uploadTrialBanner.style.display = 'none';
+        if (trialSidebarNotice) trialSidebarNotice.style.display = 'none';
+        if (canvasWatermarkBanner) canvasWatermarkBanner.style.display = 'none';
+        if (workspaceLicenseTag) {
+            workspaceLicenseTag.textContent = 'Active Pro License';
+            workspaceLicenseTag.style.color = '#34d399';
+        }
+    }
+}
+
+// 3. SemVer comparison & Live GitHub version.json check
 function parseSemver(v) {
     if (!v) return [0, 0, 0];
     return String(v).replace(/^v/i, '').split('.').map(n => parseInt(n) || 0);
@@ -1523,7 +1683,6 @@ function isOlderThan(vClient, vRemote) {
 
 let latestGithubVersion = null;
 
-// Fetch Version from GitHub repository version.json
 async function fetchLatestGithubVersion() {
     try {
         const res = await fetch('?action=get_latest_version');
@@ -1536,7 +1695,6 @@ async function fetchLatestGithubVersion() {
         }
     } catch (e) {}
 
-    // Fallback direct check to GitHub raw
     try {
         const r2 = await fetch('https://raw.githubusercontent.com/a-b-infotech/signer/main/version.json');
         if (r2.ok) {
@@ -1579,7 +1737,7 @@ async function checkBackgroundServer() {
             if (latestGithubVersion && data.version && isOlderThan(data.version, latestGithubVersion)) {
                 const det = document.getElementById('updateVersionDetails');
                 if (det) {
-                    det.innerHTML = `Your local software (v${data.version}) is older than the latest release <b>v${latestGithubVersion}</b> on GitHub (<code>https://github.com/a-b-infotech/signer/blob/main/version.json</code>). Please install the latest release below.`;
+                    det.innerHTML = `Your local software (v${data.version}) is older than the latest release <b>v${latestGithubVersion}</b> on GitHub (<code>https://github.com/a-b-infotech/signer/blob/main/version.json</code>). Please install the updated package below.`;
                 }
                 document.getElementById('update-overlay').style.display = 'flex';
                 return;
@@ -1587,12 +1745,10 @@ async function checkBackgroundServer() {
                 document.getElementById('update-overlay').style.display = 'none';
             }
 
-            if (data.demo === true) {
-                window.isDemoMode = true;
-                const demoMsg = document.getElementById('demoWarningMsg');
-                if (demoMsg) demoMsg.style.display = 'block';
-                document.getElementById('expired-overlay').style.display = 'none';
-            } else {
+            const isServerDemo = (data.demo === true);
+            updateTrialVisuals(isServerDemo);
+
+            if (!isServerDemo) {
                 // Verify license expiration in DB
                 const formData = new FormData();
                 formData.append('key', data.key || '');
@@ -1607,12 +1763,10 @@ async function checkBackgroundServer() {
 
                 if (verifyData.status === 'expired') {
                     document.getElementById('expired-overlay').style.display = 'flex';
-                    window.isDemoMode = true;
+                    updateTrialVisuals(true);
                 } else if (verifyData.status === 'active') {
                     document.getElementById('expired-overlay').style.display = 'none';
-                    window.isDemoMode = false;
-                    const demoMsg = document.getElementById('demoWarningMsg');
-                    if (demoMsg) demoMsg.style.display = 'none';
+                    updateTrialVisuals(false);
                 }
             }
         } else {

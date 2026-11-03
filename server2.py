@@ -2588,7 +2588,13 @@ class SoftwareUpdateManager:
             dlg.destroy()
             SoftwareUpdateManager.download_and_install_update(parent, info)
 
-        ttk.Button(btn_bar, text="🚀 DOWNLOAD & INSTALL UPDATE NOW", style="Primary3D.TButton", command=start_download).pack(side=tk.LEFT, ipady=4, expand=True, fill=tk.X, padx=(0, 6))
+        def browser_download():
+            dlg.destroy()
+            d_target = info.get("download_url") or "https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe"
+            webbrowser.open(d_target)
+
+        ttk.Button(btn_bar, text="🚀 DOWNLOAD & INSTALL UPDATE NOW", style="Primary3D.TButton", command=start_download).pack(side=tk.LEFT, ipady=4, expand=True, fill=tk.X, padx=(0, 4))
+        ttk.Button(btn_bar, text="🌐 Browser Download", style="Tool3D.TButton", command=browser_download).pack(side=tk.LEFT, ipady=4, padx=(0, 4))
         ttk.Button(btn_bar, text="Remind Me Later", style="Tool3D.TButton", command=dlg.destroy).pack(side=tk.RIGHT, ipady=4)
 
     @staticmethod
@@ -2626,13 +2632,23 @@ class SoftwareUpdateManager:
             target_installer = os.path.join(temp_dir, "Abinfo_Signer_Windows_Setup.exe")
             success = False
 
+            ssl_ctx = None
+            try:
+                import ssl
+                ssl_ctx = ssl._create_unverified_context()
+            except Exception:
+                pass
+
             for durl in download_urls:
                 if not durl:
                     continue
                 try:
                     prog_dlg.after(0, lambda u=durl: lbl_status.config(text="Downloading update installer..."))
-                    req = urllib.request.Request(durl, headers={"User-Agent": f"ABInfoSigner/{APP_VERSION} (Windows)"})
-                    with urllib.request.urlopen(req, timeout=30) as resp:
+                    req = urllib.request.Request(durl, headers={"User-Agent": f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) ABInfoSigner/{APP_VERSION}"})
+                    kwargs = {"timeout": 35}
+                    if ssl_ctx:
+                        kwargs["context"] = ssl_ctx
+                    with urllib.request.urlopen(req, **kwargs) as resp:
                         total_bytes = int(resp.headers.get('content-length', 0))
                         chunk_size = 64 * 1024
                         downloaded = 0
@@ -2677,13 +2693,15 @@ class SoftwareUpdateManager:
             else:
                 def on_fail():
                     prog_dlg.destroy()
-                    messagebox.showerror(
-                        "Download Failed",
-                        "Could not download the update package from any available server.\n\n"
-                        "Please check your network connection or download manually from:\n"
-                        "https://github.com/a-b-infotech/signer/releases/latest",
+                    ask_browser = messagebox.askyesno(
+                        "Download Notice",
+                        "Could not complete automatic in-app download.\n\n"
+                        "Would you like to open your web browser to download the Windows Setup installer directly from GitHub?\n\n"
+                        "Click YES to open browser download.",
                         parent=parent
                     )
+                    if ask_browser:
+                        webbrowser.open("https://github.com/a-b-infotech/signer/releases/latest/download/Abinfo_Signer_Windows_Setup.exe")
                 prog_dlg.after(0, on_fail)
 
         threading.Thread(target=_download_thread, daemon=True).start()
@@ -2866,11 +2884,45 @@ def api_certs():
             logger.error(f"Cert fetch error: {e}")
     return jsonify(certs)
 
+def apply_demo_watermark(pdf_bytes, text="ABINFO SIGN DEMO"):
+    """
+    Applies small professional demo trial watermark at the bottom of every page
+    when signed in Web Demo / 4-Day Trial mode without an active license key.
+    """
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        writer = PdfWriter()
+        for page in reader.pages:
+            pw = float(page.mediabox.width if hasattr(page.mediabox, 'width') else page.mediaBox.getWidth())
+            ph = float(page.mediabox.height if hasattr(page.mediabox, 'height') else page.mediaBox.getHeight())
+            offset_x = float(page.mediabox.left if hasattr(page.mediabox, 'left') else page.mediaBox.getLowerLeft_x())
+            offset_y = float(page.mediabox.bottom if hasattr(page.mediabox, 'bottom') else page.mediaBox.getLowerLeft_y())
+
+            packet = io.BytesIO()
+            c = rl_canvas.Canvas(packet, pagesize=(pw, ph))
+            c.setFont("Helvetica-Bold", 8)
+            c.setFillColor(Color(0.4, 0.4, 0.4, alpha=0.75))
+            c.drawCentredString(offset_x + pw / 2.0, offset_y + 8, text)
+            c.save()
+            packet.seek(0)
+
+            overlay_reader = PdfReader(packet)
+            page.merge_page(overlay_reader.pages[0])
+            writer.add_page(page)
+
+        out_io = io.BytesIO()
+        writer.write(out_io)
+        return out_io.getvalue()
+    except Exception as e:
+        logger.error(f"Failed to apply demo watermark: {e}")
+        return pdf_bytes
+
 @app.route('/api/sign', methods=['POST'])
 def sign_pdf():
     try:
-        if LicenseManager.check_expiration_local() == "expired":
-            return jsonify({"error": "Your software license has expired. Please contact +91 7016797720 or sales@a-b-infotech.in to renew."}), 403
+        is_activated = LicenseManager.is_activated()
+        exp_status = LicenseManager.check_expiration_local() if is_activated else "inactive"
+        is_demo = (not is_activated) or (exp_status in ["expired", "inactive"])
 
         pdf_data = request.files['file'].read()
         pin = request.form.get('password')
@@ -2909,6 +2961,9 @@ def sign_pdf():
             signer = PKCS11Signer(pkcs11_session=session, cert_id=cert_id)
 
             visual_pdf_data = draw_reportlab_layer(pdf_data, signature_areas, cert_parsed)
+            # In Web Demo / 4-Day Trial mode without active license, apply small demo watermark on every page
+            if is_demo:
+                visual_pdf_data = apply_demo_watermark(visual_pdf_data, text="ABINFO SIGN DEMO")
             current_io = io.BytesIO(visual_pdf_data)
 
             base_reader = PdfReader(io.BytesIO(pdf_data))
@@ -4952,16 +5007,22 @@ class PdfVirtualEditor(tk.Frame):
             return
 
         if not self.search_all_pages_var.get():
+            if not self.spans:
+                self.scan_and_detect_text()
             for idx, s in enumerate(self.spans):
                 if query in s.get("text", "").lower():
                     self.search_matches.append(idx)
             count = len(self.search_matches)
             if count == 0:
-                self.lbl_search_count.config(text="0 matches on page", fg="#DC2626")
+                if not self.spans:
+                    self.lbl_search_count.config(text="No text on page (Run '🔍 OCR Page')", fg="#EA580C")
+                else:
+                    self.lbl_search_count.config(text="0 matches on page", fg="#DC2626")
             else:
                 self.lbl_search_count.config(text=f"{count} match(es)", fg="#047857")
                 self.active_search_match_idx = 0
                 self._draw_search_highlights()
+                self._highlight_active_search_match()
         else:
             all_m = []
             for p_idx in range(len(self.doc)):
@@ -6237,16 +6298,12 @@ class VisualPdfSignerApp:
         self.bulk_pdf_files = []
         self.just_activated = False
 
-        # Verify license
-        if not LicenseManager.is_activated():
+        # Verify license - Server DO NOT open anything without active license key!
+        if not LicenseManager.is_activated() or LicenseManager.check_expiration_local() in ["expired", "inactive"]:
+            self.root.withdraw()
             self._show_activation_screen()
         else:
-            status = LicenseManager.check_expiration_local()
-            if status == "expired":
-                messagebox.showwarning("License Expired", "Your software license has expired!\n\nPlease contact +91 7016797720 or sales@a-b-infotech.in to renew.")
-                self._show_activation_screen()
-            else:
-                self._init_app_interface()
+            self._init_app_interface()
 
     def _configure_styles(self):
         style = ttk.Style(self.root)
@@ -6326,25 +6383,41 @@ class VisualPdfSignerApp:
                 pass
 
     def _show_activation_screen(self):
+        self.root.withdraw()
         self.act_win = tk.Toplevel(self.root)
-        self.act_win.title("🔑 A B INFOTECH - License Activation")
-        self.act_win.geometry("450x300")
+        self.act_win.title("🔑 A B INFOTECH - License Activation Required")
+        self.act_win.geometry("500x380")
+        self.act_win.resizable(False, False)
         self._apply_window_icon(self.act_win)
+        
+        # Terminate application if activation window is closed without entering active license key
+        self.act_win.protocol("WM_DELETE_WINDOW", lambda: (self.root.destroy(), os._exit(0)))
 
-        outer = tk.Frame(self.act_win, bg="#FFFFFF", padx=20, pady=20)
+        outer = tk.Frame(self.act_win, bg="#FFFFFF", padx=24, pady=20)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(outer, text="A B INFOTECH", font=get_sys_font(14, "bold"), fg="#1E3A8A", bg="#FFFFFF").pack()
-        tk.Label(outer, text="Unified Digital Signer & PDF Power Suite", font=get_sys_font(9), fg="#64748B", bg="#FFFFFF").pack(pady=(2, 14))
+        tk.Label(outer, text="A B INFOTECH", font=get_sys_font(15, "bold"), fg="#1E3A8A", bg="#FFFFFF").pack()
+        tk.Label(outer, text="Unified Digital Signer & PDF Power Suite", font=get_sys_font(9), fg="#64748B", bg="#FFFFFF").pack(pady=(2, 8))
+
+        # Security lock banner
+        lock_f = tk.Frame(outer, bg="#FEF2F2", bd=1, relief=tk.SOLID, padx=10, pady=8)
+        lock_f.pack(fill=tk.X, pady=(0, 12))
+        tk.Label(lock_f, text="🔒 Active License Key Required to Open Desktop Suite", font=get_sys_font(8, "bold"), fg="#DC2626", bg="#FEF2F2").pack(anchor=tk.W)
+        tk.Label(lock_f, text="The desktop application suite requires an active license key.\nTo test digital signing for free, use the Web Signer (Token.php) in 4-day trial mode.", font=get_sys_font(7), fg="#991B1B", bg="#FEF2F2", justify="left").pack(anchor=tk.W, pady=(2, 0))
 
         tk.Label(outer, text="Enter License Key:", font=get_sys_font(9, "bold"), bg="#FFFFFF").pack(anchor=tk.W)
         self.key_entry = ttk.Entry(outer, width=42, font=get_sys_font(10), show="*")
-        self.key_entry.pack(fill=tk.X, pady=(2, 14))
+        self.key_entry.pack(fill=tk.X, pady=(2, 10))
 
-        self.btn_activate = ttk.Button(outer, text="Activate License via Browser", style="Primary3D.TButton", command=self._verify_key)
-        self.btn_activate.pack(fill=tk.X, ipady=4)
+        self.btn_activate = ttk.Button(outer, text="🚀 Activate License via Browser", style="Primary3D.TButton", command=self._verify_key)
+        self.btn_activate.pack(fill=tk.X, ipady=4, pady=(0, 8))
 
-        tk.Label(outer, text="Support WhatsApp: +91 7016797720  |  sales@a-b-infotech.in", font=get_sys_font(7), fg="#0284C7", bg="#FFFFFF").pack(pady=(16, 0))
+        btn_row = tk.Frame(outer, bg="#FFFFFF")
+        btn_row.pack(fill=tk.X, pady=(2, 0))
+        ttk.Button(btn_row, text="🛒 Buy / Renew License Online", style="Tool3D.TButton", command=lambda: webbrowser.open("https://pay.a-b-infotech.in/license.php")).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 3))
+        ttk.Button(btn_row, text="💬 WhatsApp Support", style="Tool3D.TButton", command=lambda: webbrowser.open("https://api.whatsapp.com/send?phone=917016797720&text=Buy%20PDF%20Signer%20License")).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(3, 0))
+
+        tk.Label(outer, text="Helpline: +91 7016797720  |  sales@a-b-infotech.in", font=get_sys_font(7), fg="#64748B", bg="#FFFFFF").pack(pady=(12, 0))
 
     def _verify_key(self):
         user_key = self.key_entry.get().strip()
@@ -6357,6 +6430,8 @@ class VisualPdfSignerApp:
             messagebox.showinfo("Success", "Developer Bypass Activated! Pro Edition Unlocked.")
             self.act_win.destroy()
             self.just_activated = True
+            self.root.deiconify()
+            self._maximize_window(self.root)
             self._init_app_interface()
             return
 
@@ -6393,6 +6468,8 @@ class VisualPdfSignerApp:
             messagebox.showinfo("Success", "License Activated Successfully!")
             self.act_win.destroy()
             self.just_activated = True
+            self.root.deiconify()
+            self._maximize_window(self.root)
             self._init_app_interface()
         elif LicenseManager.activation_error:
             err = LicenseManager.activation_error
