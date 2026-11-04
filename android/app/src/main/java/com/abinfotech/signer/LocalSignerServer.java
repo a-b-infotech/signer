@@ -105,8 +105,8 @@ public class LocalSignerServer {
                 obj.put("server", "ABInfo Local Signer (Android Service)");
                 obj.put("port", port);
                 obj.put("licensed", LicenseManager.isActivated(context));
-                sendJsonResponse(out, 200, obj.toString());
                 obj.put("usb_token", UsbTokenManager.getConnectedTokenSummary(context));
+                sendJsonResponse(out, 200, obj.toString());
             } else if (path.equals("/api/drivers")) {
                 JSONArray arr = new JSONArray();
                 arr.put("HYP2003 / ePass2003 (USB OTG - libcastle.so)");

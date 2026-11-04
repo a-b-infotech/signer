@@ -45,9 +45,6 @@ public class MainActivity extends Activity {
         btnActivate = (Button) findViewById(R.id.btnActivate);
         etLicenseKey = (EditText) findViewById(R.id.etLicenseKey);
 
-        // Load USB Token drivers & native libraries
-        UsbTokenManager.tryLoadNativeLibraries();
-
         // Auto-start background local server
         startServerService();
 

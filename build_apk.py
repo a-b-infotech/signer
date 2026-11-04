@@ -11,7 +11,6 @@ app_dir = os.path.join(project_dir, "app")
 src_dir = os.path.join(app_dir, "src", "main")
 res_dir = os.path.join(src_dir, "res")
 manifest_file = os.path.join(src_dir, "AndroidManifest.xml")
-jni_dir = os.path.join(src_dir, "jniLibs")
 
 print(f"=== A B INFOTECH - Building Universal Android APK ===")
 print(f"Repository Root: {repo_root}")
@@ -37,7 +36,7 @@ if not sdk_dir:
     sys.exit(1)
 print(f"Android SDK Found: {sdk_dir}")
 
-# Discover Build Tools (Prefer stable 35.0.0 or 34.0.0 over 36.0.0)
+# Discover Build Tools (Prefer stable 35.0.0 or 34.0.0)
 bt_dir = os.path.join(sdk_dir, "build-tools")
 preferred_build_tools = ["35.0.0", "34.0.0", "30.0.3", "36.0.0"]
 build_tools_dir = None
@@ -53,7 +52,7 @@ if not build_tools_dir:
     build_tools_dir = os.path.join(bt_dir, build_tools_list[0])
     print(f"Using Fallback Build Tools: {build_tools_dir}")
 
-# Discover Stable Platforms (Prefer android-34 [Android 14] over preview 37.0)
+# Discover Stable Platforms (Prefer android-34 [Android 14])
 platforms_dir = os.path.join(sdk_dir, "platforms")
 preferred_platforms = ["android-34", "android-33", "android-32", "android-31", "android-30", "android-28", "android-26"]
 android_jar = None
@@ -72,13 +71,11 @@ if not android_jar:
 # Discover Java Executables
 def find_exe(name):
     ext = ".exe" if sys.platform == "win32" else ""
-    # Look in Android Studio JBR first
     as_jbr = r"C:\Program Files\Android\Android Studio\jbr\bin"
     c = os.path.join(as_jbr, name + ext)
     if os.path.isfile(c):
         return c
 
-    # Look in JAVA_HOME
     jh = os.environ.get("JAVA_HOME", "")
     if jh:
         c = os.path.join(jh, "bin", name + ext)
@@ -94,6 +91,7 @@ def find_exe(name):
 java_exe = find_exe("java")
 javac_exe = find_exe("javac")
 keytool_exe = find_exe("keytool")
+jarsigner_exe = find_exe("jarsigner")
 
 ext = ".exe" if sys.platform == "win32" else ""
 aapt2_exe = os.path.join(build_tools_dir, "aapt2" + ext)
@@ -125,8 +123,8 @@ if ret.returncode != 0:
     sys.exit(1)
 print("aapt2 compile completed successfully.")
 
-# 2. Link Resources with Explicit Universal Compatibility Flags
-print("\n[2/7] Linking resources with aapt2 (minSdkVersion=24, targetSdkVersion=34, versionCode=22)...")
+# 2. Link Resources with Universal Compatibility (minSdkVersion=21 for 100% device support)
+print("\n[2/7] Linking resources with aapt2 (minSdkVersion=21, targetSdkVersion=34, versionCode=23)...")
 base_apk = os.path.join(build_dir, "base.apk")
 cmd_link = [
     aapt2_exe, "link",
@@ -135,10 +133,10 @@ cmd_link = [
     "--java", gen_dir,
     "-o", base_apk,
     "--auto-add-overlay",
-    "--min-sdk-version", "24",
+    "--min-sdk-version", "21",
     "--target-sdk-version", "34",
-    "--version-code", "22",
-    "--version-name", "2.2.0",
+    "--version-code", "23",
+    "--version-name", "2.2.1",
     res_zip
 ]
 ret = subprocess.run(cmd_link, capture_output=True, text=True)
@@ -186,7 +184,7 @@ cmd_d8 = [
     java_exe,
     "-cp", d8_jar,
     "com.android.tools.r8.D8",
-    "--min-api", "24",
+    "--min-api", "21",
     "--output", dex_dir,
     "--lib", android_jar
 ] + class_files
@@ -196,39 +194,17 @@ if ret.returncode != 0:
     sys.exit(1)
 print("D8 completed successfully.")
 
-# 5. Package classes.dex and All 4 Token Native Libraries (.so) into APK
-print("\n[5/7] Packaging classes.dex and token .so libraries into base APK...")
+# 5. Package classes.dex into base APK
+print("\n[5/7] Packaging classes.dex into APK...")
 dex_file = os.path.join(dex_dir, "classes.dex")
 unaligned_apk = os.path.join(build_dir, "unaligned.apk")
 shutil.copyfile(base_apk, unaligned_apk)
 
-so_count = 0
 with zipfile.ZipFile(unaligned_apk, "a") as zipf:
     zipf.write(dex_file, "classes.dex")
-    if os.path.isdir(jni_dir):
-        for root, _, files in os.walk(jni_dir):
-            for f in files:
-                if f.endswith(".so"):
-                    full_p = os.path.join(root, f)
-                    rel_p = os.path.relpath(full_p, jni_dir)
-                    apk_entry = "lib/" + rel_p.replace("\\", "/")
-                    zipf.write(full_p, apk_entry)
-                    so_count += 1
+print("Injected classes.dex into APK.")
 
-print(f"Injected classes.dex and {so_count} native .so driver libraries into APK.")
-
-# 6. Align APK with zipalign (page alignment for native shared libraries)
-print("\n[6/7] Aligning APK with zipalign (-p 4 page-aligned)...")
-aligned_apk = os.path.join(build_dir, "aligned.apk")
-cmd_zipalign = [zipalign_exe, "-f", "-p", "4", unaligned_apk, aligned_apk]
-ret = subprocess.run(cmd_zipalign, capture_output=True, text=True)
-if ret.returncode != 0:
-    print("zipalign error:", ret.stderr)
-    sys.exit(1)
-print("zipalign completed successfully.")
-
-# 7. Sign APK with apksigner (v1, v2, v3 schemes)
-print("\n[7/7] Signing APK with apksigner...")
+# Ensure Keystore Exists
 keystore_path = os.path.join(project_dir, "debug.keystore")
 if not os.path.exists(keystore_path):
     print("Generating debug keystore...")
@@ -248,6 +224,35 @@ if not os.path.exists(keystore_path):
         print("keytool error:", ret.stderr)
         sys.exit(1)
 
+# 6. Apply V1 JAR Signature with jarsigner
+print("\n[6/7] Applying V1 JAR Signature with jarsigner...")
+cmd_jarsigner = [
+    jarsigner_exe,
+    "-keystore", keystore_path,
+    "-storepass", "android",
+    "-keypass", "android",
+    "-sigalg", "SHA256withRSA",
+    "-digestalg", "SHA-256",
+    unaligned_apk,
+    "abinfokey"
+]
+ret = subprocess.run(cmd_jarsigner, capture_output=True, text=True)
+if ret.returncode != 0:
+    print("jarsigner error:", ret.stderr)
+    sys.exit(1)
+print("jarsigner completed successfully.")
+
+# Align APK with zipalign
+aligned_apk = os.path.join(build_dir, "aligned.apk")
+cmd_zipalign = [zipalign_exe, "-f", "4", unaligned_apk, aligned_apk]
+ret = subprocess.run(cmd_zipalign, capture_output=True, text=True)
+if ret.returncode != 0:
+    print("zipalign error:", ret.stderr)
+    sys.exit(1)
+print("zipalign completed successfully.")
+
+# 7. Apply V2 + V3 Signatures with apksigner
+print("\n[7/7] Applying V2 + V3 Signature with apksigner...")
 dist_dir = os.path.join(repo_root, "dist")
 os.makedirs(dist_dir, exist_ok=True)
 final_apk = os.path.join(dist_dir, "Abinfo_Signer_Android.apk")
@@ -261,9 +266,6 @@ cmd_sign = [
     "--ks-pass", "pass:android",
     "--ks-key-alias", "abinfokey",
     "--key-pass", "pass:android",
-    "--v1-signing-enabled", "true",
-    "--v2-signing-enabled", "true",
-    "--v3-signing-enabled", "true",
     "--min-sdk-version", "21",
     "--max-sdk-version", "34",
     "--out", final_apk,
@@ -274,7 +276,7 @@ if ret.returncode != 0:
     print("apksigner error:", ret.stderr)
     sys.exit(1)
 
-# Verify APK
+# Verify All Signature Schemes
 cmd_verify = [
     java_exe,
     "-jar", apksigner_jar,
@@ -283,13 +285,13 @@ cmd_verify = [
     final_apk
 ]
 ret_v = subprocess.run(cmd_verify, capture_output=True, text=True)
-print("APK Verification Output:\n" + ret_v.stdout.strip())
+print("\nAPK Verification Output:\n" + ret_v.stdout.strip())
 
 shutil.copyfile(final_apk, root_apk)
 
 apk_size = os.path.getsize(final_apk) / 1024
 print("\n=======================================================")
-print("SUCCESS! Android APK built and verified successfully!")
+print("SUCCESS! Universal Android APK built and verified!")
 print(f"Dist Location: {final_apk}")
 print(f"Root Location: {root_apk}")
 print(f"Final Size:    {apk_size:.2f} KB")
