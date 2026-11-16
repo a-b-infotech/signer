@@ -1,238 +1,1538 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0A0F1D"
-    android:fillViewport="true">
+    android:background="#0F172A"
+    android:orientation="vertical"
+    tools:context=".MainActivity">
 
+    <!-- Top Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:background="#1E293B"
+        android:elevation="4dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="12dp">
 
-        <!-- Top Header Bar -->
+        <ImageView
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="Logo"
+            android:src="@drawable/app_logo" />
+
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="A B INFOTECH"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Digital Signer &amp; PDF Power Suite"
+                android:textColor="#94A3B8"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <!-- License Badge -->
+        <TextView
+            android:id="@+id/tvHeaderLicenseBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="#0284C7"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp"
+            android:text="PRO"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <!-- Server Status Badge -->
+        <TextView
+            android:id="@+id/tvHeaderServerBadge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:background="#166534"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp"
+            android:text="5000: ON"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Navigation Tabs (Horizontal Scroll) -->
+    <HorizontalScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#0B1329"
+        android:paddingVertical="8dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingBottom="16dp">
+            android:paddingHorizontal="8dp">
 
-            <ImageView
-                android:layout_width="42dp"
-                android:layout_height="42dp"
-                android:src="@mipmap/ic_launcher"
-                android:contentDescription="Logo" />
+            <Button
+                android:id="@+id/tabSign"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:background="#2563EB"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="✍️ Sign PDF"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/tabCompress"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginStart="6dp"
+                android:background="#1E293B"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="🗜️ Compress"
+                android:textAllCaps="false"
+                android:textColor="#94A3B8"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/tabMerge"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginStart="6dp"
+                android:background="#1E293B"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="📑 Merge"
+                android:textAllCaps="false"
+                android:textColor="#94A3B8"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/tabVerify"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginStart="6dp"
+                android:background="#1E293B"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="🛡️ Verify"
+                android:textAllCaps="false"
+                android:textColor="#94A3B8"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/tabTools"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginStart="6dp"
+                android:background="#1E293B"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="🛠️ PDF Tools"
+                android:textAllCaps="false"
+                android:textColor="#94A3B8"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/tabServer"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginStart="6dp"
+                android:background="#1E293B"
+                android:minWidth="0dp"
+                android:paddingHorizontal="14dp"
+                android:text="⚙️ Server &amp; Key"
+                android:textAllCaps="false"
+                android:textColor="#94A3B8"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- Main View Flipper for Tabs -->
+    <ViewFlipper
+        android:id="@+id/viewFlipper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <!-- ======================================================== -->
+        <!-- TAB 1: SIGN PDF STUDIO -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
 
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="12dp"
-                android:orientation="vertical">
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <!-- 1. PDF File Selection Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="1. ACTIVE PDF DOCUMENT"
+                        android:textColor="#38BDF8"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvSignPdfInfo"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="No PDF file selected"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnSignSelectPdf"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:background="#0284C7"
+                            android:text="📂 Choose PDF"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+
+                        <Button
+                            android:id="@+id/btnSignClearPdf"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:background="#475569"
+                            android:text="Clear"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 2. Token & Certificate Settings Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="2. USB TOKEN &amp; CERTIFICATE"
+                            android:textColor="#38BDF8"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvTokenStatusBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="#EF4444"
+                            android:paddingHorizontal="8dp"
+                            android:paddingVertical="3dp"
+                            android:text="Disconnected"
+                            android:textColor="#FFFFFF"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- Driver Spinner -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="USB Token Driver:"
+                        android:textColor="#94A3B8"
+                        android:textSize="11sp" />
+
+                    <Spinner
+                        android:id="@+id/spTokenDriver"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="2dp"
+                        android:background="#0F172A" />
+
+                    <!-- Certificate Status / Dropdown -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Digital Certificate:"
+                        android:textColor="#94A3B8"
+                        android:textSize="11sp" />
+
+                    <TextView
+                        android:id="@+id/tvSignSelectedCert"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:background="#0F172A"
+                        android:padding="8dp"
+                        android:text="-- Tap 'Find Certificates' or Load P12 --"
+                        android:textColor="#E2E8F0"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnSignFindCerts"
+                            android:layout_width="0dp"
+                            android:layout_height="38dp"
+                            android:layout_weight="1"
+                            android:background="#166534"
+                            android:text="🔑 Find Certificates"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp" />
+
+                        <Button
+                            android:id="@+id/btnSignLoadP12"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="8dp"
+                            android:background="#334155"
+                            android:text="Load P12/PFX"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <!-- Token PIN -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Hardware Token PIN / P12 Password:"
+                        android:textColor="#94A3B8"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/etSignPin"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="2dp"
+                        android:background="#0F172A"
+                        android:hint="Enter Token User PIN"
+                        android:inputType="textPassword"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="13sp" />
+
+                    <!-- Reason & Location -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Signing Reason:"
+                        android:textColor="#94A3B8"
+                        android:textSize="11sp" />
+
+                    <Spinner
+                        android:id="@+id/spSignReason"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="2dp"
+                        android:background="#0F172A" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Signer Location / Address:"
+                        android:textColor="#94A3B8"
+                        android:textSize="11sp" />
+
+                    <EditText
+                        android:id="@+id/etSignLocation"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="2dp"
+                        android:background="#0F172A"
+                        android:hint="e.g. Gujarat, India"
+                        android:paddingHorizontal="10dp"
+                        android:text="Gujarat, India"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- 3. Signature Placement & Page Selection Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="3. SIGNATURE PLACEMENT &amp; PAGES"
+                        android:textColor="#38BDF8"
+                        android:textSize="12sp"
+                        android:textStyle="bold" />
+
+                    <!-- Page Selection -->
+                    <RadioGroup
+                        android:id="@+id/rgSignPages"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/rbSignCurrentPage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="Current Page"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbSignAllPages"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="All Pages"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbSignCustomPages"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="Custom"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+                    </RadioGroup>
+
+                    <EditText
+                        android:id="@+id/etSignCustomPages"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:layout_marginTop="4dp"
+                        android:background="#0F172A"
+                        android:hint="Page numbers (e.g. 1, 3, 5)"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
+
+                    <!-- Position Mode: Preset vs Drag-to-Draw -->
+                    <RadioGroup
+                        android:id="@+id/rgSignPositionMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/rbSignPreset"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="Preset Position"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbSignDragBox"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:text="✏️ Drag on Preview"
+                            android:textColor="#38BDF8"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </RadioGroup>
+
+                    <Spinner
+                        android:id="@+id/spSignPresetPosition"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="4dp"
+                        android:background="#0F172A" />
+
+                    <!-- Custom Drag Controls -->
+                    <LinearLayout
+                        android:id="@+id/llSignCustomControls"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:id="@+id/tvSignCustomAreasInfo"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Drag your finger on the PDF preview below to draw a signature box."
+                            android:textColor="#FDE047"
+                            android:textSize="11sp" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:orientation="horizontal">
+
+                            <Spinner
+                                android:id="@+id/spSignBoxSize"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1"
+                                android:background="#0F172A" />
+
+                            <Button
+                                android:id="@+id/btnSignClearAreas"
+                                android:layout_width="wrap_content"
+                                android:layout_height="36dp"
+                                android:layout_marginStart="8dp"
+                                android:background="#DC2626"
+                                android:text="Clear Areas"
+                                android:textAllCaps="false"
+                                android:textColor="#FFFFFF"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 4. Interactive Live PDF Preview Canvas -->
+                <LinearLayout
+                    android:id="@+id/llSignPageControls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="8dp">
+
+                    <!-- Page Toolbar -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnSignPrevPage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:background="#334155"
+                            android:text="◀ Prev"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+
+                        <TextView
+                            android:id="@+id/tvSignPageNum"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:gravity="center"
+                            android:text="Page 1/1"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btnSignNextPage"
+                            android:layout_width="wrap_content"
+                            android:layout_height="34dp"
+                            android:background="#334155"
+                            android:text="Next ▶"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+
+                    <!-- Preview Image -->
+                    <ImageView
+                        android:id="@+id/ivSignPdfPreview"
+                        android:layout_width="match_parent"
+                        android:layout_height="360dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#FFFFFF"
+                        android:contentDescription="PDF Preview"
+                        android:scaleType="fitCenter" />
+                </LinearLayout>
+
+                <!-- 5. Big Sign PDF Action Button -->
+                <Button
+                    android:id="@+id/btnSignPdfNow"
+                    android:layout_width="match_parent"
+                    android:layout_height="50dp"
+                    android:layout_marginTop="12dp"
+                    android:background="#2563EB"
+                    android:text="✍️ Sign PDF Directly to Downloads"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <!-- 6. Signed Result & Open/Share Card -->
+                <LinearLayout
+                    android:id="@+id/llSignResultCard"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="#14532D"
+                    android:orientation="vertical"
+                    android:padding="12dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="✅ PDF Successfully Signed!"
+                        android:textColor="#86EFAC"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvSignResultPath"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnSignOpenPdf"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:background="#22C55E"
+                            android:text="📂 Open Signed PDF"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF"
+                            android:textStyle="bold" />
+
+                        <Button
+                            android:id="@+id/btnSignSharePdf"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:background="#15803D"
+                            android:text="📤 Share"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ======================================================== -->
+        <!-- TAB 2: COMPRESS PDF -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="A B INFOTECH"
-                    android:textColor="#F8FAFC"
+                    android:text="🗜️ PDF Compression Suite"
+                    android:textColor="#FFFFFF"
                     android:textSize="18sp"
                     android:textStyle="bold" />
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="ANDROID DIGITAL SIGNER SUITE"
-                    android:textColor="#38BDF8"
-                    android:textSize="10sp"
+                    android:layout_marginTop="4dp"
+                    android:text="Reduce PDF file size while maintaining crystal-clear text and signature appearance."
+                    android:textColor="#94A3B8"
+                    android:textSize="12sp" />
+
+                <!-- File Picker -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:id="@+id/tvCompressFileInfo"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="No PDF file selected for compression"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp" />
+
+                    <Button
+                        android:id="@+id/btnCompressSelectPdf"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="10dp"
+                        android:background="#0284C7"
+                        android:text="📂 Select PDF to Compress"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- Compression Presets -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Select Compression Level:"
+                        android:textColor="#38BDF8"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <RadioGroup
+                        android:id="@+id/rgCompressLevel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp">
+
+                        <RadioButton
+                            android:id="@+id/rbCompressExtreme"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="⚡ Extreme Compression (Smallest file size, ~70% reduction)"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbCompressRecommended"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="⚖️ Recommended (Balanced quality &amp; size, ~45% reduction)"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbCompressLow"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="💎 High Quality (Minimal compression, crisp details)"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+                    </RadioGroup>
+                </LinearLayout>
+
+                <Button
+                    android:id="@+id/btnCompressNow"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="16dp"
+                    android:background="#2563EB"
+                    android:text="🗜️ Compress PDF Now"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
                     android:textStyle="bold" />
+
+                <!-- Result Card -->
+                <LinearLayout
+                    android:id="@+id/llCompressResult"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="#14532D"
+                    android:orientation="vertical"
+                    android:padding="14dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🎉 Compression Complete!"
+                        android:textColor="#86EFAC"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvCompressResultDetails"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnCompressOpen"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:background="#22C55E"
+                            android:text="📂 Open Compressed PDF"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+
+                        <Button
+                            android:id="@+id/btnCompressShare"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:background="#15803D"
+                            android:text="📤 Share"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
+        </ScrollView>
 
-            <TextView
-                android:id="@+id/tvHeaderStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="● Port 5000"
-                android:textColor="#10B981"
-                android:background="@drawable/badge_online"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:paddingTop="6dp"
-                android:paddingBottom="6dp"
-                android:textSize="12sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <!-- CARD 1: Background Server Controls -->
-        <LinearLayout
+        <!-- ======================================================== -->
+        <!-- TAB 3: MERGE PDF -->
+        <!-- ======================================================== -->
+        <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="16dp"
-            android:layout_marginBottom="14dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/server_title"
-                android:textColor="#F8FAFC"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvServerIp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Running on: http://127.0.0.1:5000"
-                android:textColor="#0DCAF0"
-                android:textSize="13sp"
-                android:paddingTop="4dp" />
-
-            <TextView
-                android:id="@+id/tvLanIp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Network IP: Discovering..."
-                android:textColor="#94A3B8"
-                android:textSize="12sp"
-                android:paddingBottom="12dp" />
+            android:layout_height="match_parent"
+            android:fillViewport="true">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center">
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="📑 PDF Merge &amp; Combine Suite"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Select and combine multiple PDF files in any order into one clean document."
+                    android:textColor="#94A3B8"
+                    android:textSize="12sp" />
 
                 <Button
-                    android:id="@+id/btnToggleServer"
-                    android:layout_width="0dp"
+                    android:id="@+id/btnMergeAddPdf"
+                    android:layout_width="match_parent"
                     android:layout_height="44dp"
-                    android:layout_weight="1"
-                    android:text="Stop Server"
+                    android:layout_marginTop="14dp"
+                    android:background="#0284C7"
+                    android:text="➕ Add PDF Files to Merge"
+                    android:textAllCaps="false"
                     android:textColor="#FFFFFF"
-                    android:background="@drawable/btn_red"
-                    android:textSize="13sp"
                     android:textStyle="bold" />
+
+                <!-- Merged Files List -->
+                <LinearLayout
+                    android:id="@+id/llMergeFileList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical" />
+
+                <Button
+                    android:id="@+id/btnMergeNow"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="16dp"
+                    android:background="#2563EB"
+                    android:text="📑 Combine &amp; Merge All PDFs"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <!-- Merge Result -->
+                <LinearLayout
+                    android:id="@+id/llMergeResult"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="#14532D"
+                    android:orientation="vertical"
+                    android:padding="14dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🎉 Documents Merged Successfully!"
+                        android:textColor="#86EFAC"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvMergeResultPath"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFFFF"
+                        android:textSize="11sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnMergeOpen"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:background="#22C55E"
+                            android:text="📂 Open Merged PDF"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+
+                        <Button
+                            android:id="@+id/btnMergeShare"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_marginStart="8dp"
+                            android:background="#15803D"
+                            android:text="📤 Share"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ======================================================== -->
+        <!-- TAB 4: VERIFY SIGNATURES -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🛡️ Digital Signature Verifier"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="Verify legal authenticity, signer certificate details, and check if the PDF has been tampered with."
+                    android:textColor="#94A3B8"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnVerifySelectPdf"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="14dp"
+                    android:background="#0284C7"
+                    android:text="📂 Select Signed PDF to Inspect"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvVerifyFileInfo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="No PDF chosen"
+                    android:textColor="#E2E8F0"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnVerifyNow"
+                    android:layout_width="match_parent"
+                    android:layout_height="46dp"
+                    android:layout_marginTop="12dp"
+                    android:background="#2563EB"
+                    android:text="🔍 Run Signature Verification"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <!-- Verification Results Card List -->
+                <LinearLayout
+                    android:id="@+id/llVerifyResultsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- ======================================================== -->
+        <!-- TAB 5: PDF TOOLS SUITE (Protect, Unlock, Watermark, Split, Rotate) -->
+        <!-- ======================================================== -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🛠️ PDF Tools Suite"
+                    android:textColor="#FFFFFF"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <!-- Tool 1: Password Protect -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔒 Password Protect (Encrypt)"
+                        android:textColor="#38BDF8"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnToolProtectSelect"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#334155"
+                        android:text="Choose PDF to Encrypt"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <EditText
+                        android:id="@+id/etToolProtectPassword"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#0F172A"
+                        android:hint="Enter Password"
+                        android:inputType="textPassword"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnToolProtectRun"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#0284C7"
+                        android:text="Encrypt &amp; Save"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- Tool 2: Unlock PDF -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔓 Unlock PDF (Remove Password)"
+                        android:textColor="#38BDF8"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnToolUnlockSelect"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#334155"
+                        android:text="Choose Locked PDF"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <EditText
+                        android:id="@+id/etToolUnlockPassword"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#0F172A"
+                        android:hint="Enter Current Password"
+                        android:inputType="textPassword"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnToolUnlockRun"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#0284C7"
+                        android:text="Remove Password &amp; Save"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- Tool 3: Watermark PDF -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="💧 Add Diagonal Watermark"
+                        android:textColor="#38BDF8"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnToolWatermarkSelect"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#334155"
+                        android:text="Choose PDF to Watermark"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <EditText
+                        android:id="@+id/etToolWatermarkText"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#0F172A"
+                        android:hint="Watermark Text (e.g. CONFIDENTIAL)"
+                        android:paddingHorizontal="10dp"
+                        android:text="CONFIDENTIAL"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnToolWatermarkRun"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#0284C7"
+                        android:text="Stamp Watermark &amp; Save"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- Tool 4: Split PDF -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="✂️ Split &amp; Extract Pages"
+                        android:textColor="#38BDF8"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnToolSplitSelect"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#334155"
+                        android:text="Choose PDF to Split"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <EditText
+                        android:id="@+id/etToolSplitRanges"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#0F172A"
+                        android:hint="Page Ranges (e.g. 1-3, 5)"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/btnToolSplitRun"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#0284C7"
+                        android:text="Extract Pages &amp; Save"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <!-- Tool 5: Rotate PDF -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔄 Rotate PDF Pages"
+                        android:textColor="#38BDF8"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnToolRotateSelect"
+                        android:layout_width="match_parent"
+                        android:layout_height="38dp"
+                        android:layout_marginTop="6dp"
+                        android:background="#334155"
+                        android:text="Choose PDF to Rotate"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+
+                    <RadioGroup
+                        android:id="@+id/rgToolRotateDegrees"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <RadioButton
+                            android:id="@+id/rbRotate90"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="90° Clockwise"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbRotate180"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="180°"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+
+                        <RadioButton
+                            android:id="@+id/rbRotate270"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:text="270°"
+                            android:textColor="#E2E8F0"
+                            android:textSize="12sp" />
+                    </RadioGroup>
+
+                    <Button
+                        android:id="@+id/btnToolRotateRun"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#0284C7"
+                        android:text="Rotate &amp; Save"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
 
                 <View
-                    android:layout_width="10dp"
-                    android:layout_height="1dp" />
-
-                <Button
-                    android:id="@+id/btnOpenStudio"
-                    android:layout_width="0dp"
-                    android:layout_height="44dp"
-                    android:layout_weight="1.3"
-                    android:text="@string/btn_open_studio"
-                    android:textColor="#FFFFFF"
-                    android:background="@drawable/btn_cyan"
-                    android:textSize="13sp"
-                    android:textStyle="bold" />
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp" />
             </LinearLayout>
-        </LinearLayout>
+        </ScrollView>
 
-        <!-- CARD 2: Certificate Management -->
-        <LinearLayout
+        <!-- ======================================================== -->
+        <!-- TAB 6: SERVER & LICENSE SETTINGS -->
+        <!-- ======================================================== -->
+        <ScrollView
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="16dp"
-            android:layout_marginBottom="14dp">
+            android:layout_height="match_parent"
+            android:fillViewport="true">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/cert_manager_title"
-                android:textColor="#F8FAFC"
-                android:textSize="15sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvCertCount"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Installed Certificates: 0"
-                android:textColor="#94A3B8"
-                android:textSize="13sp"
-                android:paddingTop="4dp"
-                android:paddingBottom="10dp" />
-
-            <Button
-                android:id="@+id/btnImportCert"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:text="@string/btn_import_cert"
-                android:textColor="#38BDF8"
-                android:background="@drawable/btn_tool"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <!-- CARD 3: License & Activation -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="16dp"
-            android:layout_marginBottom="14dp">
-
-            <TextView
-                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/license_title"
-                android:textColor="#F8FAFC"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:orientation="vertical"
+                android:padding="16dp">
 
-            <TextView
-                android:id="@+id/tvLicenseStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Status: Active PRO Edition"
-                android:textColor="#10B981"
-                android:textSize="13sp"
-                android:paddingTop="4dp"
-                android:paddingBottom="8dp" />
+                <!-- 1. Local HTTP API Server Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="14dp">
 
-            <EditText
-                android:id="@+id/etLicenseKey"
-                android:layout_width="match_parent"
-                android:layout_height="44dp"
-                android:hint="Enter License Key / Bypass"
-                android:textColor="#F8FAFC"
-                android:textColorHint="#64748B"
-                android:background="#1E293B"
-                android:padding="10dp"
-                android:textSize="13sp"
-                android:singleLine="true" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/btnActivate"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="8dp"
-                android:text="@string/btn_activate"
-                android:textColor="#FFFFFF"
-                android:background="@drawable/btn_cyan"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
 
-        <!-- Support Info -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="A B INFOTECH Official Support: +91 7016797720
-Website: https://www.a-b-infotech.in"
-            android:textColor="#64748B"
-            android:textSize="11sp"
-            android:gravity="center"
-            android:paddingTop="8dp"
-            android:paddingBottom="16dp" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Local HTTP Signing Server (Port 5000)"
+                                android:textColor="#FFFFFF"
+                                android:textSize="14sp"
+                                android:textStyle="bold" />
 
-    </LinearLayout>
-</ScrollView>
+                            <TextView
+                                android:id="@+id/tvServerIpDetails"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="http://127.0.0.1:5000"
+                                android:textColor="#38BDF8"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <androidx.appcompat.widget.SwitchCompat
+                            android:id="@+id/switchServerStatus"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true" />
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btnOpenWebStudio"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="12dp"
+                        android:background="#2563EB"
+                        android:text="🌐 Open Web Studio in Browser"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- 2. License Activation Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="License Key &amp; Activation"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/tvLicenseStatusText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Status: Active PRO (Unlimited)"
+                        android:textColor="#86EFAC"
+                        android:textSize="12sp" />
+
+                    <EditText
+                        android:id="@+id/etLicenseKeyInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="10dp"
+                        android:background="#0F172A"
+                        android:hint="Enter License Key or ABI-MASTER-PASS"
+                        android:paddingHorizontal="10dp"
+                        android:textColor="#FFFFFF"
+                        android:textColorHint="#64748B"
+                        android:textSize="13sp" />
+
+                    <Button
+                        android:id="@+id/btnActivateLicense"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#166534"
+                        android:text="✅ Activate License"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <!-- 3. Support & Updates Card -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="#1E293B"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Support &amp; Updates"
+                        android:textColor="#FFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnWhatsappSupport"
+                        android:layout_width="match_parent"
+                        android:layout_height="42dp"
+                        android:layout_marginTop="10dp"
+                        android:background="#25D366"
+                        android:text="💬 WhatsApp Support (+91 7016797720)"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnCheckUpdates"
+                        android:layout_width="match_parent"
+                        android:layout_height="40dp"
+                        android:layout_marginTop="8dp"
+                        android:background="#334155"
+                        android:text="🔄 Check for Updates (GitHub)"
+                        android:textAllCaps="false"
+                        android:textColor="#FFFFFF" />
+                </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+    </ViewFlipper>
+</LinearLayout>
