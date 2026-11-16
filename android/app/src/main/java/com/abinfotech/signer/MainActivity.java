@@ -44,8 +44,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ViewFlipper;
 
-import com.ftsafe.monitor.OTGPassToKen;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -196,14 +194,6 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Crash-proof global handler
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-            @Override
-            public void uncaughtException(Thread thread, Throwable throwable) {
-                Log.e(TAG, "Uncaught Exception Safely Handled: ", throwable);
-            }
-        });
-
         try {
             setContentView(R.layout.activity_main);
         } catch (Throwable t) {
@@ -217,13 +207,6 @@ public class MainActivity extends Activity {
 
         progressDialog = new ProgressDialog(this);
 
-        // Initialize OTG Token SDK
-        try {
-            OTGPassToKen.initOTGToken(this);
-        } catch (Throwable t) {
-            Log.w(TAG, "OTG Token Init: " + t.getMessage());
-        }
-
         initViews();
         setupNavigationTabs();
         setupSpinners();
@@ -232,11 +215,22 @@ public class MainActivity extends Activity {
 
         restorePreferences();
 
-        // Start local Port 5000 signing server
-        startServerService();
-
-        // Check for pre-existing certificates in storage
-        autoDetectCertificates();
+        // Safe background startup of Port 5000 signing server & certificate scanner
+        uiHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    startServerService();
+                } catch (Throwable t) {
+                    Log.w(TAG, "Server startup error: " + t.getMessage());
+                }
+                try {
+                    autoDetectCertificates();
+                } catch (Throwable t) {
+                    Log.w(TAG, "Auto detect certs error: " + t.getMessage());
+                }
+            }
+        }, 500);
     }
 
     @Override
@@ -811,7 +805,7 @@ public class MainActivity extends Activity {
     private void updateTokenStatus() {
         boolean connected = false;
         try {
-            connected = OTGPassToKen.getIsConnect() || UsbTokenManager.isHardwareTokenConnected(this);
+            connected = UsbTokenManager.isHardwareTokenConnected(this);
         } catch (Throwable ignored) {}
 
         mIsUsbTokenConnected = connected;

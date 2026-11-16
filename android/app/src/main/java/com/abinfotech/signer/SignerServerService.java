@@ -23,19 +23,22 @@ public class SignerServerService extends Service {
         super.onCreate();
         createNotificationChannel();
 
-        // Android 14 (API 34) Foreground Service compliance
+        // Android 14 (API 34) Foreground Service compliance (specialUse)
         try {
             Notification notif = createNotification();
             if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIF_ID, notif, 
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC | ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
             } else {
                 startForeground(NOTIF_ID, notif);
             }
         } catch (Throwable t) {
-            Log.w(TAG, "startForeground non-fatal error: " + t.getMessage());
+            Log.w(TAG, "startForeground specialUse failed, attempting standard: " + t.getMessage());
+            try {
+                Notification notif = createNotification();
+                startForeground(NOTIF_ID, notif);
+            } catch (Throwable t2) {
+                Log.e(TAG, "startForeground failed: " + t2.getMessage());
+            }
         }
 
         // Asynchronously start the socket server on a daemon worker thread
@@ -125,12 +128,18 @@ public class SignerServerService extends Service {
             ? new Notification.Builder(this, CHANNEL_ID)
             : new Notification.Builder(this);
 
-        return builder
+        builder
             .setContentTitle("A B INFOTECH Local Signer")
             .setContentText("🟢 Online on Port 5000 (http://127.0.0.1:5000)")
-            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pi)
-            .setOngoing(true)
-            .build();
+            .setOngoing(true);
+
+        try {
+            builder.setSmallIcon(R.drawable.app_logo);
+        } catch (Throwable t) {
+            builder.setSmallIcon(android.R.drawable.stat_notify_sync);
+        }
+
+        return builder.build();
     }
 }

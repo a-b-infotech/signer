@@ -47,11 +47,6 @@
             android:configChanges="orientation|screenSize"
             android:windowSoftInputMode="adjustResize" />
 
-        <!-- Feitian OTG Token Monitor Service -->
-        <service
-            android:name="com.ftsafe.monitor.MonitorService"
-            android:exported="false" />
-
         <!-- Foreground Service for Local HTTP Signing Server -->
         <service
             android:name=".SignerServerService"

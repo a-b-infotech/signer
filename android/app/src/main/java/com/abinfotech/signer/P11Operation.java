@@ -5,9 +5,8 @@ import java.io.IOException;
 import javax.security.cert.CertificateException;
 import javax.security.cert.X509Certificate;
 
-import com.ftsafe.monitor.OTGPassToKen;
 import android.annotation.SuppressLint;
-import  android.content.Context;
+import android.content.Context;
 import ft.mobile.bank.utils.Convection;
 import iaik.pkcs.pkcs11.wrapper.CK_ATTRIBUTE;
 import iaik.pkcs.pkcs11.wrapper.CK_MECHANISM;
@@ -24,7 +23,8 @@ public class P11Operation {
 
 	public static int isLoadlib = 0;
 	static{
-		try { System.loadLibrary("OTGPass2003_India"); } catch (Throwable t) { t.printStackTrace(); }
+		try { System.loadLibrary("c++_shared"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("OTGPass2003_India"); } catch (Throwable ignored) {}
 	}
 
 	@SuppressLint("SdCardPath")
