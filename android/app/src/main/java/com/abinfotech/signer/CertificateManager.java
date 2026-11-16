@@ -2,10 +2,10 @@ package com.abinfotech.signer;
 
 import android.content.Context;
 import android.os.Environment;
+import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Set;
 
 public class CertificateManager {
-
+    private static final String TAG = "CertificateManager";
     private static final String LAST_CERT_FILE = "last_cert.p12";
 
     public static File getCertDir(Context context) {
@@ -105,7 +105,22 @@ public class CertificateManager {
             }
         }
 
-        // 3. Downloads directory
+        // 3. External app-specific storage directory
+        try {
+            File extFiles = context.getExternalFilesDir(null);
+            if (extFiles != null && extFiles.exists()) {
+                File[] extList = extFiles.listFiles(pfxFilter);
+                if (extList != null) {
+                    for (File f : extList) {
+                        if (f.isFile() && seenPaths.add(f.getAbsolutePath())) {
+                            result.add(f);
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        // 4. Downloads directory
         try {
             File downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
             if (downloads != null && downloads.exists()) {
@@ -120,7 +135,7 @@ public class CertificateManager {
             }
         } catch (Throwable ignored) {}
 
-        // 4. Documents directory
+        // 5. Documents directory
         try {
             File docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
             if (docs != null && docs.exists()) {
@@ -144,28 +159,55 @@ public class CertificateManager {
 
         // 1. Hardware USB Token Certificates (if connected)
         try {
+            // Setup CCID connection & JNI endpoints
+            UsbTokenManager.setupHardwareTokenConnection(context);
+
             if (UsbTokenManager.isHardwareTokenConnected(context)) {
+                boolean tokenCertsFound = false;
                 try {
-                    P11Operation.p11initialize(context.getApplicationContext());
-                    if (0 == P11Operation.getSlotInfo()) {
-                        P11Operation.openSession();
-                        javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
-                        if (tokenCerts != null && tokenCerts.length > 0) {
-                            for (int i = 0; i < tokenCerts.length; i++) {
-                                javax.security.cert.X509Certificate tc = tokenCerts[i];
-                                JSONObject obj = new JSONObject();
-                                obj.put("alias", "USB_Token_Slot0_Cert_" + i);
-                                obj.put("subject", tc.getSubjectDN().getName());
-                                obj.put("issuer", tc.getIssuerDN().getName());
-                                obj.put("source", "USB Token (PKCS#11 Hardware)");
-                                obj.put("file_path", "PKCS11://token/cert/" + i);
-                                obj.put("is_hardware_token", true);
-                                arr.put(obj);
+                    boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
+                    if (initOk) {
+                        if (0 == P11Operation.getSlotInfo()) {
+                            P11Operation.openSession();
+                            if (password != null && !password.trim().isEmpty()) {
+                                try {
+                                    P11Operation.loginUser(password.trim());
+                                } catch (Throwable t) {
+                                    Log.w(TAG, "P11 login notice: " + t.getMessage());
+                                }
+                            }
+                            javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
+                            if (tokenCerts != null && tokenCerts.length > 0) {
+                                for (int i = 0; i < tokenCerts.length; i++) {
+                                    javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                    JSONObject obj = new JSONObject();
+                                    obj.put("alias", "USB_Token_Cert_" + i);
+                                    obj.put("subject", tc.getSubjectDN().getName());
+                                    obj.put("issuer", tc.getIssuerDN().getName());
+                                    obj.put("source", "USB Token (Hardware PKCS#11)");
+                                    obj.put("file_path", "PKCS11://token/cert/" + i);
+                                    obj.put("is_hardware_token", true);
+                                    arr.put(obj);
+                                    tokenCertsFound = true;
+                                }
                             }
                         }
                     }
                 } catch (Throwable t) {
-                    // Token reading fallback
+                    Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
+                }
+
+                // If hardware token is plugged in but P11 didn't return certs yet (e.g. waiting for PIN)
+                if (!tokenCertsFound) {
+                    CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(context);
+                    JSONObject obj = new JSONObject();
+                    obj.put("alias", "USB_HARDWARE_TOKEN");
+                    obj.put("subject", "Hardware Token: " + (dt != null ? dt.name : "USB Token"));
+                    obj.put("issuer", (dt != null ? dt.brand : "USB Crypto Driver"));
+                    obj.put("source", "USB Token (Plugged in - Enter PIN to sign)");
+                    obj.put("file_path", "PKCS11://hardware/token");
+                    obj.put("is_hardware_token", true);
+                    arr.put(obj);
                 }
             }
         } catch (Throwable ignored) {}

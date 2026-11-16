@@ -41,23 +41,25 @@ public class CcidTokenDriver {
     public static final int PID_HYP2003_1 = 0x0807;
     public static final int PID_HYP2003_2 = 0x2003;
 
-    // 2. mToken / CryptoID (Longmai)
-    public static final int PID_MTOKEN_1 = 0x0801;
-    public static final int PID_MTOKEN_2 = 0x0806;
-    public static final int PID_MTOKEN_3 = 0x0808;
+    // 2. mToken / CryptoID (Longmai PKI)
+    public static final int VID_LONGMAI_1 = 0x338c;
+    public static final int VID_LONGMAI_2 = 0x4c4d;
 
-    // 3. Watchdata ProxKey
-    public static final int VID_WATCHDATA_1 = 0x04b4;
-    public static final int VID_WATCHDATA_2 = 0x163c;
-    public static final int PID_PROXKEY_1 = 0x0002;
-    public static final int PID_PROXKEY_2 = 0x0003;
-    public static final int PID_PROXKEY_3 = 0x0411;
+    // 3. Watchdata ProxKey (Watchdata WDS)
+    public static final int VID_WATCHDATA_1 = 0x163c;
+    public static final int VID_WATCHDATA_2 = 0x04b5;
+    public static final int VID_WATCHDATA_3 = 0x1059;
+    public static final int VID_WATCHDATA_4 = 0x04b4;
 
-    // 4. InnaIT Precision
-    public static final int VID_INNAIT_1 = 0x2007;
-    public static final int VID_INNAIT_2 = 0x2ce3;
-    public static final int PID_INNAIT_1 = 0x1001;
-    public static final int PID_INNAIT_2 = 0x1002;
+    // 4. InnaIT Precision (Precision / eMudhra)
+    public static final int VID_INNAIT_1 = 0x2ccf;
+    public static final int VID_INNAIT_2 = 0x2007;
+    public static final int VID_INNAIT_3 = 0x2ce3;
+
+    // 5. SafeNet eToken
+    public static final int VID_SAFENET_1 = 0x0529;
+    public static final int VID_SAFENET_2 = 0x08e6;
+    public static final int VID_SAFENET_3 = 0x055c;
 
     public static DetectedToken scanForToken(Context context) {
         UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
@@ -80,21 +82,25 @@ public class CcidTokenDriver {
                 }
             }
 
-            // 1. HYP2003
-            if (vid == VID_FEITIAN && (pid == PID_EPASS2003 || pid == PID_HYP2003_1 || pid == PID_HYP2003_2)) {
+            // 1. HYP2003 / ePass2003
+            if (vid == VID_FEITIAN) {
                 return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
             }
-            // 2. mToken
-            if (vid == VID_FEITIAN && (pid == PID_MTOKEN_1 || pid == PID_MTOKEN_2 || pid == PID_MTOKEN_3)) {
+            // 2. mToken / CryptoID
+            if (vid == VID_LONGMAI_1 || vid == VID_LONGMAI_2) {
                 return new DetectedToken("mToken / CryptoID", "Longmai PKI", vid, pid, dev, hasCcid);
             }
             // 3. Watchdata ProxKey
-            if ((vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2) && (pid == PID_PROXKEY_1 || pid == PID_PROXKEY_2 || pid == PID_PROXKEY_3)) {
+            if (vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2 || vid == VID_WATCHDATA_3 || vid == VID_WATCHDATA_4) {
                 return new DetectedToken("Watchdata ProxKey", "Watchdata WDS", vid, pid, dev, hasCcid);
             }
             // 4. InnaIT Precision
-            if ((vid == VID_INNAIT_1 || vid == VID_INNAIT_2) && (pid == PID_INNAIT_1 || pid == PID_INNAIT_2)) {
+            if (vid == VID_INNAIT_1 || vid == VID_INNAIT_2 || vid == VID_INNAIT_3) {
                 return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
+            }
+            // 5. SafeNet eToken
+            if (vid == VID_SAFENET_1 || vid == VID_SAFENET_2 || vid == VID_SAFENET_3) {
+                return new DetectedToken("SafeNet eToken", "Gemalto / Thales", vid, pid, dev, hasCcid);
             }
             // Generic Smartcard / CCID
             if (hasCcid) {

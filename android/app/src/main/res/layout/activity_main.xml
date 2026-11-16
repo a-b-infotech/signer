@@ -1387,6 +1387,34 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
+                <!-- License Lockout Alert Banner -->
+                <LinearLayout
+                    android:id="@+id/llLicenseLockoutBanner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="14dp"
+                    android:background="#7F1D1D"
+                    android:orientation="vertical"
+                    android:padding="14dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="🔒 APPLICATION LOCKED"
+                        android:textColor="#FCA5A5"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="A valid license key is required to use Digital Signer, Compression, Merging, and PDF Tools Suite. Please enter your license key below to activate and unlock all features."
+                        android:textColor="#FFFFFF"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
                 <!-- 1. Local HTTP API Server Card -->
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -1475,7 +1503,7 @@
                         android:layout_height="42dp"
                         android:layout_marginTop="10dp"
                         android:background="#0F172A"
-                        android:hint="Enter License Key or ABI-MASTER-PASS"
+                        android:hint="Enter 16-Digit License Key"
                         android:paddingHorizontal="10dp"
                         android:textColor="#FFFFFF"
                         android:textColorHint="#64748B"

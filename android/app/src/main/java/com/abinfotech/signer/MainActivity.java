@@ -3,10 +3,14 @@ package com.abinfotech.signer;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
+import android.content.BroadcastReceiver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -15,6 +19,8 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.pdf.PdfRenderer;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,6 +30,7 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.os.StrictMode;
 import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Log;
@@ -72,6 +79,11 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_COMPRESS_PDF = 1003;
     private static final int REQ_PICK_MERGE_PDF = 1004;
     private static final int REQ_PICK_VERIFY_PDF = 1005;
+    private static final int REQ_PICK_TOOL_PROTECT_PDF = 1011;
+    private static final int REQ_PICK_TOOL_UNLOCK_PDF = 1012;
+    private static final int REQ_PICK_TOOL_WATERMARK_PDF = 1013;
+    private static final int REQ_PICK_TOOL_SPLIT_PDF = 1014;
+    private static final int REQ_PICK_TOOL_ROTATE_PDF = 1015;
 
     // Header Views
     private TextView tvHeaderLicenseBadge;
@@ -140,6 +152,23 @@ public class MainActivity extends Activity {
     private LinearLayout llVerifyResultsContainer;
     private File mVerifyPdf = null;
 
+    // Tab 5: PDF Tools Suite Views
+    private Button btnToolProtectSelect, btnToolProtectRun;
+    private EditText etToolProtectPassword;
+    private Button btnToolUnlockSelect, btnToolUnlockRun;
+    private EditText etToolUnlockPassword;
+    private Button btnToolWatermarkSelect, btnToolWatermarkRun;
+    private EditText etToolWatermarkText;
+    private Button btnToolSplitSelect, btnToolSplitRun;
+    private EditText etToolSplitRanges;
+    private Button btnToolRotateSelect, btnToolRotateRun;
+
+    private File mToolProtectPdf = null;
+    private File mToolUnlockPdf = null;
+    private File mToolWatermarkPdf = null;
+    private File mToolSplitPdf = null;
+    private File mToolRotatePdf = null;
+
     // Tab 6: Server & License Settings Views
     private TextView tvServerIpDetails;
     private Switch switchServerStatus;
@@ -149,6 +178,7 @@ public class MainActivity extends Activity {
     private Button btnActivateLicense;
     private Button btnWhatsappSupport;
     private Button btnCheckUpdates;
+    private LinearLayout llLicenseLockoutBanner;
 
     // State Variables
     private File mActivePdfFile = null;
@@ -178,6 +208,40 @@ public class MainActivity extends Activity {
 
     private ProgressDialog progressDialog;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
+
+    private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent != null ? intent.getAction() : null;
+            if (action == null) return;
+
+            if (UsbTokenManager.ACTION_USB_PERMISSION.equals(action)) {
+                synchronized (this) {
+                    UsbDevice device = (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                        if (device != null) {
+                            UsbTokenManager.setupHardwareTokenConnection(context);
+                            Toast.makeText(context, "🟢 USB Token Connected & Ready", Toast.LENGTH_SHORT).show();
+                            updateServerStatusUi();
+                            updateTokenStatus();
+                        }
+                    } else {
+                        Toast.makeText(context, "USB Token Permission Denied", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+                Toast.makeText(context, "USB Device Attached: Connecting...", Toast.LENGTH_SHORT).show();
+                UsbTokenManager.setupHardwareTokenConnection(context);
+                updateServerStatusUi();
+                updateTokenStatus();
+            } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
+                Toast.makeText(context, "USB Token Detached", Toast.LENGTH_SHORT).show();
+                UsbTokenManager.disconnectToken();
+                updateServerStatusUi();
+                updateTokenStatus();
+            }
+        }
+    };
 
     private final Runnable statusPoller = new Runnable() {
         @Override
@@ -215,6 +279,23 @@ public class MainActivity extends Activity {
 
         restorePreferences();
 
+        // Register USB attach/detach/permission receiver
+        try {
+            IntentFilter filter = new IntentFilter();
+            filter.addAction(UsbTokenManager.ACTION_USB_PERMISSION);
+            filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+            filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(mUsbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(mUsbReceiver, filter);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Receiver register notice: " + t.getMessage());
+        }
+
+        applyLicenseLockoutState();
+
         // Safe background startup of Port 5000 signing server & certificate scanner
         uiHandler.postDelayed(new Runnable() {
             @Override
@@ -236,6 +317,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        applyLicenseLockoutState();
         updateTokenStatus();
         updateServerStatusUi();
         uiHandler.removeCallbacks(statusPoller);
@@ -251,6 +333,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         closePdfRenderer();
+        try {
+            unregisterReceiver(mUsbReceiver);
+        } catch (Throwable ignored) {}
         try {
             P11Operation.p11finalize();
         } catch (Throwable ignored) {}
@@ -336,6 +421,26 @@ public class MainActivity extends Activity {
         btnVerifyNow = (Button) findViewById(R.id.btnVerifyNow);
         llVerifyResultsContainer = (LinearLayout) findViewById(R.id.llVerifyResultsContainer);
 
+        // Tab 5: PDF Tools Suite
+        btnToolProtectSelect = (Button) findViewById(R.id.btnToolProtectSelect);
+        etToolProtectPassword = (EditText) findViewById(R.id.etToolProtectPassword);
+        btnToolProtectRun = (Button) findViewById(R.id.btnToolProtectRun);
+
+        btnToolUnlockSelect = (Button) findViewById(R.id.btnToolUnlockSelect);
+        etToolUnlockPassword = (EditText) findViewById(R.id.etToolUnlockPassword);
+        btnToolUnlockRun = (Button) findViewById(R.id.btnToolUnlockRun);
+
+        btnToolWatermarkSelect = (Button) findViewById(R.id.btnToolWatermarkSelect);
+        etToolWatermarkText = (EditText) findViewById(R.id.etToolWatermarkText);
+        btnToolWatermarkRun = (Button) findViewById(R.id.btnToolWatermarkRun);
+
+        btnToolSplitSelect = (Button) findViewById(R.id.btnToolSplitSelect);
+        etToolSplitRanges = (EditText) findViewById(R.id.etToolSplitRanges);
+        btnToolSplitRun = (Button) findViewById(R.id.btnToolSplitRun);
+
+        btnToolRotateSelect = (Button) findViewById(R.id.btnToolRotateSelect);
+        btnToolRotateRun = (Button) findViewById(R.id.btnToolRotateRun);
+
         // Tab 6: Server
         tvServerIpDetails = (TextView) findViewById(R.id.tvServerIpDetails);
         switchServerStatus = (Switch) findViewById(R.id.switchServerStatus);
@@ -345,6 +450,7 @@ public class MainActivity extends Activity {
         btnActivateLicense = (Button) findViewById(R.id.btnActivateLicense);
         btnWhatsappSupport = (Button) findViewById(R.id.btnWhatsappSupport);
         btnCheckUpdates = (Button) findViewById(R.id.btnCheckUpdates);
+        llLicenseLockoutBanner = (LinearLayout) findViewById(R.id.llLicenseLockoutBanner);
     }
 
     private void setupNavigationTabs() {
@@ -361,6 +467,15 @@ public class MainActivity extends Activity {
                 else if (id == R.id.tabTools) targetIndex = 4;
                 else if (id == R.id.tabServer) targetIndex = 5;
 
+                if (targetIndex < 5 && !LicenseManager.isActivated(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this, "🔒 Application Locked: Please activate your license key to unlock all features", Toast.LENGTH_LONG).show();
+                    highlightTab(5);
+                    if (viewFlipper != null) {
+                        viewFlipper.setDisplayedChild(5);
+                    }
+                    return;
+                }
+
                 highlightTab(targetIndex);
                 if (viewFlipper != null) {
                     viewFlipper.setDisplayedChild(targetIndex);
@@ -376,6 +491,19 @@ public class MainActivity extends Activity {
         if (tabServer != null) tabServer.setOnClickListener(tabClickListener);
 
         highlightTab(0);
+    }
+
+    private void applyLicenseLockoutState() {
+        boolean activated = LicenseManager.isActivated(this);
+        if (llLicenseLockoutBanner != null) {
+            llLicenseLockoutBanner.setVisibility(activated ? View.GONE : View.VISIBLE);
+        }
+        if (!activated) {
+            highlightTab(5);
+            if (viewFlipper != null) {
+                viewFlipper.setDisplayedChild(5);
+            }
+        }
     }
 
     private void highlightTab(int index) {
@@ -656,8 +784,13 @@ public class MainActivity extends Activity {
                         return;
                     }
                     LicenseManager.saveLicense(MainActivity.this, key, "active", "pro", "never");
-                    Toast.makeText(MainActivity.this, "License Activated! PRO Suite Unlocked.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "🎉 License Activated! PRO Suite Unlocked.", Toast.LENGTH_SHORT).show();
+                    applyLicenseLockoutState();
                     updateServerStatusUi();
+                    highlightTab(0);
+                    if (viewFlipper != null) {
+                        viewFlipper.setDisplayedChild(0);
+                    }
                 }
             });
         }
@@ -777,6 +910,188 @@ public class MainActivity extends Activity {
                 }
             });
         }
+
+        setupPdfTools();
+    }
+
+    private void setupPdfTools() {
+        // 1. Protect PDF
+        if (btnToolProtectSelect != null) {
+            btnToolProtectSelect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("application/pdf");
+                    startActivityForResult(Intent.createChooser(intent, "Select PDF to Encrypt"), REQ_PICK_TOOL_PROTECT_PDF);
+                }
+            });
+        }
+        if (btnToolProtectRun != null) {
+            btnToolProtectRun.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mToolProtectPdf == null || !mToolProtectPdf.exists()) {
+                        Toast.makeText(MainActivity.this, "Please select a PDF to encrypt first", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String pwd = etToolProtectPassword != null ? etToolProtectPassword.getText().toString() : "";
+                    if (pwd.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Please enter a password to protect the PDF", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    try {
+                        File out = new File(getExternalFilesDir(null), "protected_" + System.currentTimeMillis() + ".pdf");
+                        PdfToolsHelper.protectPdf(mToolProtectPdf, out, pwd);
+                        showToolPdfResultDialog("Password Protected PDF Created", out);
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Protect failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+
+        // 2. Unlock PDF
+        if (btnToolUnlockSelect != null) {
+            btnToolUnlockSelect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("application/pdf");
+                    startActivityForResult(Intent.createChooser(intent, "Select Locked PDF"), REQ_PICK_TOOL_UNLOCK_PDF);
+                }
+            });
+        }
+        if (btnToolUnlockRun != null) {
+            btnToolUnlockRun.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mToolUnlockPdf == null || !mToolUnlockPdf.exists()) {
+                        Toast.makeText(MainActivity.this, "Please select a locked PDF first", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String pwd = etToolUnlockPassword != null ? etToolUnlockPassword.getText().toString() : "";
+                    try {
+                        File out = new File(getExternalFilesDir(null), "unlocked_" + System.currentTimeMillis() + ".pdf");
+                        PdfToolsHelper.unlockPdf(mToolUnlockPdf, out, pwd);
+                        showToolPdfResultDialog("Password Removed PDF Created", out);
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Unlock failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+
+        // 3. Watermark PDF
+        if (btnToolWatermarkSelect != null) {
+            btnToolWatermarkSelect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("application/pdf");
+                    startActivityForResult(Intent.createChooser(intent, "Select PDF to Watermark"), REQ_PICK_TOOL_WATERMARK_PDF);
+                }
+            });
+        }
+        if (btnToolWatermarkRun != null) {
+            btnToolWatermarkRun.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mToolWatermarkPdf == null || !mToolWatermarkPdf.exists()) {
+                        Toast.makeText(MainActivity.this, "Please select a PDF to watermark first", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String wm = etToolWatermarkText != null ? etToolWatermarkText.getText().toString().trim() : "CONFIDENTIAL";
+                    try {
+                        File out = new File(getExternalFilesDir(null), "watermarked_" + System.currentTimeMillis() + ".pdf");
+                        PdfToolsHelper.watermarkPdf(mToolWatermarkPdf, out, wm);
+                        showToolPdfResultDialog("Watermarked PDF Created", out);
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Watermark failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+
+        // 4. Split PDF
+        if (btnToolSplitSelect != null) {
+            btnToolSplitSelect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("application/pdf");
+                    startActivityForResult(Intent.createChooser(intent, "Select PDF to Split"), REQ_PICK_TOOL_SPLIT_PDF);
+                }
+            });
+        }
+        if (btnToolSplitRun != null) {
+            btnToolSplitRun.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mToolSplitPdf == null || !mToolSplitPdf.exists()) {
+                        Toast.makeText(MainActivity.this, "Please select a PDF to split first", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String ranges = etToolSplitRanges != null ? etToolSplitRanges.getText().toString().trim() : "1";
+                    try {
+                        File out = new File(getExternalFilesDir(null), "split_" + System.currentTimeMillis() + ".pdf");
+                        PdfToolsHelper.splitPdf(mToolSplitPdf, out, ranges);
+                        showToolPdfResultDialog("Pages Extracted Successfully", out);
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Split failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+
+        // 5. Rotate PDF
+        if (btnToolRotateSelect != null) {
+            btnToolRotateSelect.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("application/pdf");
+                    startActivityForResult(Intent.createChooser(intent, "Select PDF to Rotate"), REQ_PICK_TOOL_ROTATE_PDF);
+                }
+            });
+        }
+        if (btnToolRotateRun != null) {
+            btnToolRotateRun.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (mToolRotatePdf == null || !mToolRotatePdf.exists()) {
+                        Toast.makeText(MainActivity.this, "Please select a PDF to rotate first", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    try {
+                        File out = new File(getExternalFilesDir(null), "rotated_" + System.currentTimeMillis() + ".pdf");
+                        PdfToolsHelper.rotatePdf(mToolRotatePdf, out, 90);
+                        showToolPdfResultDialog("Rotated 90° Successfully", out);
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Rotate failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+    }
+
+    private void showToolPdfResultDialog(String title, final File pdfFile) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage("Output saved:\n" + pdfFile.getName() + " (" + (pdfFile.length() / 1024) + " KB)")
+                .setPositiveButton("Open PDF", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        openPdfWithViewer(pdfFile);
+                    }
+                })
+                .setNeutralButton("Share PDF", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        sharePdfWithIntent(pdfFile);
+                    }
+                })
+                .setNegativeButton("Done", null)
+                .show();
     }
 
     private void restorePreferences() {
@@ -849,6 +1164,11 @@ public class MainActivity extends Activity {
     }
 
     private void showCertificateSelectionDialog() {
+        // Ensure hardware token connection is attempted if attached
+        try {
+            UsbTokenManager.setupHardwareTokenConnection(this);
+        } catch (Throwable ignored) {}
+
         JSONArray certs = CertificateManager.listCertificatesJson(this, etSignPin != null ? etSignPin.getText().toString() : "");
 
         if (certs.length() == 0) {
@@ -859,6 +1179,17 @@ public class MainActivity extends Activity {
                         @Override
                         public void onClick(DialogInterface dialog, int which) {
                             if (btnSignLoadP12 != null) btnSignLoadP12.performClick();
+                        }
+                    })
+                    .setNeutralButton("Check USB Token", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            try {
+                                UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                            } catch (Throwable ignored) {}
+                            Toast.makeText(MainActivity.this, UsbTokenManager.getConnectedTokenSummary(MainActivity.this), Toast.LENGTH_LONG).show();
+                            updateServerStatusUi();
+                            updateTokenStatus();
                         }
                     })
                     .setNegativeButton("Cancel", null)
@@ -1438,8 +1769,27 @@ public class MainActivity extends Activity {
                 }
             } else if (requestCode == REQ_PICK_P12_CERT) {
                 try {
-                    InputStream is = getContentResolver().openInputStream(uri);
                     String fileName = "cert_" + System.currentTimeMillis() + ".pfx";
+                    try {
+                        Cursor cursor = getContentResolver().query(uri, null, null, null, null);
+                        if (cursor != null) {
+                            try {
+                                if (cursor.moveToFirst()) {
+                                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                                    if (nameIndex != -1) {
+                                        String orig = cursor.getString(nameIndex);
+                                        if (orig != null && !orig.trim().isEmpty()) {
+                                            fileName = orig.trim();
+                                        }
+                                    }
+                                }
+                            } finally {
+                                cursor.close();
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+
+                    InputStream is = getContentResolver().openInputStream(uri);
                     String savedPath = CertificateManager.importCertificate(this, is, fileName);
 
                     mSelectedCertAlias = fileName;
@@ -1452,7 +1802,7 @@ public class MainActivity extends Activity {
                             .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
                             .apply();
 
-                    Toast.makeText(this, "Certificate Loaded & Saved", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Certificate Loaded & Saved: " + fileName, Toast.LENGTH_SHORT).show();
                 } catch (Exception e) {
                     Toast.makeText(this, "Certificate load failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
@@ -1488,6 +1838,51 @@ public class MainActivity extends Activity {
                     }
                 } catch (Exception e) {
                     Toast.makeText(this, "Could not load PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQ_PICK_TOOL_PROTECT_PDF) {
+                try {
+                    mToolProtectPdf = copyUriToInternalFile(uri, "tool_protect_in.pdf");
+                    if (btnToolProtectSelect != null) {
+                        btnToolProtectSelect.setText("✓ " + mToolProtectPdf.getName() + " (" + (mToolProtectPdf.length() / 1024) + " KB)");
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed to load PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQ_PICK_TOOL_UNLOCK_PDF) {
+                try {
+                    mToolUnlockPdf = copyUriToInternalFile(uri, "tool_unlock_in.pdf");
+                    if (btnToolUnlockSelect != null) {
+                        btnToolUnlockSelect.setText("✓ " + mToolUnlockPdf.getName() + " (" + (mToolUnlockPdf.length() / 1024) + " KB)");
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed to load PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQ_PICK_TOOL_WATERMARK_PDF) {
+                try {
+                    mToolWatermarkPdf = copyUriToInternalFile(uri, "tool_watermark_in.pdf");
+                    if (btnToolWatermarkSelect != null) {
+                        btnToolWatermarkSelect.setText("✓ " + mToolWatermarkPdf.getName() + " (" + (mToolWatermarkPdf.length() / 1024) + " KB)");
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed to load PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQ_PICK_TOOL_SPLIT_PDF) {
+                try {
+                    mToolSplitPdf = copyUriToInternalFile(uri, "tool_split_in.pdf");
+                    if (btnToolSplitSelect != null) {
+                        btnToolSplitSelect.setText("✓ " + mToolSplitPdf.getName() + " (" + (mToolSplitPdf.length() / 1024) + " KB)");
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed to load PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQ_PICK_TOOL_ROTATE_PDF) {
+                try {
+                    mToolRotatePdf = copyUriToInternalFile(uri, "tool_rotate_in.pdf");
+                    if (btnToolRotateSelect != null) {
+                        btnToolRotateSelect.setText("✓ " + mToolRotatePdf.getName() + " (" + (mToolRotatePdf.length() / 1024) + " KB)");
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(this, "Failed to load PDF: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                 }
             }
         }

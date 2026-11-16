@@ -1,10 +1,26 @@
 package com.abinfotech.signer;
 
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
+import android.hardware.usb.UsbConstants;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
+import android.hardware.usb.UsbEndpoint;
+import android.hardware.usb.UsbInterface;
+import android.hardware.usb.UsbManager;
+import android.os.Build;
+import android.util.Log;
+
 import java.util.ArrayList;
 import java.util.List;
 
 public class UsbTokenManager {
+    private static final String TAG = "UsbTokenManager";
+    public static final String ACTION_USB_PERMISSION = "com.abinfotech.signer.USB_PERMISSION";
+
+    private static UsbDevice sConnectedDevice = null;
+    private static UsbDeviceConnection sActiveConnection = null;
 
     public static class TokenInfo {
         public String name;
@@ -19,13 +35,14 @@ public class UsbTokenManager {
     }
 
     public static List<TokenInfo> getAvailableDrivers(Context context) {
-        List<TokenInfo> list = new ArrayList<TokenInfo>();
+        List<TokenInfo> list = new ArrayList<>();
         CcidTokenDriver.DetectedToken detected = CcidTokenDriver.scanForToken(context);
 
         list.add(new TokenInfo("HYP2003 / ePass2003 (USB OTG)", "HyperPKI Feitian", detected != null && detected.name.contains("HYP2003")));
         list.add(new TokenInfo("mToken / CryptoID (USB OTG)", "Longmai PKI", detected != null && detected.name.contains("mToken")));
         list.add(new TokenInfo("Watchdata ProxKey (USB OTG)", "Watchdata WDS", detected != null && detected.name.contains("Watchdata")));
         list.add(new TokenInfo("InnaIT Precision (USB OTG)", "Precision / eMudhra", detected != null && detected.name.contains("InnaIT")));
+        list.add(new TokenInfo("SafeNet eToken (USB OTG)", "Gemalto / Thales", detected != null && detected.name.contains("SafeNet")));
         list.add(new TokenInfo("Software Certificate (.pfx / .p12)", "Local / Storage", true));
         list.add(new TokenInfo("Android System KeyStore", "Hardware KeyStore", true));
         return list;
@@ -38,8 +55,132 @@ public class UsbTokenManager {
     public static String getConnectedTokenSummary(Context context) {
         CcidTokenDriver.DetectedToken token = CcidTokenDriver.scanForToken(context);
         if (token != null) {
-            return "🟢 Connected: " + token.name + " (" + token.brand + ")";
+            UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+            boolean hasPerm = manager != null && manager.hasPermission(token.device);
+            return "🟢 " + token.name + " (" + token.brand + ")" + (hasPerm ? " [Ready]" : " [Permission Needed]");
         }
         return "No USB Token Connected (Plug OTG Cable)";
+    }
+
+    /**
+     * Inspects attached USB devices, prompts for permission if needed, and wires the
+     * open UsbDeviceConnection and Bulk IN/OUT endpoints into MyApplication and JniCallBack
+     * so that libOTGPass2003_India.so and CCID smartcard commands function correctly.
+     */
+    public static synchronized boolean setupHardwareTokenConnection(Context context) {
+        if (context == null) return false;
+        UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+        if (manager == null) return false;
+
+        CcidTokenDriver.DetectedToken detected = CcidTokenDriver.scanForToken(context);
+        if (detected == null || detected.device == null) {
+            disconnectToken();
+            return false;
+        }
+
+        UsbDevice device = detected.device;
+        sConnectedDevice = device;
+
+        if (!manager.hasPermission(device)) {
+            Log.d(TAG, "Requesting USB permission for token: VID=0x" + Integer.toHexString(device.getVendorId()) + " PID=0x" + Integer.toHexString(device.getProductId()));
+            try {
+                int flags = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    flags = PendingIntent.FLAG_MUTABLE;
+                }
+                Intent intent = new Intent(ACTION_USB_PERMISSION);
+                intent.setPackage(context.getPackageName());
+                PendingIntent pi = PendingIntent.getBroadcast(context, 0, intent, flags);
+                manager.requestPermission(device, pi);
+            } catch (Throwable t) {
+                Log.e(TAG, "Error requesting USB permission: " + t.getMessage(), t);
+            }
+            return false;
+        }
+
+        // Permission already granted: open connection and claim interface
+        try {
+            UsbDeviceConnection conn = manager.openDevice(device);
+            if (conn == null) {
+                Log.e(TAG, "Could not open UsbDeviceConnection for device");
+                return false;
+            }
+            sActiveConnection = conn;
+
+            UsbInterface targetIntf = null;
+            UsbEndpoint bulkIn = null;
+            UsbEndpoint bulkOut = null;
+
+            int intfCount = device.getInterfaceCount();
+            for (int i = 0; i < intfCount; i++) {
+                UsbInterface intf = device.getInterface(i);
+                UsbEndpoint tempIn = null;
+                UsbEndpoint tempOut = null;
+                for (int j = 0; j < intf.getEndpointCount(); j++) {
+                    UsbEndpoint ep = intf.getEndpoint(j);
+                    if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                        if (ep.getDirection() == UsbConstants.USB_DIR_IN) {
+                            tempIn = ep;
+                        } else if (ep.getDirection() == UsbConstants.USB_DIR_OUT) {
+                            tempOut = ep;
+                        }
+                    }
+                }
+                if (tempIn != null && tempOut != null) {
+                    targetIntf = intf;
+                    bulkIn = tempIn;
+                    bulkOut = tempOut;
+                    break;
+                }
+            }
+
+            if (targetIntf != null) {
+                boolean claimed = conn.claimInterface(targetIntf, true);
+                Log.d(TAG, "Claimed USB Interface " + targetIntf.getId() + ": " + claimed);
+
+                // Wire endpoints into Feitian / HyperPKI SDK (MyApplication & JniCallBack)
+                try {
+                    com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
+                    if (myApp != null) {
+                        myApp.setUsbDeviceConnection(conn);
+                        myApp.setInUsbEndpoint(bulkIn);
+                        myApp.setOutUsbEndpoint(bulkOut);
+                        Log.d(TAG, "MyApplication endpoints successfully wired");
+                    }
+                    com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
+                    if (cb != null) {
+                        cb.setidVendor(device.getVendorId());
+                        cb.setidProduct(device.getProductId());
+                        Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "HyperPKI JniCallBack setup notice: " + t.getMessage());
+                }
+
+                return true;
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to connect hardware token: " + t.getMessage(), t);
+        }
+
+        return false;
+    }
+
+    public static synchronized void disconnectToken() {
+        if (sActiveConnection != null) {
+            try {
+                sActiveConnection.close();
+            } catch (Throwable ignored) {}
+            sActiveConnection = null;
+        }
+        sConnectedDevice = null;
+        try {
+            com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
+            if (myApp != null) {
+                myApp.setUsbDeviceConnection(null);
+                myApp.setInUsbEndpoint(null);
+                myApp.setOutUsbEndpoint(null);
+            }
+        } catch (Throwable ignored) {}
     }
 }

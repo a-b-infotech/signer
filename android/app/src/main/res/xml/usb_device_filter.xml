@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 1. Feitian HYP2003 / ePass2003 (VID 0x096e = 2414) -->
+    <usb-device vendor-id="2414" />
+    
+    <!-- 2. Longmai mToken / CryptoID (VID 0x338c = 13196, 0x4c4d = 19533) -->
+    <usb-device vendor-id="13196" />
+    <usb-device vendor-id="19533" />
+    
+    <!-- 3. Watchdata ProxKey (VID 0x163c = 5692, 0x04b5 = 1205, 0x1059 = 4185, 0x04b4 = 1204) -->
+    <usb-device vendor-id="5692" />
+    <usb-device vendor-id="1205" />
+    <usb-device vendor-id="4185" />
+    <usb-device vendor-id="1204" />
+    
+    <!-- 4. InnaIT Precision / eMudhra (VID 0x2ccf = 11471, 0x2007 = 8200, 0x2ce3 = 11491) -->
+    <usb-device vendor-id="11471" />
+    <usb-device vendor-id="8200" />
+    <usb-device vendor-id="11491" />
+    
+    <!-- 5. SafeNet eToken (VID 0x0529 = 1321, 0x08e6 = 2278, 0x055c = 1372) -->
+    <usb-device vendor-id="1321" />
+    <usb-device vendor-id="2278" />
+    <usb-device vendor-id="1372" />
+    
+    <!-- 6. Generic CCID Smartcard Devices (Class 11 = 0x0B) -->
+    <usb-device class="11" />
+</resources>
