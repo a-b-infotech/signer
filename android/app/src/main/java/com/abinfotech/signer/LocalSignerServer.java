@@ -1,11 +1,14 @@
 package com.abinfotech.signer;
 
 import android.content.Context;
+import android.content.res.AssetManager;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -22,8 +25,16 @@ public class LocalSignerServer {
     }
 
     public synchronized void start() throws IOException {
-        if (isRunning) return;
-        serverSocket = new ServerSocket(port, 50, InetAddress.getByName("0.0.0.0"));
+        if (isRunning && serverSocket != null && !serverSocket.isClosed()) return;
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (Exception ignored) {}
+
+        serverSocket = new ServerSocket();
+        serverSocket.setReuseAddress(true);
+        serverSocket.bind(new InetSocketAddress("0.0.0.0", port), 50);
         isRunning = true;
         threadPool.execute(new Runnable() {
             @Override
@@ -80,12 +91,19 @@ public class LocalSignerServer {
 
             int contentLength = 0;
             String contentType = "";
+            Map<String, String> headers = new HashMap<String, String>();
+
             while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                String lower = line.toLowerCase();
-                if (lower.startsWith("content-length:")) {
-                    contentLength = Integer.parseInt(line.substring(15).trim());
-                } else if (lower.startsWith("content-type:")) {
-                    contentType = line.substring(13).trim();
+                int colon = line.indexOf(":");
+                if (colon != -1) {
+                    String key = line.substring(0, colon).trim().toLowerCase();
+                    String val = line.substring(colon + 1).trim();
+                    headers.put(key, val);
+                    if (key.equals("content-length")) {
+                        try { contentLength = Integer.parseInt(val); } catch (Exception ignored) {}
+                    } else if (key.equals("content-type")) {
+                        contentType = val;
+                    }
                 }
             }
 
@@ -96,8 +114,8 @@ public class LocalSignerServer {
                 return;
             }
 
-            // Routes
-            if (path.equals("/api/status")) {
+            // Route handling
+            if (path.equals("/api/status") || path.equals("/status")) {
                 JSONObject obj = new JSONObject();
                 obj.put("status", "running");
                 obj.put("version", "2.2.0");
@@ -105,6 +123,7 @@ public class LocalSignerServer {
                 obj.put("server", "ABInfo Local Signer (Android Service)");
                 obj.put("port", port);
                 obj.put("licensed", LicenseManager.isActivated(context));
+                obj.put("license_tier", "pro");
                 obj.put("usb_token", UsbTokenManager.getConnectedTokenSummary(context));
                 sendJsonResponse(out, 200, obj.toString());
             } else if (path.equals("/api/drivers")) {
@@ -141,19 +160,56 @@ public class LocalSignerServer {
                     totalRead += r;
                 }
 
-                byte[] signedBytes = PdfSignerEngine.signPdf(context, body, "", "", "I approve this document", "India");
+                String certAlias = headers.get("x-cert-alias");
+                String pin = headers.get("x-pin");
+                String reason = headers.get("x-reason");
+                String location = headers.get("x-location");
+
+                byte[] signedBytes = PdfSignerEngine.signPdf(context, body, certAlias, pin, reason, location);
                 sendBinaryResponse(out, 200, "application/pdf", "Signed_Document.pdf", signedBytes);
+            } else if (path.equals("/") || path.equals("/studio") || path.equals("/index.html")) {
+                serveAssetFile(out, "webstudio/index.html", "text/html; charset=utf-8");
+            } else if (path.equals("/pdf.min.js")) {
+                serveAssetFile(out, "webstudio/pdf.min.js", "application/javascript");
+            } else if (path.equals("/pdf.worker.min.js")) {
+                serveAssetFile(out, "webstudio/pdf.worker.min.js", "application/javascript");
             } else {
-                String welcome = "<html><body style='font-family:sans-serif; background:#0A0F1D; color:#F8FAFC; text-align:center; padding:50px;'>" +
-                                 "<h1 style='color:#0DCAF0;'>A B INFOTECH Android Digital Signer</h1>" +
-                                 "<p style='color:#10B981;'>🟢 Background Server Active on Port " + port + "</p>" +
-                                 "<p style='color:#94A3B8;'>Ready to sign PDF documents from Web Studio &amp; Network Apps.</p></body></html>";
-                sendHtmlResponse(out, 200, welcome);
+                serveAssetFile(out, "webstudio/index.html", "text/html; charset=utf-8");
             }
 
             out.flush();
             client.close();
         } catch (Exception ignored) {}
+    }
+
+    private void serveAssetFile(OutputStream out, String assetPath, String contentType) {
+        try {
+            AssetManager am = context.getAssets();
+            InputStream is = am.open(assetPath);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) != -1) {
+                baos.write(buf, 0, n);
+            }
+            is.close();
+            byte[] data = baos.toByteArray();
+
+            String header = "HTTP/1.1 200 OK\r\n" +
+                            "Content-Type: " + contentType + "\r\n" +
+                            "Access-Control-Allow-Origin: *\r\n" +
+                            "Content-Length: " + data.length + "\r\n\r\n";
+            out.write(header.getBytes(StandardCharsets.UTF_8));
+            out.write(data);
+        } catch (Exception e) {
+            try {
+                String fallback = "<html><body style='font-family:sans-serif; background:#0A0F1D; color:#F8FAFC; text-align:center; padding:50px;'>" +
+                                  "<h1 style='color:#0DCAF0;'>A B INFOTECH Android Digital Signer</h1>" +
+                                  "<p style='color:#10B981;'>🟢 Background Server Active on Port " + port + "</p>" +
+                                  "<p style='color:#94A3B8;'>Ready to sign PDF documents from Web Studio &amp; Network Apps.</p></body></html>";
+                sendHtmlResponse(out, 200, fallback);
+            } catch (Exception ignored) {}
+        }
     }
 
     private String getQueryParam(String query, String name) {

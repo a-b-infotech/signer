@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>A B INFOTECH - Mobile Web Signing Studio</title>
+    <style>
+        :root {
+            --bg-dark: #070A14;
+            --bg-card: rgba(18, 26, 47, 0.85);
+            --border-glow: rgba(13, 202, 240, 0.3);
+            --cyan-accent: #0DCAF0;
+            --cyan-glow: 0 0 20px rgba(13, 202, 240, 0.4);
+            --emerald: #10B981;
+            --red: #EF4444;
+            --amber: #F59E0B;
+            --text-main: #F8FAFC;
+            --text-muted: #94A3B8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: radial-gradient(circle at 50% 0%, #152238 0%, #070A14 75%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Top Bar */
+        .top-bar {
+            height: 56px;
+            background: rgba(10, 15, 29, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-glow);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .brand-title {
+            font-size: 1.05rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, #FFF 0%, var(--cyan-accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .server-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 5px 10px;
+            border-radius: 20px;
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--emerald);
+            border: 1px solid rgba(16, 185, 129, 0.35);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .server-badge.offline {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--red);
+            border-color: rgba(239, 68, 68, 0.35);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            box-shadow: 0 0 8px currentColor;
+        }
+
+        /* Main Workspace */
+        .workspace {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            padding: 12px;
+            gap: 12px;
+        }
+
+        @media (min-width: 900px) {
+            .workspace {
+                flex-direction: row;
+                align-items: flex-start;
+                padding: 16px;
+            }
+            .sidebar {
+                width: 380px;
+                flex-shrink: 0;
+            }
+            .stage-container {
+                flex: 1;
+            }
+        }
+
+        /* Glassmorphic 3D Card */
+        .card-3d {
+            background: var(--bg-card);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        /* Sidebar Form */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        select, input[type="text"], input[type="password"] {
+            width: 100%;
+            background: rgba(10, 15, 29, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-main);
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            outline: none;
+            transition: all 0.2s;
+        }
+        select:focus, input:focus {
+            border-color: var(--cyan-accent);
+            box-shadow: 0 0 10px rgba(13, 202, 240, 0.3);
+        }
+
+        /* Action Buttons */
+        .btn-3d {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 18px;
+            border-radius: 12px;
+            font-size: 0.92rem;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            user-select: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #0284C7 0%, #0DCAF0 100%);
+            color: #FFFFFF;
+            box-shadow: 0 4px 15px rgba(13, 202, 240, 0.35);
+        }
+        .btn-primary:active {
+            transform: scale(0.98);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .btn-draw {
+            background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+            color: #FFF;
+        }
+        .btn-draw.active {
+            background: linear-gradient(135deg, #EF4444 0%, #B91C1C 100%);
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+        }
+
+        /* Stage Area */
+        .stage-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 480px;
+        }
+
+        .stage-controls {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(10, 15, 29, 0.85);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .nav-btn {
+            padding: 6px 12px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-main);
+            font-size: 0.82rem;
+            cursor: pointer;
+        }
+
+        .canvas-viewport {
+            position: relative;
+            background: #111726;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            overflow: auto;
+            min-height: 420px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 16px;
+        }
+
+        .canvas-wrapper {
+            position: relative;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+            border-radius: 4px;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        canvas {
+            display: block;
+            background: #FFFFFF;
+        }
+
+        /* Interactive Signature Box Overlay */
+        .sig-box {
+            position: absolute;
+            border: 2px dashed #0DCAF0;
+            background: rgba(13, 202, 240, 0.2);
+            color: #0DCAF0;
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            cursor: move;
+            box-shadow: 0 0 15px rgba(13, 202, 240, 0.4);
+            user-select: none;
+            touch-action: none;
+        }
+
+        /* Empty State */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+            gap: 12px;
+        }
+        .empty-icon {
+            font-size: 3.5rem;
+            opacity: 0.85;
+        }
+
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+    </style>
+    <script src="pdf.min.js"></script>
+</head>
+<body>
+
+    <!-- Top Navigation Bar -->
+    <header class="top-bar">
+        <div class="brand-title">
+            <span>✍️</span> A B INFOTECH Studio
+        </div>
+        <div id="serverBadge" class="server-badge">
+            <span class="status-dot"></span>
+            <span id="serverBadgeText">Checking Server...</span>
+        </div>
+    </header>
+
+    <!-- Workspace -->
+    <div class="workspace">
+        
+        <!-- SIDEBAR: Controls & Settings -->
+        <aside class="sidebar">
+            <div class="card-3d">
+                <h3 style="font-size:1rem; margin-bottom:12px; color:#F8FAFC;">📁 Open PDF Document</h3>
+                <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;">
+                <button type="button" class="btn-3d btn-primary" style="width:100%;" onclick="document.getElementById('pdfFileInput').click();">
+                    📄 Choose PDF from Phone
+                </button>
+                <div id="fileInfo" style="font-size:0.8rem; color:var(--text-muted); margin-top:8px; word-break:break-all;"></div>
+            </div>
+
+            <div class="card-3d">
+                <h3 style="font-size:1rem; margin-bottom:12px; color:#F8FAFC;">⚙️ Signature Settings</h3>
+
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>1. USB Hardware Token Driver</label>
+                    <select id="selDriver">
+                        <option value="auto">Auto-Detect CCID Token (OTG)</option>
+                        <option value="hyp2003">HYP2003 / ePass2003 (USB OTG)</option>
+                        <option value="mtoken">mToken / CryptoID (USB OTG)</option>
+                        <option value="proxkey">Watchdata ProxKey (USB OTG)</option>
+                        <option value="innait">InnaIT Precision (USB OTG)</option>
+                        <option value="pfx">Software Certificate (.pfx / .p12)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>2. Digital Certificate</label>
+                    <select id="selCert">
+                        <option value="">-- Choose Installed Certificate --</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>3. Token User PIN / Password</label>
+                    <input type="password" id="txtPin" placeholder="Enter Token PIN / Cert Password">
+                </div>
+
+                <div class="form-group" style="margin-bottom:10px;">
+                    <label>4. Signing Reason</label>
+                    <select id="selReason">
+                        <option value="I approve this document">I approve this document</option>
+                        <option value="I am the author of this document">I am the author of this document</option>
+                        <option value="I have reviewed and verified this document">I have reviewed and verified this document</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="margin-bottom:14px;">
+                    <label>5. Signer Location / Address</label>
+                    <input type="text" id="txtLocation" value="Gujarat, India" placeholder="e.g. Gujarat, India">
+                </div>
+
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="chkAllPages">
+                        <span>Sign on <b>All Pages</b> of document</span>
+                    </label>
+                </div>
+
+                <button type="button" id="btnSignPdf" class="btn-3d btn-primary" style="width:100%; padding:14px;" onclick="executeSignPdf()">
+                    🚀 Sign PDF &amp; Save
+                </button>
+            </div>
+        </aside>
+
+        <!-- STAGE: PDF Canvas & Signature Placement -->
+        <main class="stage-container">
+            <div class="stage-controls">
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <button type="button" class="nav-btn" onclick="prevPage()">◄ Prev</button>
+                    <span id="pageIndicator" style="font-size:0.85rem; font-weight:600;">Page 1 / 1</span>
+                    <button type="button" class="nav-btn" onclick="nextPage()">Next ►</button>
+                </div>
+
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <button type="button" class="nav-btn" onclick="zoomOut()">−</button>
+                    <span id="zoomLevel" style="font-size:0.85rem; font-weight:600;">100%</span>
+                    <button type="button" class="nav-btn" onclick="zoomIn()">+</button>
+                </div>
+
+                <div style="display:flex; gap:6px;">
+                    <button type="button" id="btnDrawBox" class="btn-3d btn-draw" style="padding:6px 12px; font-size:0.82rem;" onclick="toggleDrawMode()">
+                        ✏️ Draw Box
+                    </button>
+                    <button type="button" class="nav-btn" onclick="clearSignatureArea()">Clear</button>
+                </div>
+            </div>
+
+            <div class="canvas-viewport" id="canvasViewport">
+                <div id="emptyPrompt" class="empty-state">
+                    <div class="empty-icon">📄</div>
+                    <h3 style="font-size:1.2rem; font-weight:700;">No PDF Loaded</h3>
+                    <p style="color:var(--text-muted); font-size:0.9rem; max-width:320px;">
+                        Tap "Choose PDF from Phone" on the sidebar to preview and position your signature visually.
+                    </p>
+                </div>
+
+                <div class="canvas-wrapper" id="canvasWrapper" style="display:none;">
+                    <canvas id="pdfCanvas"></canvas>
+                    <div id="sigBox" class="sig-box" style="display:none;">
+                        <span>✍️ Digital Signature Area<br><small id="sigBoxCoords">X:0 Y:0</small></span>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Set local PDF.js worker
+        if (window['pdfjs-dist/build/pdf']) {
+            pdfjsLib = window['pdfjs-dist/build/pdf'];
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
+        }
+
+        let pdfDoc = null;
+        let currentPageNum = 1;
+        let totalPagesCount = 1;
+        let currentScale = 1.0;
+        let pdfRawBytes = null;
+        let isDrawMode = false;
+        let isServerOnline = false;
+
+        let sigPlacement = {
+            page: 1,
+            x: 50,
+            y: 50,
+            width: 180,
+            height: 70
+        };
+
+        const canvas = document.getElementById('pdfCanvas');
+        const ctx = canvas.getContext('2d');
+        const sigBox = document.getElementById('sigBox');
+        const canvasWrapper = document.getElementById('canvasWrapper');
+        const emptyPrompt = document.getElementById('emptyPrompt');
+
+        // Check Local Server Port 5000 API
+        async function checkServerStatus() {
+            try {
+                const res = await fetch('http://127.0.0.1:5000/api/status', { mode: 'cors', cache: 'no-cache' });
+                if (res.ok) {
+                    const data = await res.json();
+                    isServerOnline = true;
+                    document.getElementById('serverBadge').className = 'server-badge';
+                    document.getElementById('serverBadgeText').textContent = 'Port 5000: ONLINE';
+                    loadCertificates();
+                    return;
+                }
+            } catch (e) {}
+
+            isServerOnline = false;
+            document.getElementById('serverBadge').className = 'server-badge offline';
+            document.getElementById('serverBadgeText').textContent = 'Port 5000: OFFLINE';
+        }
+
+        setInterval(checkServerStatus, 4000);
+        checkServerStatus();
+
+        // Load certificates from local server
+        async function loadCertificates() {
+            try {
+                const res = await fetch('http://127.0.0.1:5000/api/certificates', { mode: 'cors' });
+                if (res.ok) {
+                    const certs = await res.json();
+                    const sel = document.getElementById('selCert');
+                    sel.innerHTML = '<option value="">-- Choose Installed Certificate --</option>';
+                    certs.forEach(c => {
+                        const opt = document.createElement('option');
+                        opt.value = c.alias || c.file_path || c.subject;
+                        opt.textContent = (c.subject ? c.subject.replace('CN=', '') : (c.alias || 'Certificate')) + ' (' + (c.source || 'Local') + ')';
+                        sel.appendChild(opt);
+                    });
+                }
+            } catch (e) {}
+        }
+
+        // File Input Handler
+        document.getElementById('pdfFileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('fileInfo').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                pdfRawBytes = new Uint8Array(evt.target.result);
+                renderPdfBytes(pdfRawBytes);
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        function renderPdfBytes(bytes) {
+            if (!pdfjsLib) return;
+            pdfjsLib.getDocument({ data: bytes }).promise.then(pdf => {
+                pdfDoc = pdf;
+                totalPagesCount = pdf.numPages;
+                currentPageNum = 1;
+                emptyPrompt.style.display = 'none';
+                canvasWrapper.style.display = 'inline-block';
+                renderPage(currentPageNum);
+            }).catch(err => {
+                alert('Failed to load PDF: ' + err.message);
+            });
+        }
+
+        function renderPage(num) {
+            if (!pdfDoc) return;
+            pdfDoc.getPage(num).then(page => {
+                const viewport = page.getViewport({ scale: currentScale });
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+
+                const renderContext = {
+                    canvasContext: ctx,
+                    viewport: viewport
+                };
+                page.render(renderContext).promise.then(() => {
+                    document.getElementById('pageIndicator').textContent = `Page ${num} / ${totalPagesCount}`;
+                    document.getElementById('zoomLevel').textContent = `${Math.round(currentScale * 100)}%`;
+                    updateSigBoxUi();
+                });
+            });
+        }
+
+        function prevPage() {
+            if (pdfDoc && currentPageNum > 1) {
+                currentPageNum--;
+                renderPage(currentPageNum);
+            }
+        }
+
+        function nextPage() {
+            if (pdfDoc && currentPageNum < totalPagesCount) {
+                currentPageNum++;
+                renderPage(currentPageNum);
+            }
+        }
+
+        function zoomIn() {
+            currentScale = Math.min(2.5, currentScale + 0.15);
+            renderPage(currentPageNum);
+        }
+
+        function zoomOut() {
+            currentScale = Math.max(0.6, currentScale - 0.15);
+            renderPage(currentPageNum);
+        }
+
+        // Signature Box Dragging & Placement
+        function updateSigBoxUi() {
+            if (sigPlacement.page === currentPageNum) {
+                sigBox.style.display = 'flex';
+                sigBox.style.left = (sigPlacement.x * currentScale) + 'px';
+                sigBox.style.top = (sigPlacement.y * currentScale) + 'px';
+                sigBox.style.width = (sigPlacement.width * currentScale) + 'px';
+                sigBox.style.height = (sigPlacement.height * currentScale) + 'px';
+                document.getElementById('sigBoxCoords').textContent = `X:${Math.round(sigPlacement.x)} Y:${Math.round(sigPlacement.y)}`;
+            } else {
+                sigBox.style.display = 'none';
+            }
+        }
+
+        function toggleDrawMode() {
+            isDrawMode = !isDrawMode;
+            const btn = document.getElementById('btnDrawBox');
+            if (isDrawMode) {
+                btn.className = 'btn-3d btn-draw active';
+                btn.textContent = 'Tap on Canvas';
+            } else {
+                btn.className = 'btn-3d btn-draw';
+                btn.textContent = '✏️ Draw Box';
+            }
+        }
+
+        canvasWrapper.addEventListener('click', function(e) {
+            if (!isDrawMode) return;
+            const rect = canvas.getBoundingClientRect();
+            const clickX = (e.clientX - rect.left) / currentScale;
+            const clickY = (e.clientY - rect.top) / currentScale;
+
+            sigPlacement.page = currentPageNum;
+            sigPlacement.x = Math.max(10, clickX - (sigPlacement.width / 2));
+            sigPlacement.y = Math.max(10, clickY - (sigPlacement.height / 2));
+            updateSigBoxUi();
+            toggleDrawMode();
+        });
+
+        // Touch dragging support for mobile
+        let isDragging = false;
+        let startX, startY;
+
+        sigBox.addEventListener('touchstart', function(e) {
+            isDragging = true;
+            const touch = e.touches[0];
+            startX = touch.clientX - sigBox.offsetLeft;
+            startY = touch.clientY - sigBox.offsetTop;
+            e.preventDefault();
+        });
+
+        window.addEventListener('touchmove', function(e) {
+            if (!isDragging) return;
+            const touch = e.touches[0];
+            let newLeft = touch.clientX - startX;
+            let newTop = touch.clientY - startY;
+
+            sigPlacement.x = Math.max(0, newLeft / currentScale);
+            sigPlacement.y = Math.max(0, newTop / currentScale);
+            updateSigBoxUi();
+        });
+
+        window.addEventListener('touchend', function() {
+            isDragging = false;
+        });
+
+        function clearSignatureArea() {
+            sigBox.style.display = 'none';
+            sigPlacement.page = -1;
+        }
+
+        // Execute PDF Signing
+        async function executeSignPdf() {
+            if (!pdfRawBytes) {
+                alert('Please choose a PDF document first.');
+                return;
+            }
+
+            const cert = document.getElementById('selCert').value;
+            const pin = document.getElementById('txtPin').value;
+            const reason = document.getElementById('selReason').value;
+            const location = document.getElementById('txtLocation').value;
+            const allPages = document.getElementById('chkAllPages').checked;
+
+            const btn = document.getElementById('btnSignPdf');
+            btn.textContent = '⏳ Signing PDF...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('http://127.0.0.1:5000/api/sign', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/pdf',
+                        'X-Cert-Alias': cert,
+                        'X-Pin': pin,
+                        'X-Reason': reason,
+                        'X-Location': location,
+                        'X-All-Pages': allPages ? 'true' : 'false',
+                        'X-Sig-X': sigPlacement.x.toString(),
+                        'X-Sig-Y': sigPlacement.y.toString(),
+                        'X-Sig-Width': sigPlacement.width.toString(),
+                        'X-Sig-Height': sigPlacement.height.toString()
+                    },
+                    body: pdfRawBytes
+                });
+
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'Signed_Document.pdf';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    alert('✓ PDF Document successfully signed and saved!');
+                } else {
+                    const text = await response.text();
+                    alert('Signing Failed: ' + (text || 'Could not complete digital signature.'));
+                }
+            } catch (err) {
+                alert('Server Error: ' + err.message + '\nPlease make sure Local Server is running on Port 5000.');
+            } finally {
+                btn.textContent = '🚀 Sign PDF & Save';
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

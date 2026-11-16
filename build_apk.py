@@ -10,6 +10,7 @@ project_dir = os.path.join(repo_root, "android")
 app_dir = os.path.join(project_dir, "app")
 src_dir = os.path.join(app_dir, "src", "main")
 res_dir = os.path.join(src_dir, "res")
+assets_dir = os.path.join(src_dir, "assets")
 manifest_file = os.path.join(src_dir, "AndroidManifest.xml")
 
 print(f"=== A B INFOTECH - Building Universal Android APK ===")
@@ -123,20 +124,21 @@ if ret.returncode != 0:
     sys.exit(1)
 print("aapt2 compile completed successfully.")
 
-# 2. Link Resources with Universal Compatibility (minSdkVersion=21 for 100% device support)
-print("\n[2/7] Linking resources with aapt2 (minSdkVersion=21, targetSdkVersion=34, versionCode=23)...")
+# 2. Link Resources with Universal Compatibility (minSdkVersion=21, targetSdkVersion=34)
+print("\n[2/7] Linking resources with aapt2 (minSdkVersion=21, targetSdkVersion=34, versionCode=24)...")
 base_apk = os.path.join(build_dir, "base.apk")
 cmd_link = [
     aapt2_exe, "link",
     "-I", android_jar,
     "--manifest", manifest_file,
     "--java", gen_dir,
+    "-A", assets_dir,
     "-o", base_apk,
     "--auto-add-overlay",
     "--min-sdk-version", "21",
     "--target-sdk-version", "34",
-    "--version-code", "23",
-    "--version-name", "2.2.1",
+    "--version-code", "24",
+    "--version-name", "2.2.2",
     res_zip
 ]
 ret = subprocess.run(cmd_link, capture_output=True, text=True)
@@ -194,15 +196,22 @@ if ret.returncode != 0:
     sys.exit(1)
 print("D8 completed successfully.")
 
-# 5. Package classes.dex into base APK
-print("\n[5/7] Packaging classes.dex into APK...")
+# 5. Package classes.dex and bundled assets into base APK
+print("\n[5/7] Packaging classes.dex and offline assets into APK...")
 dex_file = os.path.join(dex_dir, "classes.dex")
 unaligned_apk = os.path.join(build_dir, "unaligned.apk")
 shutil.copyfile(base_apk, unaligned_apk)
 
 with zipfile.ZipFile(unaligned_apk, "a") as zipf:
     zipf.write(dex_file, "classes.dex")
-print("Injected classes.dex into APK.")
+    # Verify assets are packed
+    for root, _, files in os.walk(assets_dir):
+        for f in files:
+            full_p = os.path.join(root, f)
+            arc_name = os.path.relpath(full_p, src_dir).replace("\\", "/")
+            if arc_name not in zipf.namelist():
+                zipf.write(full_p, arc_name)
+print("Injected classes.dex and assets into APK.")
 
 # Ensure Keystore Exists
 keystore_path = os.path.join(project_dir, "debug.keystore")
@@ -294,5 +303,5 @@ print("\n=======================================================")
 print("SUCCESS! Universal Android APK built and verified!")
 print(f"Dist Location: {final_apk}")
 print(f"Root Location: {root_apk}")
-print(f"Final Size:    {apk_size:.2f} KB")
+print(f"Final Size:    {apk_size:.2f} KB ({apk_size/1024:.2f} MB)")
 print("=======================================================\n")

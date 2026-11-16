@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -36,6 +38,14 @@ public class WebStudioActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 if (progressBar != null) progressBar.setVisibility(View.GONE);
             }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                // If remote fails, fallback to local offline asset
+                if (request != null && request.isForMainFrame()) {
+                    view.loadUrl("file:///android_asset/webstudio/index.html");
+                }
+            }
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -52,7 +62,12 @@ public class WebStudioActivity extends Activity {
             }
         });
 
-        webView.loadUrl("https://sign.a-b-infotech.in/Token.php");
+        // First try local Port 5000 server, then fallback to local asset
+        if (SignerServerService.serverInstance != null && SignerServerService.serverInstance.isRunning()) {
+            webView.loadUrl("http://127.0.0.1:5000/studio");
+        } else {
+            webView.loadUrl("file:///android_asset/webstudio/index.html");
+        }
     }
 
     @Override
