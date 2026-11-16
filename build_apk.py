@@ -8,9 +8,11 @@ import zipfile
 repo_root = os.path.dirname(os.path.abspath(__file__))
 project_dir = os.path.join(repo_root, "android")
 app_dir = os.path.join(project_dir, "app")
+libs_dir = os.path.join(app_dir, "libs")
 src_dir = os.path.join(app_dir, "src", "main")
 res_dir = os.path.join(src_dir, "res")
 assets_dir = os.path.join(src_dir, "assets")
+jni_libs_dir = os.path.join(src_dir, "jniLibs")
 manifest_file = os.path.join(src_dir, "AndroidManifest.xml")
 
 print(f"=== A B INFOTECH - Building Universal Android APK ===")
@@ -125,7 +127,7 @@ if ret.returncode != 0:
 print("aapt2 compile completed successfully.")
 
 # 2. Link Resources with Universal Compatibility (minSdkVersion=21, targetSdkVersion=34)
-print("\n[2/7] Linking resources with aapt2 (minSdkVersion=21, targetSdkVersion=34, versionCode=24)...")
+print("\n[2/7] Linking resources with aapt2 (minSdkVersion=21, targetSdkVersion=34, versionCode=22)...")
 base_apk = os.path.join(build_dir, "base.apk")
 cmd_link = [
     aapt2_exe, "link",
@@ -137,8 +139,8 @@ cmd_link = [
     "--auto-add-overlay",
     "--min-sdk-version", "21",
     "--target-sdk-version", "34",
-    "--version-code", "24",
-    "--version-name", "2.2.2",
+    "--version-code", "22",
+    "--version-name", "2.2.0",
     res_zip
 ]
 ret = subprocess.run(cmd_link, capture_output=True, text=True)
@@ -146,6 +148,14 @@ if ret.returncode != 0:
     print("aapt2 link error:", ret.stderr)
     sys.exit(1)
 print(f"aapt2 link completed successfully. Generated R.java in: {gen_dir}")
+
+# Discover Extra Jars (PKCS#11, OTGKeySDK)
+extra_jars = []
+if os.path.isdir(libs_dir):
+    for f in os.listdir(libs_dir):
+        if f.endswith(".jar"):
+            extra_jars.append(os.path.join(libs_dir, f))
+print(f"Found {len(extra_jars)} supplementary libraries in libs: {[os.path.basename(j) for j in extra_jars]}")
 
 # 3. Compile Java Sources
 print("\n[3/7] Compiling Java classes with javac...")
@@ -159,11 +169,14 @@ for root, _, files in os.walk(gen_dir):
         if f.endswith(".java"):
             java_files.append(os.path.join(root, f))
 
+sep = ";" if sys.platform == "win32" else ":"
+cp_arg = sep.join([android_jar] + extra_jars)
+
 cmd_javac = [
     javac_exe,
     "-source", "1.8",
     "-target", "1.8",
-    "-cp", android_jar,
+    "-cp", cp_arg,
     "-d", bin_classes_dir
 ] + java_files
 ret = subprocess.run(cmd_javac, capture_output=True, text=True)
@@ -189,15 +202,15 @@ cmd_d8 = [
     "--min-api", "21",
     "--output", dex_dir,
     "--lib", android_jar
-] + class_files
+] + extra_jars + class_files
 ret = subprocess.run(cmd_d8, capture_output=True, text=True)
 if ret.returncode != 0:
     print("d8 error:", ret.stderr)
     sys.exit(1)
 print("D8 completed successfully.")
 
-# 5. Package classes.dex and bundled assets into base APK
-print("\n[5/7] Packaging classes.dex and offline assets into APK...")
+# 5. Package classes.dex, assets, and native .so libraries into base APK
+print("\n[5/7] Packaging classes.dex, offline assets, and native token libraries into APK...")
 dex_file = os.path.join(dex_dir, "classes.dex")
 unaligned_apk = os.path.join(build_dir, "unaligned.apk")
 shutil.copyfile(base_apk, unaligned_apk)
@@ -211,7 +224,19 @@ with zipfile.ZipFile(unaligned_apk, "a") as zipf:
             arc_name = os.path.relpath(full_p, src_dir).replace("\\", "/")
             if arc_name not in zipf.namelist():
                 zipf.write(full_p, arc_name)
-print("Injected classes.dex and assets into APK.")
+    # Package native .so libraries (HYP2003, InnaIT, CCID, etc.)
+    if os.path.isdir(jni_libs_dir):
+        packed_libs = 0
+        for root, _, files in os.walk(jni_libs_dir):
+            for f in files:
+                if f.endswith(".so"):
+                    full_p = os.path.join(root, f)
+                    rel_p = os.path.relpath(full_p, jni_libs_dir).replace("\\", "/")
+                    arc_name = f"lib/{rel_p}"
+                    zipf.write(full_p, arc_name)
+                    packed_libs += 1
+        print(f"Packaged {packed_libs} native .so token driver libraries into lib/")
+print("Injected classes.dex, assets, and native libraries into APK.")
 
 # Ensure Keystore Exists
 keystore_path = os.path.join(project_dir, "debug.keystore")

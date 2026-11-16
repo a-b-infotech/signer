@@ -1424,7 +1424,7 @@
                                 android:textSize="12sp" />
                         </LinearLayout>
 
-                        <androidx.appcompat.widget.SwitchCompat
+                        <Switch
                             android:id="@+id/switchServerStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"

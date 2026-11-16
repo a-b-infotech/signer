@@ -4,8 +4,7 @@ import android.content.Context;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FilenameFilter;
-import java.io.InputStream;
+import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.PrivateKey;
@@ -14,23 +13,19 @@ import java.security.cert.X509Certificate;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.Locale;
 
 public class PdfSignerEngine {
+
     public static byte[] signPdf(Context context, byte[] pdfBytes, String certAlias, String password, String reason, String location) throws Exception {
-        File certDir = CertificateManager.getCertDir(context);
-        File[] files = certDir.listFiles(new FilenameFilter() {
-            @Override
-            public boolean accept(File d, String name) {
-                return name.endsWith(".pfx") || name.endsWith(".p12");
-            }
-        });
+        List<File> files = CertificateManager.getAllCertificateFiles(context);
         
         PrivateKey privKey = null;
         X509Certificate signCert = null;
         char[] passChars = (password != null) ? password.toCharArray() : new char[0];
 
-        if (files != null) {
+        if (files != null && !files.isEmpty()) {
             for (File f : files) {
                 try {
                     KeyStore ks = KeyStore.getInstance("PKCS12");
@@ -72,7 +67,7 @@ public class PdfSignerEngine {
             "%% Timestamp: %s\n" +
             "%% Reason: %s\n" +
             "%% Location: %s\n" +
-            "%% Platform: Android Digital Signer Mobile\n" +
+            "%% Platform: Android Digital Signer Mobile v2.2.0\n" +
             "%% Status: VERIFIED & INTEGRITY SEALED\n" +
             "%% ===============================================\n",
             signerName, signDate,
@@ -82,5 +77,25 @@ public class PdfSignerEngine {
         out.write(stampMetadata.getBytes(StandardCharsets.UTF_8));
 
         return out.toByteArray();
+    }
+
+    public static File signPdfFile(Context context, File inputFile, File outputFile, String certAlias, String password, String reason, String location) throws Exception {
+        byte[] inputBytes = new byte[(int) inputFile.length()];
+        try (FileInputStream fis = new FileInputStream(inputFile)) {
+            int read = 0;
+            while (read < inputBytes.length) {
+                int r = fis.read(inputBytes, read, inputBytes.length - read);
+                if (r == -1) break;
+                read += r;
+            }
+        }
+
+        byte[] signedBytes = signPdf(context, inputBytes, certAlias, password, reason, location);
+
+        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+            fos.write(signedBytes);
+            fos.flush();
+        }
+        return outputFile;
     }
 }

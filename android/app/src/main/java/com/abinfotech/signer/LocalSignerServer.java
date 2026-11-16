@@ -124,14 +124,15 @@ public class LocalSignerServer {
                 obj.put("port", port);
                 obj.put("licensed", LicenseManager.isActivated(context));
                 obj.put("license_tier", "pro");
+                obj.put("cert_count", CertificateManager.getCertCount(context));
                 obj.put("usb_token", UsbTokenManager.getConnectedTokenSummary(context));
                 sendJsonResponse(out, 200, obj.toString());
             } else if (path.equals("/api/drivers")) {
                 JSONArray arr = new JSONArray();
-                arr.put("HYP2003 / ePass2003 (USB OTG - libcastle.so)");
-                arr.put("mToken / CryptoID (USB OTG - libcryptoid_pkcs11.so)");
-                arr.put("InnaIT Precision (USB OTG - libinnait_pkcs11.so)");
-                arr.put("Watchdata ProxKey (USB OTG - libWatchdataPKCS11.so)");
+                arr.put("HYP2003 / ePass2003 (USB OTG - libOTGPass2003_India.so)");
+                arr.put("InnaIT Precision (USB OTG - libInnaITPKCS11.so)");
+                arr.put("mToken / CryptoID (USB OTG)");
+                arr.put("Watchdata ProxKey (USB OTG)");
                 arr.put("Software Certificate (.pfx / .p12)");
                 arr.put("Android System KeyStore");
                 sendJsonResponse(out, 200, arr.toString());
@@ -151,7 +152,7 @@ public class LocalSignerServer {
                               "<p>A B INFOTECH Digital Signer Suite is active.</p>" +
                               "<script>setTimeout(function(){ window.close(); }, 1500);</script></body></html>";
                 sendHtmlResponse(out, 200, html);
-            } else if (path.equals("/api/sign") && method.equals("POST")) {
+            } else if ((path.equals("/api/sign") || path.equals("/api/sign_pdf")) && method.equals("POST")) {
                 byte[] body = new byte[contentLength];
                 int totalRead = 0;
                 while (totalRead < contentLength) {
