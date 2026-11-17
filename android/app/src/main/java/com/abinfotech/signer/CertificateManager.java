@@ -209,10 +209,11 @@ public class CertificateManager {
 
             // 4. Subject DN CA string heuristics
             String sub = cert.getSubjectDN() != null ? cert.getSubjectDN().getName().toLowerCase() : "";
-            if ((sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
+            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
                     || sub.contains("certifying authority") || sub.contains("cca india")
-                    || sub.contains("intermediate ca") || sub.contains("issuing ca"))
-                    && !sub.contains("cn=")) {
+                    || sub.contains("intermediate ca") || sub.contains("issuing ca")
+                    || sub.contains("trust provider ca") || sub.contains("national ca")
+                    || sub.contains("class 2 ca") || sub.contains("class 3 ca")) {
                 return false;
             }
 
@@ -233,14 +234,13 @@ public class CertificateManager {
                 return false;
             }
 
-            // 2. CA naming heuristics
+            // 2. CA naming heuristics - rigorously filter ANY CA certificate
             if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
                     || sub.contains("certifying authority") || sub.contains("cca india")
                     || sub.contains("intermediate ca") || sub.contains("issuing ca")
-                    || sub.contains("trust provider ca") || sub.contains("national ca")) {
-                if (!sub.contains("ou=") || sub.contains("cn=sub") || sub.contains("cn=root")) {
-                    return false;
-                }
+                    || sub.contains("trust provider ca") || sub.contains("national ca")
+                    || sub.contains("class 2 ca") || sub.contains("class 3 ca")) {
+                return false;
             }
             return true;
         } catch (Throwable t) {
@@ -276,98 +276,119 @@ public class CertificateManager {
 
         // 1. Hardware USB Token Certificates (if connected)
         try {
-            // Setup CCID connection & JNI endpoints
-            UsbTokenManager.setupHardwareTokenConnection(context);
+            CcidTokenDriver.DetectedToken detected = CcidTokenDriver.scanForToken(context);
+            if (detected != null && detected.device != null) {
+                boolean hasPermission = UsbTokenManager.isPermissionGranted(context);
 
-            if (UsbTokenManager.isHardwareTokenConnected(context)) {
-                // Method A: Native PKCS#11 driver
-                try {
-                    P11Operation.resetSession();
-                    boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
-                    if (initOk) {
-                        if (0 == P11Operation.getSlotInfo()) {
-                            P11Operation.openSession();
-                            if (!activePin.isEmpty()) {
-                                try {
-                                    P11Operation.loginUser(activePin);
-                                } catch (Throwable t) {
-                                    Log.w(TAG, "P11 login notice: " + t.getMessage());
+                if (!hasPermission) {
+                    // DO NOT TOUCH NATIVE P11 without permission! Avoids fatal SIGSEGV crash.
+                    Log.d(TAG, "Hardware token attached, waiting for user USB permission.");
+                    UsbTokenManager.setupHardwareTokenConnection(context);
+
+                    JSONObject obj = new JSONObject();
+                    obj.put("alias", "USB_HARDWARE_TOKEN_PERM");
+                    obj.put("subject", detected.name + " (Tap 'Find Certificates' to Grant Access)");
+                    obj.put("issuer", detected.brand);
+                    obj.put("source", "USB Hardware Token");
+                    obj.put("is_placeholder", true);
+                    obj.put("is_hardware_token", true);
+                    arr.put(obj);
+                    tokenCertsFound = true;
+                } else {
+                    // Permission is granted! Safely connect
+                    boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
+                    if (connOk) {
+                        // Method A: Native PKCS#11 driver - ONLY for Feitian tokens (0x096e)
+                        if (detected.vendorId == CcidTokenDriver.VID_FEITIAN) {
+                            try {
+                                P11Operation.resetSession();
+                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
+                                if (initOk) {
+                                    if (0 == P11Operation.getSlotInfo()) {
+                                        P11Operation.openSession();
+                                        if (!activePin.isEmpty()) {
+                                            try {
+                                                P11Operation.loginUser(activePin);
+                                            } catch (Throwable t) {
+                                                Log.w(TAG, "P11 login notice: " + t.getMessage());
+                                            }
+                                        }
+                                        javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
+                                        if (tokenCerts != null && tokenCerts.length > 0) {
+                                            for (int i = 0; i < tokenCerts.length; i++) {
+                                                javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                                if (!isClientCert(tc)) {
+                                                    // Skip Root CA / Sub CA
+                                                    continue;
+                                                }
+                                                String subjectDn = tc.getSubjectDN().getName();
+                                                String clientName = extractCommonName(subjectDn);
+                                                String issuerName = extractCommonName(tc.getIssuerDN().getName());
+                                                JSONObject obj = new JSONObject();
+                                                obj.put("alias", "USB_Token_Cert_" + i);
+                                                obj.put("subject", clientName);
+                                                obj.put("issuer", issuerName);
+                                                obj.put("source", "USB Hardware Token");
+                                                obj.put("file_path", "PKCS11://token/cert/" + i);
+                                                obj.put("is_hardware_token", true);
+                                                arr.put(obj);
+                                                tokenCertsFound = true;
+
+                                                if (context != null) {
+                                                    try {
+                                                        context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
+                                                                .edit()
+                                                                .putString("last_token_client_name", clientName)
+                                                                .putString("last_token_issuer_name", issuerName)
+                                                                .apply();
+                                                    } catch (Throwable ignored) {}
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
+                            } catch (Throwable t) {
+                                Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
                             }
-                            javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
-                            if (tokenCerts != null && tokenCerts.length > 0) {
-                                for (int i = 0; i < tokenCerts.length; i++) {
-                                    javax.security.cert.X509Certificate tc = tokenCerts[i];
-                                    if (!isClientCert(tc)) {
-                                        // Skip Root CA / Sub CA
-                                        continue;
-                                    }
-                                    String subjectDn = tc.getSubjectDN().getName();
-                                    String clientName = extractCommonName(subjectDn);
-                                    String issuerName = extractCommonName(tc.getIssuerDN().getName());
-                                    JSONObject obj = new JSONObject();
-                                    obj.put("alias", "USB_Token_Cert_" + i);
-                                    obj.put("subject", clientName);
-                                    obj.put("issuer", issuerName);
-                                    obj.put("source", "USB Hardware Token");
-                                    obj.put("file_path", "PKCS11://token/cert/" + i);
-                                    obj.put("is_hardware_token", true);
-                                    arr.put(obj);
-                                    tokenCertsFound = true;
+                        }
 
-                                    if (context != null) {
-                                        try {
-                                            context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
-                                                    .edit()
-                                                    .putString("last_token_client_name", clientName)
-                                                    .putString("last_token_issuer_name", issuerName)
-                                                    .apply();
-                                        } catch (Throwable ignored) {}
+                        // Method B: Direct USB CCID APDU reader (Universal for mToken, ProxKey, InnaIT, SafeNet)
+                        if (!tokenCertsFound) {
+                            try {
+                                List<CcidTokenDriver.CcidCertInfo> ccidCerts = CcidTokenDriver.readCertificatesViaCcid(context, activePin);
+                                if (ccidCerts != null && !ccidCerts.isEmpty()) {
+                                    for (int i = 0; i < ccidCerts.size(); i++) {
+                                        CcidTokenDriver.CcidCertInfo ci = ccidCerts.get(i);
+                                        if (ci != null && ci.clientName != null && !ci.clientName.trim().isEmpty()) {
+                                            JSONObject obj = new JSONObject();
+                                            obj.put("alias", "CCID_Token_Cert_" + i);
+                                            obj.put("subject", ci.clientName.trim());
+                                            obj.put("issuer", (ci.issuerName != null && !ci.issuerName.trim().isEmpty()) ? ci.issuerName.trim() : "USB Hardware Token");
+                                            obj.put("source", "USB Hardware Token");
+                                            obj.put("file_path", "CCID://token/cert/" + i);
+                                            obj.put("is_hardware_token", true);
+                                            arr.put(obj);
+                                            tokenCertsFound = true;
+
+                                            if (context != null) {
+                                                try {
+                                                    context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
+                                                            .edit()
+                                                            .putString("last_token_client_name", ci.clientName.trim())
+                                                            .putString("last_token_issuer_name", ci.issuerName != null ? ci.issuerName.trim() : "USB Hardware Token")
+                                                            .apply();
+                                                } catch (Throwable ignored) {}
+                                            }
+                                        }
                                     }
                                 }
+                            } catch (Throwable t) {
+                                Log.w(TAG, "CCID cert read notice: " + t.getMessage());
                             }
                         }
                     }
-                } catch (Throwable t) {
-                    Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
-                }
 
-                // Method B: Direct USB CCID APDU reader (Universal token certificate extractor)
-                if (!tokenCertsFound) {
-                    try {
-                        List<CcidTokenDriver.CcidCertInfo> ccidCerts = CcidTokenDriver.readCertificatesViaCcid(context, activePin);
-                        if (ccidCerts != null && !ccidCerts.isEmpty()) {
-                            for (int i = 0; i < ccidCerts.size(); i++) {
-                                CcidTokenDriver.CcidCertInfo ci = ccidCerts.get(i);
-                                if (ci != null && ci.clientName != null && !ci.clientName.trim().isEmpty()) {
-                                    JSONObject obj = new JSONObject();
-                                    obj.put("alias", "CCID_Token_Cert_" + i);
-                                    obj.put("subject", ci.clientName.trim());
-                                    obj.put("issuer", (ci.issuerName != null && !ci.issuerName.trim().isEmpty()) ? ci.issuerName.trim() : "USB Hardware Token");
-                                    obj.put("source", "USB Hardware Token");
-                                    obj.put("file_path", "CCID://token/cert/" + i);
-                                    obj.put("is_hardware_token", true);
-                                    arr.put(obj);
-                                    tokenCertsFound = true;
-
-                                    if (context != null) {
-                                        try {
-                                            context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
-                                                    .edit()
-                                                    .putString("last_token_client_name", ci.clientName.trim())
-                                                    .putString("last_token_issuer_name", ci.issuerName != null ? ci.issuerName.trim() : "USB Hardware Token")
-                                                    .apply();
-                                        } catch (Throwable ignored) {}
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Throwable t) {
-                        Log.w(TAG, "CCID cert read notice: " + t.getMessage());
-                    }
-                }
-
-                // Method C: Cached client name from previous read
+                    // Method C: Cached client name from previous read
                 if (!tokenCertsFound && context != null) {
                     String cachedClientName = null;
                     String cachedIssuerName = null;
@@ -405,7 +426,8 @@ public class CertificateManager {
                     arr.put(obj);
                 }
             }
-        } catch (Throwable ignored) {}
+        }
+    } catch (Throwable ignored) {}
 
         // 2. Software Certificates (.pfx / .p12)
         List<File> certFiles = getAllCertificateFiles(context);

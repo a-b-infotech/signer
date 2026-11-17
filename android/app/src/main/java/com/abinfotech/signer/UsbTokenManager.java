@@ -52,6 +52,18 @@ public class UsbTokenManager {
         return CcidTokenDriver.scanForToken(context) != null;
     }
 
+    public static boolean isPermissionGranted(Context context) {
+        if (context == null) return false;
+        UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
+        if (manager == null) return false;
+        CcidTokenDriver.DetectedToken detected = CcidTokenDriver.scanForToken(context);
+        return detected != null && detected.device != null && manager.hasPermission(detected.device);
+    }
+
+    public static synchronized UsbDeviceConnection getActiveConnection() {
+        return sActiveConnection;
+    }
+
     public static String getConnectedTokenSummary(Context context) {
         CcidTokenDriver.DetectedToken token = CcidTokenDriver.scanForToken(context);
         if (token != null) {

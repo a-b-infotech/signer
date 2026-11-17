@@ -259,7 +259,8 @@ public class MainActivity extends Activity {
     private ProgressDialog progressDialog;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
 
-    private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
+    // Receiver for app's internal USB permission callback
+    private final BroadcastReceiver mUsbPermissionReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent != null ? intent.getAction() : null;
@@ -269,39 +270,97 @@ public class MainActivity extends Activity {
                 synchronized (this) {
                     UsbDevice device = (UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        if (device != null) {
-                            UsbTokenManager.setupHardwareTokenConnection(context);
-                            Toast.makeText(context, "🟢 USB Token Connected & Ready", Toast.LENGTH_SHORT).show();
-                            mSelectedCertDisplayName = "";
-                            mSelectedCertAlias = "";
-                            autoDetectCertificates();
-                            updateServerStatusUi();
-                            updateTokenStatus();
-                        }
+                        Toast.makeText(context, "🟢 USB Token Connected & Ready", Toast.LENGTH_SHORT).show();
+                        mSelectedCertDisplayName = "";
+                        mSelectedCertAlias = "";
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                UsbTokenManager.setupHardwareTokenConnection(context);
+                                autoDetectCertificatesAsync();
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        updateServerStatusUi();
+                                        updateTokenStatus();
+                                    }
+                                });
+                            }
+                        }).start();
                     } else {
                         Toast.makeText(context, "USB Token Permission Denied", Toast.LENGTH_SHORT).show();
+                        updateTokenStatus();
                     }
                 }
-            } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+            }
+        }
+    };
+
+    // Receiver for system USB attach/detach events
+    private final BroadcastReceiver mUsbDeviceReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent != null ? intent.getAction() : null;
+            if (action == null) return;
+
+            if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
                 Toast.makeText(context, "USB Device Attached: Connecting...", Toast.LENGTH_SHORT).show();
-                UsbTokenManager.setupHardwareTokenConnection(context);
                 mSelectedCertDisplayName = "";
                 mSelectedCertAlias = "";
-                autoDetectCertificates();
-                updateServerStatusUi();
-                updateTokenStatus();
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        UsbTokenManager.setupHardwareTokenConnection(context);
+                        autoDetectCertificatesAsync();
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                updateServerStatusUi();
+                                updateTokenStatus();
+                            }
+                        });
+                    }
+                }).start();
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 Toast.makeText(context, "USB Token Detached", Toast.LENGTH_SHORT).show();
                 UsbTokenManager.disconnectToken();
                 P11Operation.disconnect();
                 mSelectedCertDisplayName = "";
                 mSelectedCertAlias = "";
-                autoDetectCertificates();
                 updateServerStatusUi();
                 updateTokenStatus();
+                autoDetectCertificatesAsync();
             }
         }
     };
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingIntent(intent);
+    }
+
+    private void handleIncomingIntent(Intent intent) {
+        if (intent == null) return;
+        String action = intent.getAction();
+        if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                    autoDetectCertificatesAsync();
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            updateServerStatusUi();
+                            updateTokenStatus();
+                        }
+                    });
+                }
+            }).start();
+        }
+    }
 
     private final Runnable statusPoller = new Runnable() {
         @Override
@@ -320,6 +379,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Catch any uncaught thread exceptions to prevent unexpected app closure
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread t, Throwable e) {
+                Log.e(TAG, "Uncaught exception in thread " + t.getName(), e);
+            }
+        });
 
         try {
             setContentView(R.layout.activity_main);
@@ -342,20 +409,33 @@ public class MainActivity extends Activity {
 
         restorePreferences();
 
-        // Register USB attach/detach/permission receiver
+        // Register internal USB permission receiver (NOT_EXPORTED on API 33+)
         try {
-            IntentFilter filter = new IntentFilter();
-            filter.addAction(UsbTokenManager.ACTION_USB_PERMISSION);
-            filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
-            filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+            IntentFilter permFilter = new IntentFilter(UsbTokenManager.ACTION_USB_PERMISSION);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(mUsbReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                registerReceiver(mUsbPermissionReceiver, permFilter, Context.RECEIVER_NOT_EXPORTED);
             } else {
-                registerReceiver(mUsbReceiver, filter);
+                registerReceiver(mUsbPermissionReceiver, permFilter);
             }
         } catch (Throwable t) {
-            Log.w(TAG, "Receiver register notice: " + t.getMessage());
+            Log.w(TAG, "Permission receiver register notice: " + t.getMessage());
         }
+
+        // Register system USB attach/detach receiver (EXPORTED on API 33+)
+        try {
+            IntentFilter usbFilter = new IntentFilter();
+            usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+            usbFilter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(mUsbDeviceReceiver, usbFilter, Context.RECEIVER_EXPORTED);
+            } else {
+                registerReceiver(mUsbDeviceReceiver, usbFilter);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "System USB receiver register notice: " + t.getMessage());
+        }
+
+        handleIncomingIntent(getIntent());
 
         applyLicenseLockoutState();
         fetchGlobalIpAsync();
@@ -368,6 +448,7 @@ public class MainActivity extends Activity {
                     try {
                         boolean connected = UsbTokenManager.isHardwareTokenConnected(MainActivity.this);
                         if (connected != mIsUsbTokenConnected) {
+                            mIsUsbTokenConnected = connected;
                             if (connected) {
                                 UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
                                 mSelectedCertDisplayName = "";
@@ -381,13 +462,13 @@ public class MainActivity extends Activity {
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    autoDetectCertificates();
                                     updateTokenStatus();
                                     updateServerStatusUi();
                                 }
                             });
+                            autoDetectCertificatesAsync();
                         }
-                        Thread.sleep(1200);
+                        Thread.sleep(1500);
                     } catch (Throwable ignored) {}
                 }
             }
@@ -431,7 +512,10 @@ public class MainActivity extends Activity {
     protected void onDestroy() {
         closePdfRenderer();
         try {
-            unregisterReceiver(mUsbReceiver);
+            if (mUsbPermissionReceiver != null) unregisterReceiver(mUsbPermissionReceiver);
+        } catch (Throwable ignored) {}
+        try {
+            if (mUsbDeviceReceiver != null) unregisterReceiver(mUsbDeviceReceiver);
         } catch (Throwable ignored) {}
         try {
             P11Operation.p11finalize();
@@ -1249,45 +1333,59 @@ public class MainActivity extends Activity {
     }
 
     private void autoDetectCertificates() {
-        boolean tokenConnected = false;
-        try {
-            tokenConnected = UsbTokenManager.isHardwareTokenConnected(this);
-        } catch (Throwable ignored) {}
+        autoDetectCertificatesAsync();
+    }
 
-        String currentPin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
-        if (currentPin.isEmpty()) {
-            currentPin = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_PIN, "");
-        }
-
-        if (tokenConnected) {
-            JSONArray certs = CertificateManager.listCertificatesJson(this, currentPin);
-            if (certs.length() > 0) {
-                // First try to find a real client certificate (not placeholder)
-                for (int i = 0; i < certs.length(); i++) {
-                    JSONObject c = certs.optJSONObject(i);
-                    if (c != null && !c.optBoolean("is_placeholder", false)) {
-                        mSelectedCertAlias = c.optString("alias", "");
-                        mSelectedCertDisplayName = c.optString("subject", "USB Hardware Token");
-                        if (tvSignSelectedCert != null) {
-                            tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+    private void autoDetectCertificatesAsync() {
+        final String currentPin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final JSONArray certs = CertificateManager.listCertificatesJson(MainActivity.this, currentPin);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            applyDetectedCertificatesToUi(certs);
                         }
-                        return;
-                    }
+                    });
+                } catch (Throwable t) {
+                    Log.e(TAG, "Error in autoDetectCertificatesAsync", t);
                 }
-                // If only placeholder found, display friendly message
-                JSONObject c0 = certs.optJSONObject(0);
-                if (c0 != null) {
-                    mSelectedCertAlias = c0.optString("alias", "");
-                    mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
+            }
+        }).start();
+    }
+
+    private void applyDetectedCertificatesToUi(JSONArray certs) {
+        if (certs == null) return;
+        boolean tokenConnected = UsbTokenManager.isHardwareTokenConnected(MainActivity.this);
+
+        if (tokenConnected && certs.length() > 0) {
+            // First try to find a real client certificate (not placeholder)
+            for (int i = 0; i < certs.length(); i++) {
+                JSONObject c = certs.optJSONObject(i);
+                if (c != null && !c.optBoolean("is_placeholder", false)) {
+                    mSelectedCertAlias = c.optString("alias", "");
+                    mSelectedCertDisplayName = c.optString("subject", "USB Hardware Token");
                     if (tvSignSelectedCert != null) {
                         tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
                     }
                     return;
                 }
             }
+            // If only placeholder found, display friendly message
+            JSONObject c0 = certs.optJSONObject(0);
+            if (c0 != null) {
+                mSelectedCertAlias = c0.optString("alias", "");
+                mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
+                if (tvSignSelectedCert != null) {
+                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                }
+                return;
+            }
         }
 
-        File lastCert = CertificateManager.getLastCertFile(this);
+        File lastCert = CertificateManager.getLastCertFile(MainActivity.this);
         if (lastCert != null && !lastCert.getName().equals("default_abinfo_dsc.p12")) {
             mSelectedCertAlias = lastCert.getName();
             mSelectedCertDisplayName = lastCert.getName();
@@ -1297,7 +1395,6 @@ public class MainActivity extends Activity {
             return;
         }
 
-        JSONArray certs = CertificateManager.listCertificatesJson(this, "");
         if (certs.length() > 0) {
             JSONObject c0 = certs.optJSONObject(0);
             if (c0 != null) {
@@ -1434,29 +1531,73 @@ public class MainActivity extends Activity {
         if (tvSignSelectedCert != null) {
             tvSignSelectedCert.setText("-- Scanning Token & Certificates... --");
         }
-        try {
-            UsbTokenManager.disconnectToken();
-            P11Operation.disconnect();
-            P11Operation.resetSession();
-            UsbTokenManager.setupHardwareTokenConnection(this);
-        } catch (Throwable ignored) {}
+        if (progressDialog != null) {
+            progressDialog.setMessage("Refreshing token connection & certificates...");
+            progressDialog.setCancelable(false);
+            progressDialog.show();
+        }
 
-        updateTokenStatus();
-        showCertificateSelectionDialog();
-        Toast.makeText(this, "🔄 Token connection & certificate list refreshed", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    UsbTokenManager.disconnectToken();
+                    P11Operation.disconnect();
+                    P11Operation.resetSession();
+                    UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                } catch (Throwable ignored) {}
+
+                final String pin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
+                final JSONArray certs = CertificateManager.listCertificatesJson(MainActivity.this, pin);
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (progressDialog != null && progressDialog.isShowing()) {
+                            try { progressDialog.dismiss(); } catch (Throwable ignored) {}
+                        }
+                        updateTokenStatus();
+                        applyDetectedCertificatesToUi(certs);
+                        showCertificateDialogWithList(certs);
+                        Toast.makeText(MainActivity.this, "🔄 Token connection & certificate list refreshed", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        }).start();
     }
 
     private void showCertificateSelectionDialog() {
-        // Ensure hardware token connection is attempted if attached
-        try {
-            UsbTokenManager.setupHardwareTokenConnection(this);
-            P11Operation.resetSession();
-        } catch (Throwable ignored) {}
+        if (progressDialog != null) {
+            progressDialog.setMessage("Scanning for digital certificates...");
+            progressDialog.setCancelable(false);
+            progressDialog.show();
+        }
 
-        CertificateManager.ensureDefaultCertificate(this);
-        JSONArray certs = CertificateManager.listCertificatesJson(this, etSignPin != null ? etSignPin.getText().toString() : "");
+        final String pin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                } catch (Throwable ignored) {}
 
-        final int count = certs.length();
+                final JSONArray certs = CertificateManager.listCertificatesJson(MainActivity.this, pin);
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (progressDialog != null && progressDialog.isShowing()) {
+                            try { progressDialog.dismiss(); } catch (Throwable ignored) {}
+                        }
+                        showCertificateDialogWithList(certs);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    private void showCertificateDialogWithList(final JSONArray certs) {
+        final int count = (certs != null) ? certs.length() : 0;
         final String[] displayNames = new String[count + 1];
         final String[] aliases = new String[count + 1];
 
