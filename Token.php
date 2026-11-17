@@ -30,21 +30,22 @@ if (!isset($pdo) || !$pdo) {
     }
 }
 
+// Determine target callback server (default: 127.0.0.1:5000, customizable via ?server= or ?ip=)
+$target_server = '127.0.0.1:5000';
+if (!empty($_REQUEST['server'])) {
+    $target_server = trim($_REQUEST['server']);
+} elseif (!empty($_REQUEST['ip'])) {
+    $target_server = trim($_REQUEST['ip']) . (strpos($_REQUEST['ip'], ':') === false ? ':5000' : '');
+}
+$target_server = preg_replace('#^https?://#i', '', $target_server);
+$target_server = rtrim($target_server, '/');
+$callback_base = 'http://' . $target_server;
+
 // ====================================================================
 // 1. HANDLE BROWSER SYNC (Opens in browser, redirects to Python / Android API)
 // ====================================================================
 if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
     $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
-
-    $target_server = '127.0.0.1:5000';
-    if (!empty($_REQUEST['server'])) {
-        $target_server = trim($_REQUEST['server']);
-    } elseif (!empty($_REQUEST['ip'])) {
-        $target_server = trim($_REQUEST['ip']) . (strpos($_REQUEST['ip'], ':') === false ? ':5000' : '');
-    }
-    $target_server = preg_replace('#^https?://#i', '', $target_server);
-    $target_server = rtrim($target_server, '/');
-    $callback_base = 'http://' . $target_server;
 
     if (empty($license_key)) {
         header('Location: ' . $callback_base . '/api/sync_callback?status=invalid');
@@ -156,16 +157,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
 // ====================================================================
 if (isset($_REQUEST['key'])) {
     $license_key = trim($_REQUEST['key']);
-
-    $target_server = '127.0.0.1:5000';
-    if (!empty($_REQUEST['server'])) {
-        $target_server = trim($_REQUEST['server']);
-    } elseif (!empty($_REQUEST['ip'])) {
-        $target_server = trim($_REQUEST['ip']) . (strpos($_REQUEST['ip'], ':') === false ? ':5000' : '');
-    }
-    $target_server = preg_replace('#^https?://#i', '', $target_server);
-    $target_server = rtrim($target_server, '/');
-    $callback_base = 'http://' . $target_server;
 
     if (empty($license_key)) {
         header('Location: ' . $callback_base . '/api/activate_callback?status=invalid&message=' . urlencode('No license key provided. Please contact +91 7016797720 or sales@a-b-infotech.in'));
@@ -1066,8 +1057,8 @@ body {
             <span id="licenseTierText">PRO SUITE</span>
         </div>
 
-        <!-- Settings Button (Configure Wi-Fi / Global IP) -->
-        <button type="button" onclick="openSettingsModal()" class="btn-3d btn-tool" style="padding: 7px 14px; font-size: 0.8rem;" title="Configure Signer Server IP">
+        <!-- Settings Button (Custom IP Configuration) -->
+        <button type="button" onclick="openSettingsModal()" class="btn-3d btn-tool" style="padding: 7px 14px; font-size: 0.8rem;" title="Configure Custom Server IP">
             ⚙️ Settings
         </button>
 
@@ -1146,12 +1137,12 @@ body {
             </div>
         </div>
 
-        <div style="margin-top: 14px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        <div style="margin-top: 10px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
             <button onclick="checkBackgroundServer()" class="btn-3d btn-cyan" style="min-width: 200px;">
                 ↻ Retry Server Connection
             </button>
             <button type="button" onclick="openSettingsModal()" class="btn-3d btn-tool" style="padding: 12px 18px;">
-                ⚙️ Configure Server IP (Wi-Fi / Global)
+                ⚙️ Configure Server IP
             </button>
         </div>
     </div>
@@ -1282,10 +1273,10 @@ body {
 </div>
 
 <!-- ====================================================================
-     OVERLAY 5: SERVER SETTINGS (CONFIGURE GLOBAL / WI-FI IP)
+     OVERLAY 5: SERVER SETTINGS (CONFIGURE CUSTOM / GLOBAL / WI-FI IP)
      ==================================================================== -->
 <div id="settings-overlay" class="overlay-backdrop">
-    <div class="glass-3d modal-3d" style="max-width: 500px; position: relative;">
+    <div class="glass-3d modal-3d" style="max-width: 480px; position: relative;">
         <button type="button" onclick="closeSettingsModal()" style="position:absolute; top:16px; right:18px; background:rgba(255,255,255,0.1); border:none; color:#cbd5e1; font-size:1.1rem; width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" title="Close popup">✕</button>
         <span class="modal-badge" style="background: rgba(13, 202, 240, 0.15); color:#0dcaf0; border: 1px solid rgba(13, 202, 240, 0.3);">
             ⚙️ Server Connection Settings
@@ -1293,48 +1284,22 @@ body {
         <h2 style="font-family:'Outfit',sans-serif; font-size:1.6rem; font-weight:800; margin-bottom:8px;">
             Signer IP Configuration
         </h2>
-        <p style="color:#94a3b8; font-size:0.88rem; line-height:1.5; margin-bottom: 14px;">
-            Connect to your PC or Android Mobile Signer over <b>Wi-Fi, Mobile Hotspot, or Global IP</b>.
+        <p style="color:#94a3b8; font-size:0.88rem; line-height:1.5; margin-bottom: 16px;">
+            Enter custom IP (Localhost, Wi-Fi IP, or Global IP) to connect to the signer API.
         </p>
 
-        <!-- Quick 1-Click Presets -->
-        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; justify-content: center;">
-            <button type="button" onclick="setPresetIp('127.0.0.1')" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
-                💻 Localhost (127.0.0.1)
-            </button>
-            <button type="button" onclick="setPresetIp('192.168.43.1')" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
-                🔥 Hotspot (192.168.43.1)
-            </button>
-            <button type="button" onclick="setPresetIp('192.168.1.')" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
-                📶 Wi-Fi LAN
-            </button>
-            <button type="button" onclick="focusGlobalIp()" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
-                🌐 Global WAN
-            </button>
-        </div>
-
-        <div style="text-align: left; margin-bottom: 14px;">
+        <div style="text-align: left; margin-bottom: 16px;">
             <label style="font-size: 0.8rem; color: #94a3b8; font-weight: 700; display: block; margin-bottom: 6px;">
-                Server IP Address (Wi-Fi / Global / Localhost):
+                Server IP Address / Hostname:
             </label>
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="background: rgba(10, 15, 28, 0.7); border: 1px solid rgba(13, 202, 240, 0.28); border-radius: 10px; padding: 11px 12px; font-size: 0.88rem; color: #38bdf8; font-family: monospace;">http://</span>
-                <input type="text" id="settingsServerIp" class="glass-input" placeholder="127.0.0.1 or 192.168.1.15" style="margin-bottom: 0; flex: 1; font-family: monospace;" value="127.0.0.1">
+                <input type="text" id="settingsCustomIp" class="glass-input" placeholder="127.0.0.1 or 192.168.1.15" style="margin-bottom: 0; flex: 1; font-family: monospace;" value="127.0.0.1">
                 <span style="background: rgba(10, 15, 28, 0.7); border: 1px solid rgba(13, 202, 240, 0.28); border-radius: 10px; padding: 11px 12px; font-size: 0.88rem; color: #38bdf8; font-family: monospace;">:5000</span>
             </div>
             <div style="font-size: 0.75rem; color: #64748b; margin-top: 6px;">
-                Port <b>5000</b> is automatic. Enter your Phone's Wi-Fi IP or Global IP shown on Android Tab 6.
+                Default is <code>127.0.0.1</code> (Port 5000). For Mobile/Remote signer, enter your Phone/PC's Wi-Fi or Global IP.
             </div>
-        </div>
-
-        <!-- Real-Time Connection Test Bar -->
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 18px; background: rgba(10, 15, 28, 0.5); padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08);">
-            <span id="testConnStatus" style="font-size: 0.78rem; color: #94a3b8; text-align: left; flex: 1;">
-                Click 'Test' to check server reachability
-            </span>
-            <button type="button" onclick="testServerConnection()" id="btnTestConn" class="btn-3d btn-tool" style="padding: 5px 12px; font-size: 0.78rem; white-space: nowrap;">
-                ⚡ Test
-            </button>
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: center;">
@@ -1371,9 +1336,12 @@ body {
         <!-- Server Offline Warning Banner -->
         <div id="uploadOfflineBanner" style="display:none; background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.4); border-radius:12px; padding:14px 18px; margin-bottom:20px; font-size:0.88rem; color:#f87171; text-align:center;">
             🔌 <b>Local Signing Server is OFFLINE:</b> Physical USB tokens require the local signing service.<br>
-            <div style="margin-top:8px;">
+            <div style="margin-top:8px; display:flex; gap:8px; justify-content:center;">
                 <button type="button" onclick="openOfflineModal()" class="btn-3d btn-cyan" style="padding:6px 16px; font-size:0.8rem;">
                     ⬇️ Download / Setup Desktop Client
+                </button>
+                <button type="button" onclick="openSettingsModal()" class="btn-3d btn-tool" style="padding:6px 14px; font-size:0.8rem;">
+                    ⚙️ Settings
                 </button>
             </div>
         </div>
@@ -1452,14 +1420,9 @@ if (fileInput) {
             <select class="glass-input" id="driverDropdownWorkspace"></select>
 
             <!-- 2. Certificate Selection -->
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:0;">
-                    2. Digital Certificate
-                </label>
-                <button type="button" id="btnRefreshCertsWeb" onclick="fetchCertificates(true)" title="Refresh Certificates" style="background:rgba(56, 189, 248, 0.15); border:1px solid rgba(56, 189, 248, 0.3); color:#38bdf8; border-radius:6px; cursor:pointer; font-size:0.75rem; padding:2px 8px; font-weight:600;">
-                    🔄 Refresh
-                </button>
-            </div>
+            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
+                2. Digital Certificate
+            </label>
             <select class="glass-input" name="certAlias" required>
                 <option value="">-- Choose Certificate --</option>
             </select>
@@ -1619,111 +1582,28 @@ if (fileInput) {
      CLIENT-SIDE INTERACTIVE ENGINE
      ==================================================================== -->
 <script>
-function getServerBaseIp() {
-    let saved = localStorage.getItem('abinfo_signer_ip') || localStorage.getItem('abinfo_global_ip');
+// Custom IP Configuration Helper Functions
+function getServerIp() {
+    let saved = localStorage.getItem('abinfo_custom_ip') || localStorage.getItem('abinfo_signer_ip') || localStorage.getItem('abinfo_global_ip');
     const params = new URLSearchParams(window.location.search);
-    if (params.get('server')) saved = params.get('server');
     if (params.get('ip')) saved = params.get('ip');
+    if (params.get('server')) saved = params.get('server');
     if (!saved || !saved.trim()) return '127.0.0.1';
     let clean = saved.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-    if (clean.includes(':')) {
-        clean = clean.split(':')[0];
-    }
+    if (clean.includes(':')) clean = clean.split(':')[0];
     return clean || '127.0.0.1';
 }
 
-function getLocalServerUrl() {
-    let saved = localStorage.getItem('abinfo_signer_ip') || localStorage.getItem('abinfo_global_ip');
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('server')) saved = params.get('server');
-    if (params.get('ip')) saved = params.get('ip');
-    if (!saved || !saved.trim()) return 'http://127.0.0.1:5000';
-
-    let val = saved.trim();
-    if (!/^https?:\/\//i.test(val)) {
-        val = 'http://' + val;
-    }
-    try {
-        const u = new URL(val);
-        if (!u.port) {
-            val = `${u.protocol}//${u.hostname}:5000`;
-        }
-    } catch (e) {
-        if (!val.includes(':5000')) {
-            val = val.replace(/\/+$/, '') + ':5000';
-        }
-    }
-    return val.replace(/\/+$/, '');
+function getServerUrl() {
+    return 'http://' + getServerIp() + ':5000';
 }
 
-window.getServerBaseIp = getServerBaseIp;
-window.getLocalServerUrl = getLocalServerUrl;
-window.getApiServerUrl = getLocalServerUrl;
-
-window.setPresetIp = function(ip) {
-    const inp = document.getElementById('settingsServerIp');
-    if (inp) {
-        inp.value = ip;
-        inp.focus();
-    }
-};
-
-window.focusGlobalIp = function() {
-    const inp = document.getElementById('settingsServerIp');
-    if (inp) {
-        if (inp.value === '127.0.0.1' || inp.value === '192.168.43.1') {
-            inp.value = '';
-        }
-        inp.placeholder = 'e.g. 103.150.24.12';
-        inp.focus();
-    }
-};
-
-window.testServerConnection = async function() {
-    const inp = document.getElementById('settingsServerIp');
-    const statusEl = document.getElementById('testConnStatus');
-    const btn = document.getElementById('btnTestConn');
-    if (!inp || !statusEl) return;
-    
-    let raw = inp.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-    if (!raw) raw = '127.0.0.1';
-    let host = raw;
-    if (host.includes(':')) host = host.split(':')[0];
-    const testUrl = `http://${host}:5000/api/health`;
-
-    if (btn) btn.disabled = true;
-    statusEl.style.color = '#38bdf8';
-    statusEl.textContent = `⏳ Testing http://${host}:5000...`;
-
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3500);
-        const res = await fetch(testUrl, { mode: 'cors', signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
-            const data = await res.json();
-            statusEl.style.color = '#34d399';
-            statusEl.textContent = `🟢 Connected! v${data.version || '2.2.0'} (RUNNING)`;
-        } else {
-            statusEl.style.color = '#f87171';
-            statusEl.textContent = `🔴 HTTP error: ${res.status}`;
-        }
-    } catch (e) {
-        statusEl.style.color = '#f87171';
-        statusEl.textContent = `🔴 Cannot reach http://${host}:5000 (Ensure app server is ON)`;
-    } finally {
-        if (btn) btn.disabled = false;
-    }
-};
+window.getServerIp = getServerIp;
+window.getServerUrl = getServerUrl;
 
 window.openSettingsModal = function() {
-    const inp = document.getElementById('settingsServerIp');
-    if (inp) inp.value = getServerBaseIp();
-    const testStatus = document.getElementById('testConnStatus');
-    if (testStatus) {
-        testStatus.style.color = '#94a3b8';
-        testStatus.textContent = "Click 'Test' to check server reachability";
-    }
+    const inp = document.getElementById('settingsCustomIp');
+    if (inp) inp.value = getServerIp();
     const modal = document.getElementById('settings-overlay');
     if (modal) modal.style.display = 'flex';
 };
@@ -1734,16 +1614,15 @@ window.closeSettingsModal = function() {
 };
 
 window.saveSettingsIp = function() {
-    const inp = document.getElementById('settingsServerIp');
+    const inp = document.getElementById('settingsCustomIp');
     if (!inp) return;
     let val = inp.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
-    if (val.includes(':')) {
-        val = val.split(':')[0];
-    }
+    if (val.includes(':')) val = val.split(':')[0];
     if (val && val !== '127.0.0.1' && val !== 'localhost') {
+        localStorage.setItem('abinfo_custom_ip', val);
         localStorage.setItem('abinfo_signer_ip', val);
-        localStorage.setItem('abinfo_global_ip', 'http://' + val + ':5000');
     } else {
+        localStorage.removeItem('abinfo_custom_ip');
         localStorage.removeItem('abinfo_signer_ip');
         localStorage.removeItem('abinfo_global_ip');
     }
@@ -1754,9 +1633,10 @@ window.saveSettingsIp = function() {
 };
 
 window.resetSettingsIp = function() {
+    localStorage.removeItem('abinfo_custom_ip');
     localStorage.removeItem('abinfo_signer_ip');
     localStorage.removeItem('abinfo_global_ip');
-    const inp = document.getElementById('settingsServerIp');
+    const inp = document.getElementById('settingsCustomIp');
     if (inp) inp.value = '127.0.0.1';
     closeSettingsModal();
     if (typeof checkBackgroundServer === 'function') checkBackgroundServer();
@@ -1784,7 +1664,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load Token Drivers from Local Server
     async function loadDrivers() {
         try {
-            const response = await fetch(`${getLocalServerUrl()}/api/drivers`);
+            const response = await fetch(`${getServerUrl()}/api/drivers`);
             const drivers = await response.json();
             const select = document.getElementById('driverDropdownWorkspace');
             if (!select) return;
@@ -1805,27 +1685,21 @@ document.addEventListener('DOMContentLoaded', function() {
     window.fetchCertificates = async function(isRefresh = false) {
         const driver = document.getElementById('driverDropdownWorkspace');
         if (!driver) return;
-        const certSelect = document.querySelector('select[name="certAlias"]');
-        const refBtn = document.getElementById('btnRefreshCertsWeb');
-        if (refBtn && isRefresh) refBtn.textContent = '⏳ ...';
-        if (certSelect && isRefresh) certSelect.innerHTML = '<option value="">-- Refreshing Certificates... --</option>';
-
         try {
             const pinVal = document.getElementById('tokenPinInput') ? document.getElementById('tokenPinInput').value.trim() : '';
             const pinParam = pinVal ? `&pin=${encodeURIComponent(pinVal)}` : '';
-            const url = `${getLocalServerUrl()}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${isRefresh ? '&refresh=1' : ''}${pinParam}&_t=${Date.now()}`;
-            const response = await fetch(url);
+            const response = await fetch(`${getServerUrl()}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${pinParam}`);
             const certs = await response.json();
+            const certSelect = document.querySelector('select[name="certAlias"]');
             if (!certSelect) return;
             
             certSelect.innerHTML = '<option value="">-- Choose Certificate --</option>';
             certs.forEach(cert => {
                 const opt = document.createElement('option');
                 opt.value = cert.alias;
-                let displayName = cert.subject || 'Client Certificate';
-                const match = displayName.match(/CN=([^,]+)/i);
-                if (match) displayName = match[1].trim();
-                
+                let displayName = cert.subject;
+                const match = cert.subject.match(/CN=([^,]+)/);
+                if (match) displayName = match[1];
                 if (cert.source && !cert.is_placeholder && !cert.source.includes("Enter PIN")) {
                     opt.textContent = `${displayName} (${cert.source})`;
                 } else {
@@ -1834,7 +1708,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 certSelect.appendChild(opt);
             });
             if (certs.length >= 1 && certSelect.options.length > 1) {
-                // Auto-select first real cert if available
                 let selectIdx = 1;
                 for (let i = 0; i < certs.length; i++) {
                     if (!certs[i].is_placeholder) {
@@ -1844,11 +1717,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 certSelect.selectedIndex = selectIdx;
             }
-        } catch (e) {
-            if (certSelect && isRefresh) certSelect.innerHTML = '<option value="">-- No Certificates Found --</option>';
-        } finally {
-            if (refBtn) refBtn.textContent = '🔄 Refresh';
-        }
+        } catch (e) {}
     };
 
     // Render PDF Document
@@ -1896,7 +1765,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pinInput) pinInput.type = (pinInput.type === 'password') ? 'text' : 'password';
     };
 
-    // Auto-refresh certificates when user enters PIN
+    // Auto-refresh certificates on PIN input
     const tokenPinEl = document.getElementById('tokenPinInput');
     if (tokenPinEl) {
         tokenPinEl.addEventListener('input', function() {
@@ -2186,7 +2055,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (signBtn) signBtn.disabled = signatureAreas.length === 0;
     }
 
-    // Submit Document Signing to Local Server (Port 5000)
+    // Submit Document Signing to Local / Custom Server (Port 5000)
     const signForm = document.getElementById('signForm');
     if (signForm) {
         signForm.addEventListener('submit', async function(e) {
@@ -2235,7 +2104,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     formData.append('custom_logo', logoInput.files[0]);
                 }
 
-                const response = await fetch(`${getLocalServerUrl()}/api/sign`, { method: 'POST', body: formData });
+                const response = await fetch(`${getServerUrl()}/api/sign`, { method: 'POST', body: formData });
 
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
@@ -2453,13 +2322,13 @@ async function checkBackgroundServer() {
     const pillText = document.getElementById('serverStatusText');
     const licensePill = document.getElementById('licensePill');
     const licenseTierText = document.getElementById('licenseTierText');
-    const currentServer = getLocalServerUrl();
-    const baseIp = getServerBaseIp();
+    const currentIp = getServerIp();
+    const currentUrl = getServerUrl();
 
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 2000);
-        const res = await fetch(`${currentServer}/api/health`, { mode: 'cors', signal: controller.signal });
+        const res = await fetch(`${currentUrl}/api/health`, { mode: 'cors', signal: controller.signal });
         clearTimeout(timeoutId);
         if (res.ok) {
             document.getElementById('offline-overlay').style.display = 'none';
@@ -2468,9 +2337,9 @@ async function checkBackgroundServer() {
             const data = await res.json();
             
             pill.className = 'status-pill';
-            pillText.textContent = (baseIp === '127.0.0.1') 
-                ? `Local Server: RUNNING (v${data.version || '2.2.0'})` 
-                : `Server (${baseIp}): RUNNING`;
+            pillText.textContent = (currentIp === '127.0.0.1')
+                ? `Local Server: RUNNING (v${data.version || '2.2.0'})`
+                : `Server (${currentIp}): RUNNING`;
 
             if (data.tier) {
                 licensePill.style.display = 'inline-flex';
@@ -2521,8 +2390,9 @@ async function checkBackgroundServer() {
             throw new Error('Local server offline');
         }
     } catch (e) {
+        const curIp = getServerIp();
         if (pill) pill.className = 'status-pill offline';
-        if (pillText) pillText.textContent = (baseIp === '127.0.0.1') ? 'Local Server: OFFLINE' : `Server (${baseIp}): OFFLINE`;
+        if (pillText) pillText.textContent = (curIp === '127.0.0.1') ? 'Local Server: OFFLINE' : `Server (${curIp}): OFFLINE`;
         if (!userDismissedOfflineModal) {
             const offModal = document.getElementById('offline-overlay');
             if (offModal) offModal.style.display = 'flex';
