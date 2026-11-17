@@ -1046,6 +1046,11 @@ body {
             <span id="licenseTierText">PRO SUITE</span>
         </div>
 
+        <!-- Settings Button (Configure Wi-Fi / Global IP) -->
+        <button type="button" onclick="openSettingsModal()" class="btn-3d btn-tool" style="padding: 7px 14px; font-size: 0.8rem;" title="Configure Signer Server IP">
+            ⚙️ Settings
+        </button>
+
         <a href="https://pay.a-b-infotech.in/license.php" target="_blank" class="btn-3d btn-amber" style="padding: 7px 14px; font-size: 0.8rem;">
             🛒 Buy License
         </a>
@@ -1121,24 +1126,13 @@ body {
             </div>
         </div>
 
-        <div style="margin-top: 10px;">
-            <button onclick="checkBackgroundServer()" class="btn-3d btn-cyan" style="min-width: 220px;">
+        <div style="margin-top: 14px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+            <button onclick="checkBackgroundServer()" class="btn-3d btn-cyan" style="min-width: 200px;">
                 ↻ Retry Server Connection
             </button>
-        </div>
-
-        <!-- Setting: Signer Server / Global IP for API -->
-        <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); text-align: center;">
-            <div style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 6px;">
-                🌐 <b>Signer Server / Global IP Setting:</b>
-            </div>
-            <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: center; max-width: 440px; width: 100%;">
-                <input type="text" id="globalIpInput" placeholder="127.0.0.1:5000 or Global IP:5000" style="padding: 7px 12px; background: rgba(15,23,42,0.85); border: 1px solid rgba(148,163,184,0.3); border-radius: 8px; color: #f8fafc; font-size: 0.82rem; flex: 1; text-align: center; font-family: monospace;">
-                <button type="button" onclick="saveGlobalIpSetting()" class="btn-3d btn-green" style="padding: 7px 14px; font-size: 0.82rem; cursor:pointer;">Save IP</button>
-            </div>
-            <div style="font-size: 0.72rem; color: #64748b; margin-top: 6px; max-width: 480px; margin-left: auto; margin-right: auto; line-height: 1.4;">
-                💡 <b>Remote Connection Tip:</b> Wi-Fi works within the same network. For remote devices across different networks, turn <b>ON Phone Hotspot</b> &amp; connect PC to it (use <code>http://192.168.43.1:5000</code>), or configure Port 5000 Forwarding on your Wi-Fi router.
-            </div>
+            <button type="button" onclick="openSettingsModal()" class="btn-3d btn-tool" style="padding: 12px 18px;">
+                ⚙️ Configure Server IP (Wi-Fi / Global)
+            </button>
         </div>
     </div>
 </div>
@@ -1264,6 +1258,47 @@ body {
         <a href="https://api.whatsapp.com/send?phone=917016797720&text=I%20want%20to%20renew%20my%20PDF%20Signer%20License" target="_blank" class="btn-3d btn-green" style="width: 100%;">
             💬 Renew on WhatsApp (+91 7016797720)
         </a>
+    </div>
+</div>
+
+<!-- ====================================================================
+     OVERLAY 5: SERVER SETTINGS (CONFIGURE GLOBAL / WI-FI IP)
+     ==================================================================== -->
+<div id="settings-overlay" class="overlay-backdrop">
+    <div class="glass-3d modal-3d" style="max-width: 480px; position: relative;">
+        <button type="button" onclick="closeSettingsModal()" style="position:absolute; top:16px; right:18px; background:rgba(255,255,255,0.1); border:none; color:#cbd5e1; font-size:1.1rem; width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" title="Close popup">✕</button>
+        <span class="modal-badge" style="background: rgba(13, 202, 240, 0.15); color:#0dcaf0; border: 1px solid rgba(13, 202, 240, 0.3);">
+            ⚙️ Server Connection Settings
+        </span>
+        <h2 style="font-family:'Outfit',sans-serif; font-size:1.6rem; font-weight:800; margin-bottom:8px;">
+            Signer IP Configuration
+        </h2>
+        <p style="color:#94a3b8; font-size:0.88rem; line-height:1.5; margin-bottom: 20px;">
+            Enter your Phone or PC's <b>Global or Wi-Fi IP address</b>.<br>Port <code>5000</code> is automatic by default.
+        </p>
+
+        <div style="text-align: left; margin-bottom: 16px;">
+            <label style="font-size: 0.8rem; color: #94a3b8; font-weight: 700; display: block; margin-bottom: 6px;">
+                Server IP Address (Wi-Fi / Global / Localhost):
+            </label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="background: rgba(10, 15, 28, 0.7); border: 1px solid rgba(13, 202, 240, 0.28); border-radius: 10px; padding: 11px 12px; font-size: 0.88rem; color: #38bdf8; font-family: monospace;">http://</span>
+                <input type="text" id="settingsServerIp" class="glass-input" placeholder="127.0.0.1 or 192.168.1.15" style="margin-bottom: 0; flex: 1; font-family: monospace;" value="127.0.0.1">
+                <span style="background: rgba(10, 15, 28, 0.7); border: 1px solid rgba(13, 202, 240, 0.28); border-radius: 10px; padding: 11px 12px; font-size: 0.88rem; color: #38bdf8; font-family: monospace;">:5000</span>
+            </div>
+            <div style="font-size: 0.75rem; color: #64748b; margin-top: 6px;">
+                Port <b>5000</b> is set by default. Leave blank or enter <code>127.0.0.1</code> for default local machine.
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 10px; justify-content: center;">
+            <button type="button" onclick="saveSettingsIp()" class="btn-3d btn-cyan" style="flex: 1;">
+                💾 Save &amp; Connect
+            </button>
+            <button type="button" onclick="resetSettingsIp()" class="btn-3d btn-tool" style="padding: 10px 16px;">
+                Reset Default
+            </button>
+        </div>
     </div>
 </div>
 
@@ -1538,39 +1573,71 @@ if (fileInput) {
      CLIENT-SIDE INTERACTIVE ENGINE
      ==================================================================== -->
 <script>
-function getApiServerUrl() {
-    let s = localStorage.getItem('abinfo_global_ip');
+function getServerBaseIp() {
+    let saved = localStorage.getItem('abinfo_signer_ip') || localStorage.getItem('abinfo_global_ip');
     const params = new URLSearchParams(window.location.search);
-    if (params.get('server')) s = params.get('server');
-    if (params.get('ip')) s = params.get('ip');
-    if (!s || !s.trim()) return 'http://127.0.0.1:5000';
-    let clean = s.trim();
-    if (!/^https?:\/\//i.test(clean)) clean = 'http://' + clean;
-    clean = clean.replace(/\/+$/, '');
-    if (!/:[0-9]+$/.test(clean)) clean += ':5000';
-    return clean;
+    if (params.get('server')) saved = params.get('server');
+    if (params.get('ip')) saved = params.get('ip');
+    if (!saved || !saved.trim()) return '127.0.0.1';
+    let clean = saved.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    if (clean.includes(':')) {
+        clean = clean.split(':')[0];
+    }
+    return clean || '127.0.0.1';
 }
 
-window.getApiServerUrl = getApiServerUrl;
+function getLocalServerUrl() {
+    const ip = getServerBaseIp();
+    return `http://${ip}:5000`;
+}
 
-window.saveGlobalIpSetting = function() {
-    const inp = document.getElementById('globalIpInput');
+window.getServerBaseIp = getServerBaseIp;
+window.getLocalServerUrl = getLocalServerUrl;
+window.getApiServerUrl = getLocalServerUrl;
+
+window.openSettingsModal = function() {
+    const inp = document.getElementById('settingsServerIp');
+    if (inp) inp.value = getServerBaseIp();
+    const modal = document.getElementById('settings-overlay');
+    if (modal) modal.style.display = 'flex';
+};
+
+window.closeSettingsModal = function() {
+    const modal = document.getElementById('settings-overlay');
+    if (modal) modal.style.display = 'none';
+};
+
+window.saveSettingsIp = function() {
+    const inp = document.getElementById('settingsServerIp');
     if (!inp) return;
-    const val = inp.value.trim();
-    if (val) {
-        let clean = val;
-        if (!/^https?:\/\//i.test(clean)) clean = 'http://' + clean;
-        clean = clean.replace(/\/+$/, '');
-        if (!/:[0-9]+$/.test(clean)) clean += ':5000';
-        localStorage.setItem('abinfo_global_ip', clean);
+    let val = inp.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    if (val.includes(':')) {
+        val = val.split(':')[0];
+    }
+    if (val && val !== '127.0.0.1' && val !== 'localhost') {
+        localStorage.setItem('abinfo_signer_ip', val);
+        localStorage.setItem('abinfo_global_ip', 'http://' + val + ':5000');
     } else {
+        localStorage.removeItem('abinfo_signer_ip');
         localStorage.removeItem('abinfo_global_ip');
     }
-    location.reload();
+    closeSettingsModal();
+    if (typeof checkBackgroundServer === 'function') checkBackgroundServer();
+    if (typeof window.fetchCertificates === 'function') window.fetchCertificates(true);
+};
+
+window.resetSettingsIp = function() {
+    localStorage.removeItem('abinfo_signer_ip');
+    localStorage.removeItem('abinfo_global_ip');
+    const inp = document.getElementById('settingsServerIp');
+    if (inp) inp.value = '127.0.0.1';
+    closeSettingsModal();
+    if (typeof checkBackgroundServer === 'function') checkBackgroundServer();
+    if (typeof window.fetchCertificates === 'function') window.fetchCertificates(true);
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-    const LOCAL_SERVER = getApiServerUrl();
+    let LOCAL_SERVER = getLocalServerUrl();
     const pdfjsLib = window['pdfjs-dist/build/pdf'];
     const canvas = document.getElementById('pdfCanvas');
     const ctx = canvas ? canvas.getContext('2d') : null;
@@ -2231,12 +2298,8 @@ async function checkBackgroundServer() {
     const pillText = document.getElementById('serverStatusText');
     const licensePill = document.getElementById('licensePill');
     const licenseTierText = document.getElementById('licenseTierText');
-    const currentServer = getApiServerUrl();
-
-    const ipInp = document.getElementById('globalIpInput');
-    if (ipInp && !ipInp.value) {
-        ipInp.value = currentServer.replace(/^https?:\/\//, '');
-    }
+    const currentServer = getLocalServerUrl();
+    const baseIp = getServerBaseIp();
 
     try {
         const controller = new AbortController();
@@ -2250,7 +2313,9 @@ async function checkBackgroundServer() {
             const data = await res.json();
             
             pill.className = 'status-pill';
-            pillText.textContent = `Local Server: RUNNING (v${data.version || '2.2.0'})`;
+            pillText.textContent = (baseIp === '127.0.0.1') 
+                ? `Local Server: RUNNING (v${data.version || '2.2.0'})` 
+                : `Server (${baseIp}): RUNNING`;
 
             if (data.tier) {
                 licensePill.style.display = 'inline-flex';
@@ -2302,7 +2367,7 @@ async function checkBackgroundServer() {
         }
     } catch (e) {
         if (pill) pill.className = 'status-pill offline';
-        if (pillText) pillText.textContent = 'Local Server: OFFLINE';
+        if (pillText) pillText.textContent = (baseIp === '127.0.0.1') ? 'Local Server: OFFLINE' : `Server (${baseIp}): OFFLINE`;
         if (!userDismissedOfflineModal) {
             const offModal = document.getElementById('offline-overlay');
             if (offModal) offModal.style.display = 'flex';

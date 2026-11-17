@@ -144,8 +144,15 @@ public class LocalSignerServer {
             }
 
             // Route handling
+            // 0. Root URL (127.0.0.1:5000, Wi-Fi IP:5000, or Global IP:5000)
+            if (path.equals("/")) {
+                sendPlainTextResponse(out, 200, "server is running");
+                client.close();
+                return;
+            }
+
             // 1. JSON API Status endpoints (matches server2.py desktop API)
-            if (path.equals("/api/health") || path.equals("/api/status") || path.equals("/status") || (path.equals("/") && !query.contains("view=studio"))) {
+            if (path.equals("/api/health") || path.equals("/api/status") || path.equals("/status")) {
                 boolean isActivated = LicenseManager.isActivated(context);
                 String activeKey = LicenseManager.getLicenseKey(context);
                 if (activeKey.isEmpty() || activeKey.equals("DEMO-TRIAL")) {
@@ -410,6 +417,18 @@ public class LocalSignerServer {
                       "Access-Control-Max-Age: 86400\r\n" +
                       "Content-Length: 0\r\n\r\n";
         out.write(resp.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void sendPlainTextResponse(OutputStream out, int status, String text) throws IOException {
+        byte[] b = text.getBytes(StandardCharsets.UTF_8);
+        String header = "HTTP/1.1 " + status + " OK\r\n" +
+                        "Content-Type: text/plain; charset=utf-8\r\n" +
+                        "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\n" +
+                        "Access-Control-Allow-Headers: *\r\n" +
+                        "Content-Length: " + b.length + "\r\n\r\n";
+        out.write(header.getBytes(StandardCharsets.UTF_8));
+        out.write(b);
     }
 
     private void sendJsonResponse(OutputStream out, int status, String json) throws IOException {

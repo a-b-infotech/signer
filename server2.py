@@ -79,7 +79,7 @@ except ImportError:
 
 # Flask and Web API Components
 try:
-    from flask import Flask, request, jsonify, send_file
+    from flask import Flask, request, jsonify, send_file, Response
     from flask_cors import CORS
     from werkzeug.serving import make_server
 except ImportError:
@@ -2708,7 +2708,7 @@ class SoftwareUpdateManager:
 
         threading.Thread(target=_download_thread, daemon=True).start()
 
-local_api_server = LocalApiServerManager(app, host="127.0.0.1", port=5000)
+local_api_server = LocalApiServerManager(app, host="0.0.0.0", port=5000)
 
 CORS(app, origins=['*'])
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
@@ -2812,6 +2812,12 @@ def sync_callback():
 def api_drivers():
     return jsonify(list(DRIVER_MAP.keys()))
 
+@app.route('/')
+def root_index():
+    return Response("server is running", mimetype="text/plain")
+
+
+
 @app.route('/api/health')
 def health():
     is_activated = LicenseManager.is_activated()
