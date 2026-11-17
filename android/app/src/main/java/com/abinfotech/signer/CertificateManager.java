@@ -69,6 +69,14 @@ public class CertificateManager {
         // Also save as last active cert for immediate auto-use
         saveAsLastCert(context, destFile);
 
+        // Clear default dummy cert if real user cert was imported
+        try {
+            File dummy = new File(dir, "default_abinfo_dsc.p12");
+            if (dummy.exists() && !fileName.equalsIgnoreCase("default_abinfo_dsc.p12")) {
+                dummy.delete();
+            }
+        } catch (Throwable ignored) {}
+
         return destFile.getAbsolutePath();
     }
 
@@ -176,10 +184,60 @@ public class CertificateManager {
         return result;
     }
 
+    public static boolean isClientCertificate(X509Certificate cert) {
+        if (cert == null) return false;
+        try {
+            // 1. BasicConstraints: -1 indicates end-entity / client certificate.
+            // CA certificates (Root CA & Sub CA) have basicConstraints >= 0 or Integer.MAX_VALUE.
+            int bc = cert.getBasicConstraints();
+            if (bc != -1) {
+                return false;
+            }
+
+            // 2. KeyUsage: bit 5 is keyCertSign, bit 6 is cRLSign (used exclusively by CAs)
+            boolean[] ku = cert.getKeyUsage();
+            if (ku != null && ku.length > 5 && ku[5]) {
+                return false;
+            }
+
+            // 3. Self-signed check: Root CA has Subject == Issuer
+            if (cert.getSubjectDN() != null && cert.getIssuerDN() != null) {
+                if (cert.getSubjectDN().getName().equalsIgnoreCase(cert.getIssuerDN().getName())) {
+                    return false;
+                }
+            }
+
+            // 4. Subject DN CA string heuristics
+            String sub = cert.getSubjectDN() != null ? cert.getSubjectDN().getName().toLowerCase() : "";
+            if ((sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
+                    || sub.contains("certifying authority") || sub.contains("cca india")
+                    || sub.contains("intermediate ca") || sub.contains("issuing ca"))
+                    && !sub.contains("cn=")) {
+                return false;
+            }
+
+            return true;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    public static String extractCommonName(String dn) {
+        if (dn == null || dn.trim().isEmpty()) return "Client Certificate";
+        for (String part : dn.split(",")) {
+            String p = part.trim();
+            if (p.toUpperCase().startsWith("CN=")) {
+                return p.substring(3).trim();
+            }
+        }
+        return dn;
+    }
+
     public static JSONArray listCertificatesJson(Context context, String password) {
         ensureDefaultCertificate(context);
         JSONArray arr = new JSONArray();
         char[] passChars = (password != null && !password.isEmpty()) ? password.toCharArray() : new char[0];
+        boolean tokenCertsFound = false;
 
         // 1. Hardware USB Token Certificates (if connected)
         try {
@@ -187,8 +245,8 @@ public class CertificateManager {
             UsbTokenManager.setupHardwareTokenConnection(context);
 
             if (UsbTokenManager.isHardwareTokenConnected(context)) {
-                boolean tokenCertsFound = false;
                 try {
+                    P11Operation.resetSession();
                     boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
                     if (initOk) {
                         if (0 == P11Operation.getSlotInfo()) {
@@ -204,11 +262,13 @@ public class CertificateManager {
                             if (tokenCerts != null && tokenCerts.length > 0) {
                                 for (int i = 0; i < tokenCerts.length; i++) {
                                     javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                    String subjectDn = tc.getSubjectDN().getName();
+                                    String clientName = extractCommonName(subjectDn);
                                     JSONObject obj = new JSONObject();
                                     obj.put("alias", "USB_Token_Cert_" + i);
-                                    obj.put("subject", tc.getSubjectDN().getName());
-                                    obj.put("issuer", tc.getIssuerDN().getName());
-                                    obj.put("source", "USB Token (Hardware PKCS#11)");
+                                    obj.put("subject", clientName);
+                                    obj.put("issuer", extractCommonName(tc.getIssuerDN().getName()));
+                                    obj.put("source", "USB Hardware Token");
                                     obj.put("file_path", "PKCS11://token/cert/" + i);
                                     obj.put("is_hardware_token", true);
                                     arr.put(obj);
@@ -228,7 +288,7 @@ public class CertificateManager {
                     obj.put("alias", "USB_HARDWARE_TOKEN");
                     obj.put("subject", "Hardware Token: " + (dt != null ? dt.name : "USB Token"));
                     obj.put("issuer", (dt != null ? dt.brand : "USB Crypto Driver"));
-                    obj.put("source", "USB Token (Plugged in - Enter PIN to sign)");
+                    obj.put("source", "USB Token (Enter PIN to read certificate)");
                     obj.put("file_path", "PKCS11://hardware/token");
                     obj.put("is_hardware_token", true);
                     arr.put(obj);
@@ -238,7 +298,26 @@ public class CertificateManager {
 
         // 2. Software Certificates (.pfx / .p12)
         List<File> certFiles = getAllCertificateFiles(context);
+        boolean hasUserCertFile = false;
         for (File f : certFiles) {
+            String fname = f.getName().toLowerCase();
+            if (!fname.equals("default_abinfo_dsc.p12") && !fname.equals("last_cert.p12")) {
+                hasUserCertFile = true;
+                break;
+            }
+        }
+
+        // Only include software certificates if no hardware token cert was found,
+        // or if they are genuine user-imported certificates
+        for (File f : certFiles) {
+            String fname = f.getName().toLowerCase();
+            boolean isDummyDefault = fname.equals("default_abinfo_dsc.p12") || fname.equals("last_cert.p12");
+            
+            // Skip dummy certificates if hardware token is connected or user has imported certificates
+            if (isDummyDefault && (tokenCertsFound || hasUserCertFile)) {
+                continue;
+            }
+
             boolean loadedWithKey = false;
             char[][] tryPasswords = new char[][]{
                 passChars,
@@ -257,10 +336,14 @@ public class CertificateManager {
                             String alias = aliases.nextElement();
                             if (ks.isKeyEntry(alias)) {
                                 X509Certificate cert = (X509Certificate) ks.getCertificate(alias);
+                                if (!isClientCertificate(cert)) {
+                                    // Skip Root CA / Sub CA
+                                    continue;
+                                }
                                 JSONObject obj = new JSONObject();
                                 obj.put("alias", alias);
-                                obj.put("subject", cert.getSubjectDN().getName());
-                                obj.put("issuer", cert.getIssuerDN().getName());
+                                obj.put("subject", extractCommonName(cert.getSubjectDN().getName()));
+                                obj.put("issuer", extractCommonName(cert.getIssuerDN().getName()));
                                 obj.put("source", f.getName());
                                 obj.put("file_path", f.getAbsolutePath());
                                 obj.put("is_hardware_token", false);
@@ -272,11 +355,11 @@ public class CertificateManager {
                 } catch (Exception ignored) {}
             }
 
-            if (!loadedWithKey) {
+            if (!loadedWithKey && !isDummyDefault) {
                 try {
                     JSONObject fallback = new JSONObject();
                     fallback.put("alias", f.getName());
-                    fallback.put("subject", "CN=" + f.getName());
+                    fallback.put("subject", f.getName());
                     fallback.put("issuer", "Local Software KeyStore");
                     fallback.put("source", f.getName());
                     fallback.put("file_path", f.getAbsolutePath());

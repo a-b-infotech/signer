@@ -21,6 +21,18 @@ public class PdfSignerEngine {
     public static byte[] signPdf(Context context, byte[] pdfBytes, String certAlias, String password, String reason, String location) throws Exception {
         CertificateManager.ensureDefaultCertificate(context);
         List<File> files = CertificateManager.getAllCertificateFiles(context);
+        if (files != null && files.size() > 1) {
+            java.util.Collections.sort(files, new java.util.Comparator<File>() {
+                @Override
+                public int compare(File f1, File f2) {
+                    boolean d1 = f1.getName().toLowerCase().contains("default");
+                    boolean d2 = f2.getName().toLowerCase().contains("default");
+                    if (d1 && !d2) return 1;
+                    if (!d1 && d2) return -1;
+                    return f1.getName().compareToIgnoreCase(f2.getName());
+                }
+            });
+        }
         
         PrivateKey privKey = null;
         X509Certificate signCert = null;

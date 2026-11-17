@@ -213,8 +213,10 @@ public class MainActivity extends Activity {
             public void run() {
                 String ip = "";
                 String[] ipServices = new String[]{
+                    "https://api4.my-ip.io/ip",
                     "https://api.ipify.org",
                     "https://icanhazip.com",
+                    "https://checkip.amazonaws.com",
                     "https://ifconfig.me/ip"
                 };
 
@@ -222,16 +224,20 @@ public class MainActivity extends Activity {
                     try {
                         java.net.URL url = new java.net.URL(serviceUrl);
                         java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                        conn.setConnectTimeout(4000);
-                        conn.setReadTimeout(4000);
+                        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android)");
+                        conn.setConnectTimeout(3500);
+                        conn.setReadTimeout(3500);
                         conn.setRequestMethod("GET");
                         if (conn.getResponseCode() == 200) {
                             java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
-                            ip = r.readLine();
+                            String line = r.readLine();
                             r.close();
-                            if (ip != null) {
-                                ip = ip.trim();
-                                if (!ip.isEmpty()) break;
+                            if (line != null) {
+                                line = line.trim();
+                                if (line.matches("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$")) {
+                                    ip = line;
+                                    break;
+                                }
                             }
                         }
                     } catch (Throwable ignored) {}
@@ -266,6 +272,9 @@ public class MainActivity extends Activity {
                         if (device != null) {
                             UsbTokenManager.setupHardwareTokenConnection(context);
                             Toast.makeText(context, "🟢 USB Token Connected & Ready", Toast.LENGTH_SHORT).show();
+                            mSelectedCertDisplayName = "";
+                            mSelectedCertAlias = "";
+                            autoDetectCertificates();
                             updateServerStatusUi();
                             updateTokenStatus();
                         }
@@ -276,11 +285,18 @@ public class MainActivity extends Activity {
             } else if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
                 Toast.makeText(context, "USB Device Attached: Connecting...", Toast.LENGTH_SHORT).show();
                 UsbTokenManager.setupHardwareTokenConnection(context);
+                mSelectedCertDisplayName = "";
+                mSelectedCertAlias = "";
+                autoDetectCertificates();
                 updateServerStatusUi();
                 updateTokenStatus();
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 Toast.makeText(context, "USB Token Detached", Toast.LENGTH_SHORT).show();
                 UsbTokenManager.disconnectToken();
+                P11Operation.disconnect();
+                mSelectedCertDisplayName = "";
+                mSelectedCertAlias = "";
+                autoDetectCertificates();
                 updateServerStatusUi();
                 updateTokenStatus();
             }
@@ -293,6 +309,9 @@ public class MainActivity extends Activity {
             try {
                 updateTokenStatus();
                 updateServerStatusUi();
+                if (mGlobalWanIp == null || mGlobalWanIp.isEmpty()) {
+                    fetchGlobalIpAsync();
+                }
             } catch (Throwable ignored) {}
             uiHandler.postDelayed(this, 2500);
         }
@@ -351,12 +370,18 @@ public class MainActivity extends Activity {
                         if (connected != mIsUsbTokenConnected) {
                             if (connected) {
                                 UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                                mSelectedCertDisplayName = "";
+                                mSelectedCertAlias = "";
                             } else {
                                 UsbTokenManager.disconnectToken();
+                                P11Operation.disconnect();
+                                mSelectedCertDisplayName = "";
+                                mSelectedCertAlias = "";
                             }
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
+                                    autoDetectCertificates();
                                     updateTokenStatus();
                                     updateServerStatusUi();
                                 }
@@ -1179,24 +1204,44 @@ public class MainActivity extends Activity {
     }
 
     private void autoDetectCertificates() {
-        CertificateManager.ensureDefaultCertificate(this);
-        File lastCert = CertificateManager.getLastCertFile(this);
-        if (lastCert != null && mSelectedCertDisplayName.isEmpty()) {
-            mSelectedCertAlias = lastCert.getName();
-            mSelectedCertDisplayName = "P12: " + lastCert.getName();
-            if (tvSignSelectedCert != null) {
-                tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
-            }
-        } else if (mSelectedCertDisplayName.isEmpty()) {
-            JSONArray certs = CertificateManager.listCertificatesJson(this, "");
+        boolean tokenConnected = false;
+        try {
+            tokenConnected = UsbTokenManager.isHardwareTokenConnected(this);
+        } catch (Throwable ignored) {}
+
+        if (tokenConnected) {
+            JSONArray certs = CertificateManager.listCertificatesJson(this, etSignPin != null ? etSignPin.getText().toString() : "");
             if (certs.length() > 0) {
                 JSONObject c0 = certs.optJSONObject(0);
                 if (c0 != null) {
                     mSelectedCertAlias = c0.optString("alias", "");
-                    mSelectedCertDisplayName = c0.optString("subject", "A B INFOTECH Certified DSC");
+                    mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
                     if (tvSignSelectedCert != null) {
                         tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
                     }
+                    return;
+                }
+            }
+        }
+
+        File lastCert = CertificateManager.getLastCertFile(this);
+        if (lastCert != null && !lastCert.getName().equals("default_abinfo_dsc.p12")) {
+            mSelectedCertAlias = lastCert.getName();
+            mSelectedCertDisplayName = lastCert.getName();
+            if (tvSignSelectedCert != null) {
+                tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+            }
+            return;
+        }
+
+        JSONArray certs = CertificateManager.listCertificatesJson(this, "");
+        if (certs.length() > 0) {
+            JSONObject c0 = certs.optJSONObject(0);
+            if (c0 != null) {
+                mSelectedCertAlias = c0.optString("alias", "");
+                mSelectedCertDisplayName = c0.optString("subject", "A B INFOTECH Certified DSC");
+                if (tvSignSelectedCert != null) {
+                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
                 }
             }
         }
@@ -1240,21 +1285,53 @@ public class MainActivity extends Activity {
             if (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) {
                 sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (Tap to Copy)");
             } else {
-                sb.append("Global WAN: Resolving Public IP...");
+                sb.append("Global WAN: Resolving Public IP... (Tap to Refresh)");
             }
             tvServerIpDetails.setText(sb.toString());
 
             tvServerIpDetails.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    String toCopy = (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) 
-                        ? ("http://" + mGlobalWanIp + ":5000") 
-                        : ("http://" + getLocalIpAddress() + ":5000");
-                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
-                    if (cm != null) {
-                        cm.setPrimaryClip(android.content.ClipData.newPlainText("ABInfo Server URL", toCopy));
-                        Toast.makeText(MainActivity.this, "Copied Signer URL: " + toCopy, Toast.LENGTH_SHORT).show();
+                    final String wifiIp = getLocalIpAddress();
+                    final String wanIp = (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) ? mGlobalWanIp : "";
+
+                    List<String> options = new ArrayList<>();
+                    if (!wanIp.isEmpty()) {
+                        options.add("🌐 Copy Global WAN: http://" + wanIp + ":5000");
+                    } else {
+                        options.add("🔄 Refresh Global WAN IP Now");
                     }
+                    options.add("📶 Copy Wi-Fi LAN: http://" + wifiIp + ":5000");
+                    options.add("💻 Copy Localhost: http://127.0.0.1:5000");
+
+                    final String[] items = options.toArray(new String[0]);
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("A B INFOTECH Signer Server URLs")
+                            .setItems(items, new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    String chosen = items[which];
+                                    if (chosen.contains("Refresh Global WAN")) {
+                                        fetchGlobalIpAsync();
+                                        Toast.makeText(MainActivity.this, "Resolving Public Global IP...", Toast.LENGTH_SHORT).show();
+                                        return;
+                                    }
+                                    String urlToCopy = "";
+                                    if (chosen.contains("Global WAN")) urlToCopy = "http://" + wanIp + ":5000";
+                                    else if (chosen.contains("Wi-Fi LAN")) urlToCopy = "http://" + wifiIp + ":5000";
+                                    else if (chosen.contains("Localhost")) urlToCopy = "http://127.0.0.1:5000";
+
+                                    if (!urlToCopy.isEmpty()) {
+                                        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                                        if (cm != null) {
+                                            cm.setPrimaryClip(android.content.ClipData.newPlainText("ABInfo Server URL", urlToCopy));
+                                            Toast.makeText(MainActivity.this, "Copied: " + urlToCopy, Toast.LENGTH_SHORT).show();
+                                        }
+                                    }
+                                }
+                            })
+                            .setNegativeButton("Close", null)
+                            .show();
                 }
             });
         }
@@ -1274,6 +1351,7 @@ public class MainActivity extends Activity {
         // Ensure hardware token connection is attempted if attached
         try {
             UsbTokenManager.setupHardwareTokenConnection(this);
+            P11Operation.resetSession();
         } catch (Throwable ignored) {}
 
         CertificateManager.ensureDefaultCertificate(this);

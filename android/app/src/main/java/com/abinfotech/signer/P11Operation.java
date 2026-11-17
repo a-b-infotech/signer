@@ -1,9 +1,13 @@
 package com.abinfotech.signer;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.cert.CertificateFactory;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -122,10 +126,33 @@ public class P11Operation {
 		return true;
 	}
 
+	public static synchronized void resetSession() {
+		try {
+			if (myPKCS11Module_ != null && session_ != -1) {
+				try {
+					myPKCS11Module_.C_CloseSession(session_);
+				} catch (Throwable ignored) {}
+				session_ = -1;
+			}
+			token_ = -1;
+		} catch (Throwable ignored) {}
+	}
+
+	public static synchronized void disconnect() {
+		resetSession();
+		try {
+			if (myPKCS11Module_ != null) {
+				try {
+					myPKCS11Module_.C_Finalize(null);
+				} catch (Throwable ignored) {}
+				myPKCS11Module_ = null;
+			}
+		} catch (Throwable ignored) {}
+		isLoadlib = 0;
+	}
+
 	public static void p11finalize() throws PKCS11Exception {
-		myPKCS11Module_.C_CloseSession(session_);
-		session_ = -1;
-		myPKCS11Module_.C_Finalize(null);
+		disconnect();
 	}
 
 	public static void p11WrapperFinalize() throws Throwable {
@@ -1054,7 +1081,6 @@ public class P11Operation {
 
 	public static X509Certificate[] getAllX509Certificate() throws PKCS11Exception, CertificateException
 	{
-		X509Certificate X509Certbuff[] = null;
 		CK_ATTRIBUTE[] findCertAttrList = new CK_ATTRIBUTE[3];
 		findCertAttrList[0] = new CK_ATTRIBUTE();
 		findCertAttrList[0].type = PKCS11Constants.CKA_CLASS;
@@ -1078,44 +1104,64 @@ public class P11Operation {
 			throw e;
 		}
 
-		if(null == certHandle)
+		if(null == certHandle || certHandle.length == 0)
 		{
 			return null;
 		}
-		else
+
+		List<X509Certificate> clientCertList = new ArrayList<>();
+		CertificateFactory cf = null;
+		try {
+			cf = CertificateFactory.getInstance("X.509");
+		} catch (Throwable ignored) {}
+
+		for(int i = 0; i < certHandle.length; i++)
 		{
-			X509Certbuff = new X509Certificate[certHandle.length];
-			for(int i=0;i<certHandle.length;i++)
+			CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
+			getValue[0] = new CK_ATTRIBUTE();
+			getValue[0].type = PKCS11Constants.CKA_VALUE;
+			getValue[0].pValue = null;
+			try {
+				myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
+			} catch(PKCS11Exception e) {
+				continue;
+			}
+
+			if(getValue[0].pValue != null)
 			{
+				byte[] bCert = (byte[]) getValue[0].pValue;
+				try {
+					if (cf != null) {
+						java.security.cert.X509Certificate javaCert = 
+							(java.security.cert.X509Certificate) cf.generateCertificate(new ByteArrayInputStream(bCert));
+						if (!CertificateManager.isClientCertificate(javaCert)) {
+							// Filter out Root CA and Sub CA! Only client certificates returned
+							continue;
+						}
+					}
+					X509Certificate oneCert = X509Certificate.getInstance(bCert);
+					clientCertList.add(oneCert);
+				} catch (Throwable ignored) {}
+			}
+		}
+
+		// Fallback: If strict client filter left list empty, return all valid certs
+		if (clientCertList.isEmpty() && certHandle.length > 0) {
+			for(int i = 0; i < certHandle.length; i++) {
 				CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
 				getValue[0] = new CK_ATTRIBUTE();
 				getValue[0].type = PKCS11Constants.CKA_VALUE;
-				getValue[0].pValue = null;/*new byte[8192];*/
-				try{
+				getValue[0].pValue = null;
+				try {
 					myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
-				}
-				catch(PKCS11Exception e)
-				{
-					throw e;
-				}
-
-				if( getValue[0].pValue!=null)
-				{
-					int l = ((byte[])getValue[0].pValue).length;
-					byte[] bCert = new byte[l];
-					for(int j=0;j<l;j++)
-						bCert[j] = ((byte[])getValue[0].pValue)[j];
-
-					try{
-						X509Certificate oneCert=X509Certificate.getInstance(bCert);
-						X509Certbuff[i] = oneCert;
+					if (getValue[0].pValue != null) {
+						byte[] bCert = (byte[]) getValue[0].pValue;
+						clientCertList.add(X509Certificate.getInstance(bCert));
 					}
-					catch(CertificateException e){
-						throw e;
-					}
-				}
+				} catch (Throwable ignored) {}
 			}
-			return X509Certbuff;
 		}
+
+		return clientCertList.toArray(new X509Certificate[0]);
 	}
 }

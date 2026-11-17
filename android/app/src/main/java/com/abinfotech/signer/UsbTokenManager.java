@@ -79,6 +79,11 @@ public class UsbTokenManager {
         }
 
         UsbDevice device = detected.device;
+        if (sConnectedDevice != null && (!sConnectedDevice.getDeviceName().equals(device.getDeviceName()) || sConnectedDevice.getDeviceId() != device.getDeviceId())) {
+            Log.d(TAG, "Different USB Token detected! Resetting previous token connection.");
+            disconnectToken();
+            P11Operation.disconnect();
+        }
         sConnectedDevice = device;
 
         if (!manager.hasPermission(device)) {
@@ -181,6 +186,9 @@ public class UsbTokenManager {
                 myApp.setInUsbEndpoint(null);
                 myApp.setOutUsbEndpoint(null);
             }
+        } catch (Throwable ignored) {}
+        try {
+            P11Operation.disconnect();
         } catch (Throwable ignored) {}
     }
 }
