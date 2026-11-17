@@ -206,8 +206,127 @@ public class MainActivity extends Activity {
     private String mSelectedCertDisplayName = "";
     private boolean mIsUsbTokenConnected = false;
     private String mGlobalWanIp = "";
+    private boolean mUpnpPortForwarded = false;
+
+    private void attemptUpnpPortForwardAsync(final int port) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final String localIp = getLocalIpAddress();
+                    if (localIp == null || localIp.isEmpty() || localIp.equals("127.0.0.1")) return;
+
+                    // 1. Send SSDP M-SEARCH broadcast for IGD
+                    String ssdpQuery = "M-SEARCH * HTTP/1.1\r\n"
+                            + "HOST: 239.255.255.250:1900\r\n"
+                            + "MAN: \"ssdp:discover\"\r\n"
+                            + "MX: 2\r\n"
+                            + "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
+
+                    java.net.DatagramSocket socket = new java.net.DatagramSocket();
+                    socket.setSoTimeout(2500);
+                    byte[] sendData = ssdpQuery.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    java.net.DatagramPacket sendPacket = new java.net.DatagramPacket(sendData, sendData.length,
+                            java.net.InetAddress.getByName("239.255.255.250"), 1900);
+                    socket.send(sendPacket);
+
+                    byte[] recvData = new byte[2048];
+                    java.net.DatagramPacket recvPacket = new java.net.DatagramPacket(recvData, recvData.length);
+                    socket.receive(recvPacket);
+                    socket.close();
+
+                    String response = new String(recvPacket.getData(), 0, recvPacket.getLength());
+                    String locationUrl = null;
+                    for (String l : response.split("\r\n")) {
+                        if (l.toUpperCase().startsWith("LOCATION:")) {
+                            locationUrl = l.substring(9).trim();
+                            break;
+                        }
+                    }
+                    if (locationUrl == null) return;
+
+                    // 2. Fetch Root XML
+                    java.net.URL loc = new java.net.URL(locationUrl);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) loc.openConnection();
+                    conn.setConnectTimeout(2500);
+                    conn.setReadTimeout(2500);
+                    java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                    reader.close();
+                    String xml = sb.toString();
+
+                    String controlUrl = null;
+                    String serviceType = null;
+                    if (xml.contains("urn:schemas-upnp-org:service:WANIPConnection:1")) {
+                        serviceType = "urn:schemas-upnp-org:service:WANIPConnection:1";
+                        int idx = xml.indexOf("urn:schemas-upnp-org:service:WANIPConnection:1");
+                        int cIdx = xml.indexOf("<controlURL>", idx);
+                        if (cIdx != -1) {
+                            controlUrl = xml.substring(cIdx + 12, xml.indexOf("</controlURL>", cIdx)).trim();
+                        }
+                    } else if (xml.contains("urn:schemas-upnp-org:service:WANPPPConnection:1")) {
+                        serviceType = "urn:schemas-upnp-org:service:WANPPPConnection:1";
+                        int idx = xml.indexOf("urn:schemas-upnp-org:service:WANPPPConnection:1");
+                        int cIdx = xml.indexOf("<controlURL>", idx);
+                        if (cIdx != -1) {
+                            controlUrl = xml.substring(cIdx + 12, xml.indexOf("</controlURL>", cIdx)).trim();
+                        }
+                    }
+                    if (controlUrl == null || serviceType == null) return;
+
+                    java.net.URL postUrl = new java.net.URL(loc, controlUrl);
+
+                    // 3. SOAP AddPortMapping
+                    String soapBody = "<?xml version=\"1.0\"?>\r\n"
+                            + "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">\r\n"
+                            + "<s:Body>\r\n"
+                            + "<u:AddPortMapping xmlns:u=\"" + serviceType + "\">\r\n"
+                            + "<NewRemoteHost></NewRemoteHost>\r\n"
+                            + "<NewExternalPort>" + port + "</NewExternalPort>\r\n"
+                            + "<NewProtocol>TCP</NewProtocol>\r\n"
+                            + "<NewInternalPort>" + port + "</NewInternalPort>\r\n"
+                            + "<NewInternalClient>" + localIp + "</NewInternalClient>\r\n"
+                            + "<NewEnabled>1</NewEnabled>\r\n"
+                            + "<NewPortMappingDescription>ABInfoSigner</NewPortMappingDescription>\r\n"
+                            + "<NewLeaseDuration>0</NewLeaseDuration>\r\n"
+                            + "</u:AddPortMapping>\r\n"
+                            + "</s:Body>\r\n"
+                            + "</s:Envelope>";
+
+                    java.net.HttpURLConnection soapConn = (java.net.HttpURLConnection) postUrl.openConnection();
+                    soapConn.setRequestMethod("POST");
+                    soapConn.setConnectTimeout(2500);
+                    soapConn.setReadTimeout(2500);
+                    soapConn.setDoOutput(true);
+                    soapConn.setRequestProperty("Content-Type", "text/xml; charset=\"utf-8\"");
+                    soapConn.setRequestProperty("SOAPAction", "\"" + serviceType + "#AddPortMapping\"");
+                    java.io.OutputStream os = soapConn.getOutputStream();
+                    os.write(soapBody.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    os.flush();
+                    os.close();
+
+                    int resCode = soapConn.getResponseCode();
+                    if (resCode == 200) {
+                        mUpnpPortForwarded = true;
+                        Log.i(TAG, "UPnP: Port " + port + " successfully opened on router for " + localIp);
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                updateServerStatusUi();
+                            }
+                        });
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "UPnP IGD notice: " + t.getMessage());
+                }
+            }
+        }).start();
+    }
 
     private void fetchGlobalIpAsync() {
+        attemptUpnpPortForwardAsync(5000);
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -837,6 +956,16 @@ public class MainActivity extends Activity {
             });
         }
 
+        // Certificate Selection Box Click
+        if (tvSignSelectedCert != null) {
+            tvSignSelectedCert.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    showCertificateSelectionDialog();
+                }
+            });
+        }
+
         // Find Certificates Dialog
         if (btnSignFindCerts != null) {
             btnSignFindCerts.setOnClickListener(new View.OnClickListener() {
@@ -1373,13 +1502,31 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            // If only placeholder found, display friendly message
+            // If only placeholder found, check if cached client name is available
+            String cachedClient = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", null);
+            if (cachedClient != null && !cachedClient.trim().isEmpty()) {
+                mSelectedCertAlias = "USB_HARDWARE_TOKEN";
+                mSelectedCertDisplayName = cachedClient.trim();
+                if (tvSignSelectedCert != null) {
+                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                }
+                return;
+            }
+
             JSONObject c0 = certs.optJSONObject(0);
             if (c0 != null) {
                 mSelectedCertAlias = c0.optString("alias", "");
-                mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
-                if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                boolean isPlaceholder = c0.optBoolean("is_placeholder", false);
+                if (isPlaceholder) {
+                    mSelectedCertDisplayName = "Click to Unlock Certificate (Enter PIN)";
+                    if (tvSignSelectedCert != null) {
+                        tvSignSelectedCert.setText(mSelectedCertDisplayName);
+                    }
+                } else {
+                    mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
+                    if (tvSignSelectedCert != null) {
+                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                    }
                 }
                 return;
             }
@@ -1443,9 +1590,13 @@ public class MainActivity extends Activity {
             sb.append("Local: http://127.0.0.1:5000\n");
             sb.append("Wi-Fi LAN: http://").append(wifiIp).append(":5000\n");
             if (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) {
-                sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (Tap to Copy)");
+                if (mUpnpPortForwarded) {
+                    sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (✅ UPnP Forwarded)\n");
+                } else {
+                    sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (Tap for Remote Guide)\n");
+                }
             } else {
-                sb.append("Global WAN: Resolving Public IP... (Tap to Refresh)");
+                sb.append("Global WAN: Resolving Public IP... (Tap to Refresh)\n");
             }
             tvServerIpDetails.setText(sb.toString());
 
@@ -1457,14 +1608,14 @@ public class MainActivity extends Activity {
 
                     List<String> options = new ArrayList<>();
                     if (!wanIp.isEmpty()) {
-                        options.add("🌐 Copy Global WAN: http://" + wanIp + ":5000");
+                        options.add("🌐 Copy Global WAN: http://" + wanIp + ":5000" + (mUpnpPortForwarded ? " (UPnP Active)" : ""));
                     } else {
-                        options.add("🔄 Refresh Global WAN IP Now");
+                        options.add("🔄 Refresh Global WAN IP & Router UPnP");
                     }
                     options.add("📶 Copy Wi-Fi LAN: http://" + wifiIp + ":5000");
                     options.add("🔥 Copy Hotspot URL: http://192.168.43.1:5000 (100% Remote)");
                     options.add("💻 Copy Localhost: http://127.0.0.1:5000");
-                    options.add("💡 Why doesn't direct Global WAN work? (Remote Guide)");
+                    options.add("💡 How to connect if on different network / location? (Remote Guide)");
 
                     final String[] items = options.toArray(new String[0]);
                     new AlertDialog.Builder(MainActivity.this)
@@ -1475,20 +1626,20 @@ public class MainActivity extends Activity {
                                     String chosen = items[which];
                                     if (chosen.contains("Refresh Global WAN")) {
                                         fetchGlobalIpAsync();
-                                        Toast.makeText(MainActivity.this, "Resolving Public Global IP...", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(MainActivity.this, "Resolving Public Global IP & UPnP Forwarding...", Toast.LENGTH_SHORT).show();
                                         return;
                                     }
                                     if (chosen.contains("Remote Guide")) {
                                         new AlertDialog.Builder(MainActivity.this)
-                                                .setTitle("Why Direct Global IP Needs Setup")
-                                                .setMessage("📶 Wi-Fi LAN works because both phone and PC share the local subnet.\n\n"
-                                                        + "🌐 Why Global WAN (Cellular/Internet) blocks:\n"
-                                                        + "Mobile operators (Jio, Airtel, Vi) use Carrier-Grade NAT (CGNAT) and Wi-Fi routers block external inbound connections on port 5000.\n\n"
-                                                        + "✅ 2 Simple Ways to Connect Remotely:\n"
-                                                        + "1. Phone Mobile Hotspot (Easiest - 100% Works):\n"
-                                                        + "Turn ON Phone Hotspot, connect your laptop/PC to it, and use http://192.168.43.1:5000 in Token.php.\n\n"
-                                                        + "2. Home Wi-Fi Router Port Forwarding:\n"
-                                                        + "In router settings (192.168.1.1), forward External Port 5000 to Phone Wi-Fi IP (" + wifiIp + ":5000).")
+                                                .setTitle("Connecting from Different Network / Location")
+                                                .setMessage("📶 1. Wi-Fi LAN (Same Network):\n"
+                                                        + "When phone and PC/browser are on the same Wi-Fi, use http://" + wifiIp + ":5000 in Token.php.\n\n"
+                                                        + "🌐 2. Automatic UPnP Global WAN:\n"
+                                                        + "When on Wi-Fi, this app automatically requests port 5000 forwarding on your router. If UPnP is enabled on your router, http://" + wanIp + ":5000 is accessible from anywhere on the internet!\n\n"
+                                                        + "🔥 3. Cellular Data / Remote Location (100% Works):\n"
+                                                        + "Mobile cellular operators (Jio, Airtel, Vi) use CGNAT and block inbound ports. For 100% reliable connection anywhere:\n"
+                                                        + "• Turn ON Phone Hotspot, connect PC to it, and use http://192.168.43.1:5000 in Token.php.\n"
+                                                        + "• Or use a free tunnel (Localtunnel / Ngrok: https://...): in Token.php Settings, paste the tunnel URL directly!")
                                                 .setPositiveButton("OK", null)
                                                 .show();
                                         return;
@@ -1589,6 +1740,22 @@ public class MainActivity extends Activity {
                         if (progressDialog != null && progressDialog.isShowing()) {
                             try { progressDialog.dismiss(); } catch (Throwable ignored) {}
                         }
+
+                        // If only placeholder found (token locked), prompt for PIN immediately!
+                        boolean hasOnlyPlaceholder = false;
+                        if (certs != null && certs.length() == 1) {
+                            JSONObject singleObj = certs.optJSONObject(0);
+                            if (singleObj != null && singleObj.optBoolean("is_placeholder", false)) {
+                                hasOnlyPlaceholder = true;
+                            }
+                        }
+
+                        if (hasOnlyPlaceholder) {
+                            promptPinAndReadTokenCert();
+                            return;
+                        }
+
+                        applyDetectedCertificatesToUi(certs);
                         showCertificateDialogWithList(certs);
                     }
                 });
@@ -1629,7 +1796,12 @@ public class MainActivity extends Activity {
                         }
                         mSelectedCertAlias = aliases[which];
                         JSONObject selectedObj = (which < count) ? certs.optJSONObject(which) : null;
-                        if (selectedObj != null && !selectedObj.optBoolean("is_placeholder", false)) {
+                        if (selectedObj != null && selectedObj.optBoolean("is_placeholder", false)) {
+                            // User tapped on token placeholder (e.g. Enter PIN to view Certificate)!
+                            promptPinAndReadTokenCert();
+                            return;
+                        }
+                        if (selectedObj != null) {
                             mSelectedCertDisplayName = selectedObj.optString("subject", displayNames[which]);
                         } else {
                             mSelectedCertDisplayName = displayNames[which];
@@ -1646,6 +1818,97 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void promptPinAndReadTokenCert() {
+        final String existingPin = (etSignPin != null) ? etSignPin.getText().toString().trim() : "";
+        if (!existingPin.isEmpty()) {
+            readHardwareTokenCertificatesWithPin(existingPin);
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setHint("Enter USB Token PIN (e.g. 12345678)");
+        input.setSingleLine(true);
+        input.setPadding(48, 32, 48, 32);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Unlock USB Token")
+                .setMessage("Please enter the PIN for your USB Token to view and select its client digital certificate:")
+                .setView(input)
+                .setPositiveButton("Read Certificate", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        String pin = input.getText().toString().trim();
+                        if (pin.isEmpty()) {
+                            Toast.makeText(MainActivity.this, "PIN cannot be empty", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (etSignPin != null) {
+                            etSignPin.setText(pin);
+                        }
+                        readHardwareTokenCertificatesWithPin(pin);
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void readHardwareTokenCertificatesWithPin(final String pin) {
+        if (progressDialog != null) {
+            progressDialog.setMessage("Logging into token & reading client certificate...");
+            progressDialog.setCancelable(false);
+            progressDialog.show();
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                } catch (Throwable ignored) {}
+
+                final JSONArray certs = CertificateManager.listCertificatesJson(MainActivity.this, pin);
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (progressDialog != null && progressDialog.isShowing()) {
+                            try { progressDialog.dismiss(); } catch (Throwable ignored) {}
+                        }
+
+                        applyDetectedCertificatesToUi(certs);
+
+                        boolean found = false;
+                        if (certs != null) {
+                            for (int i = 0; i < certs.length(); i++) {
+                                JSONObject c = certs.optJSONObject(i);
+                                if (c != null && !c.optBoolean("is_placeholder", false) && c.optBoolean("is_hardware_token", false)) {
+                                    String sub = c.optString("subject", "");
+                                    mSelectedCertAlias = c.optString("alias", "");
+                                    mSelectedCertDisplayName = sub;
+                                    if (tvSignSelectedCert != null) {
+                                        tvSignSelectedCert.setText("Selected: " + sub);
+                                    }
+                                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                                            .edit()
+                                            .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
+                                            .putString(PREF_PIN, pin)
+                                            .apply();
+                                    Toast.makeText(MainActivity.this, "✅ Certificate Loaded: " + sub, Toast.LENGTH_LONG).show();
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!found) {
+                            showCertificateDialogWithList(certs);
+                        }
+                    }
+                });
+            }
+        }).start();
     }
 
     private void setupPdfTouchInteractions() {

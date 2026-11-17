@@ -102,32 +102,17 @@ public class P11Operation {
 	}
 
 	@SuppressLint("SdCardPath")
-	public static boolean p11initialize( Context _context) {
-		if(null == _context)
-		{
+	public static boolean p11initialize(Context _context) {
+		if(null == _context) {
 			return false;
 		}
 
+		// libOTGPass2003_India.so is the unified native PKCS#11 module & JNI bridge
+		// supporting Feitian (0x096e), Longmai mToken (0x055c, 0x338c), Watchdata ProxKey (0x24dc), SafeNet (0x04b9), and InnaIT (0x2617)
 		String[] candidateModules = new String[]{
-			"lib_atick.so",
 			"libOTGPass2003_India.so",
 			"libInnaITPKCS11.so"
 		};
-
-		CcidTokenDriver.DetectedToken dt = null;
-		try {
-			dt = CcidTokenDriver.scanForToken(_context);
-		} catch (Throwable ignored) {}
-
-		if (dt != null && dt.name != null) {
-			if (dt.name.contains("mToken") || dt.name.contains("Watchdata") || dt.name.contains("ProxKey")) {
-				candidateModules = new String[]{"lib_atick.so", "libOTGPass2003_India.so", "libInnaITPKCS11.so"};
-			} else if (dt.name.contains("InnaIT")) {
-				candidateModules = new String[]{"libInnaITPKCS11.so", "lib_atick.so", "libOTGPass2003_India.so"};
-			} else {
-				candidateModules = new String[]{"libOTGPass2003_India.so", "lib_atick.so", "libInnaITPKCS11.so"};
-			}
-		}
 
 		for (String mod : candidateModules) {
 			try {
@@ -140,40 +125,28 @@ public class P11Operation {
 					myPKCS11Module_.C_Initialize(null);
 				} catch (PKCS11Exception e) {
 					if (e.getErrorCode() != PKCS11Constants.CKR_CRYPTOKI_ALREADY_INITIALIZED) {
-						continue;
+						Log.w("P11Operation", "C_Initialize warning: " + e.getMessage());
 					}
 				}
 
-				// Check if slot list is non-empty
+				long[] slotIDs = null;
 				try {
-					long[] slotIDs = myPKCS11Module_.C_GetSlotList(true);
-					if (slotIDs != null && slotIDs.length > 0) {
-						token_ = slotIDs[0];
-						return true;
+					slotIDs = myPKCS11Module_.C_GetSlotList(true);
+					if (slotIDs == null || slotIDs.length == 0) {
+						slotIDs = myPKCS11Module_.C_GetSlotList(false);
 					}
 				} catch (Throwable ignored) {}
-			} catch (Throwable ignored) {
+
+				if (slotIDs != null && slotIDs.length > 0) {
+					token_ = slotIDs[0];
+					return true;
+				}
+			} catch (Throwable t) {
+				Log.w("P11Operation", "PKCS11 init candidate " + mod + " notice: " + t.getMessage());
 			}
 		}
 
-		// Fallback to default
-		try {
-			disconnect();
-			String path = resolvePkcs11ModulePath(_context, "libOTGPass2003_India.so");
-			myPKCS11Module_ = PKCS11Connector.connectToPKCS11Module(path);
-			isLoadlib = 1;
-			try {
-				myPKCS11Module_.C_Initialize(null);
-			} catch (PKCS11Exception e) {
-				if (e.getErrorCode() != PKCS11Constants.CKR_CRYPTOKI_ALREADY_INITIALIZED) {
-					return false;
-				}
-			}
-			return true;
-		} catch (Throwable e) {
-			isLoadlib = 0;
-			return false;
-		}
+		return false;
 	}
 
 	public static synchronized void resetSession() {
@@ -216,10 +189,18 @@ public class P11Operation {
 	}
 
 	public static int getSlotInfo() throws PKCS11Exception {
-		long[] slotIDs = myPKCS11Module_.C_GetSlotList(true);
+		long[] slotIDs = null;
+		try {
+			slotIDs = myPKCS11Module_.C_GetSlotList(true);
+		} catch (Throwable ignored) {}
 
-		if(0 == slotIDs.length)
-		{
+		if (slotIDs == null || 0 == slotIDs.length) {
+			try {
+				slotIDs = myPKCS11Module_.C_GetSlotList(false);
+			} catch (Throwable ignored) {}
+		}
+
+		if (slotIDs == null || 0 == slotIDs.length) {
 			return -1;
 		}
 
@@ -1189,8 +1170,13 @@ public class P11Operation {
 			getValue[0].pValue = null;
 			try {
 				myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
-			} catch(PKCS11Exception e) {
-				continue;
+			} catch(Throwable ignored) {}
+
+			if(getValue[0].pValue == null) {
+				try {
+					getValue[0].pValue = new byte[8192];
+					myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
+				} catch(Throwable ignored) {}
 			}
 
 			if(getValue[0].pValue != null)
