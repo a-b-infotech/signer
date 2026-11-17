@@ -31,25 +31,35 @@ if (!isset($pdo) || !$pdo) {
 }
 
 // ====================================================================
-// 1. HANDLE BROWSER SYNC (Opens in browser, redirects to Python)
+// 1. HANDLE BROWSER SYNC (Opens in browser, redirects to Python / Android API)
 // ====================================================================
 if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
     $license_key = isset($_REQUEST['key']) ? trim($_REQUEST['key']) : '';
 
+    $target_server = '127.0.0.1:5000';
+    if (!empty($_REQUEST['server'])) {
+        $target_server = trim($_REQUEST['server']);
+    } elseif (!empty($_REQUEST['ip'])) {
+        $target_server = trim($_REQUEST['ip']) . (strpos($_REQUEST['ip'], ':') === false ? ':5000' : '');
+    }
+    $target_server = preg_replace('#^https?://#i', '', $target_server);
+    $target_server = rtrim($target_server, '/');
+    $callback_base = 'http://' . $target_server;
+
     if (empty($license_key)) {
-        header('Location: http://127.0.0.1:5000/api/sync_callback?status=invalid');
+        header('Location: ' . $callback_base . '/api/sync_callback?status=invalid');
         exit;
     }
 
     // Developer bypass
     if ($license_key === 'ABI-MASTER-PASS') {
-        header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=pro');
+        header('Location: ' . $callback_base . '/api/sync_callback?status=active&tier=pro');
         exit;
     }
 
     try {
         if (!$pdo) {
-            header('Location: http://127.0.0.1:5000/api/sync_callback?status=error');
+            header('Location: ' . $callback_base . '/api/sync_callback?status=error');
             exit;
         }
 
@@ -75,17 +85,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'browser_sync') {
             }
 
             if ($row['status'] !== 'active') {
-                header('Location: http://127.0.0.1:5000/api/sync_callback?status=inactive');
+                header('Location: ' . $callback_base . '/api/sync_callback?status=inactive');
             } elseif (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                header('Location: http://127.0.0.1:5000/api/sync_callback?status=expired');
+                header('Location: ' . $callback_base . '/api/sync_callback?status=expired');
             } else {
-                header('Location: http://127.0.0.1:5000/api/sync_callback?status=active&tier=' . urlencode($tier));
+                header('Location: ' . $callback_base . '/api/sync_callback?status=active&tier=' . urlencode($tier));
             }
         } else {
-            header('Location: http://127.0.0.1:5000/api/sync_callback?status=invalid');
+            header('Location: ' . $callback_base . '/api/sync_callback?status=invalid');
         }
     } catch (Exception $e) {
-        header('Location: http://127.0.0.1:5000/api/sync_callback?status=error');
+        header('Location: ' . $callback_base . '/api/sync_callback?status=error');
     }
     exit;
 }
@@ -142,25 +152,35 @@ if (isset($_GET['action']) && $_GET['action'] === 'verify_license') {
 }
 
 // ====================================================================
-// 3. HANDLE BROWSER ACTIVATION (When User enters key in Desktop App)
+// 3. HANDLE BROWSER ACTIVATION (When User enters key in Desktop / Mobile App)
 // ====================================================================
 if (isset($_REQUEST['key'])) {
     $license_key = trim($_REQUEST['key']);
 
+    $target_server = '127.0.0.1:5000';
+    if (!empty($_REQUEST['server'])) {
+        $target_server = trim($_REQUEST['server']);
+    } elseif (!empty($_REQUEST['ip'])) {
+        $target_server = trim($_REQUEST['ip']) . (strpos($_REQUEST['ip'], ':') === false ? ':5000' : '');
+    }
+    $target_server = preg_replace('#^https?://#i', '', $target_server);
+    $target_server = rtrim($target_server, '/');
+    $callback_base = 'http://' . $target_server;
+
     if (empty($license_key)) {
-        header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('No license key provided. Please contact +91 7016797720 or sales@a-b-infotech.in'));
+        header('Location: ' . $callback_base . '/api/activate_callback?status=invalid&message=' . urlencode('No license key provided. Please contact +91 7016797720 or sales@a-b-infotech.in'));
         exit;
     }
 
     // Developer Bypass
     if ($license_key === 'ABI-MASTER-PASS') {
-        header('Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=ABI-MASTER-PASS&expiredate=never&tier=pro');
+        header('Location: ' . $callback_base . '/api/activate_callback?status=valid&key=ABI-MASTER-PASS&expiredate=never&tier=pro');
         exit;
     }
 
     try {
         if (!$pdo) {
-            header('Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=' . urlencode('Database Error: Could not connect to database'));
+            header('Location: ' . $callback_base . '/api/activate_callback?status=error&message=' . urlencode('Database Error: Could not connect to database'));
             exit;
         }
 
@@ -188,13 +208,13 @@ if (isset($_REQUEST['key'])) {
 
             // Block if suspended, revoked or blocked
             if ($row['status'] !== 'active') {
-                header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('This license key is ' . $row['status'] . '. Please contact +91 7016797720 (sales@a-b-infotech.in) to activate.'));
+                header('Location: ' . $callback_base . '/api/activate_callback?status=invalid&message=' . urlencode('This license key is ' . $row['status'] . '. Please contact +91 7016797720 (sales@a-b-infotech.in) to activate.'));
                 exit;
             }
 
             // Block if expired
             if (!empty($row['expiredate']) && $row['expiredate'] !== 'never' && strtotime($row['expiredate']) < time()) {
-                header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('This license key has expired. Please contact +91 7016797720 (sales@a-b-infotech.in) to renew.'));
+                header('Location: ' . $callback_base . '/api/activate_callback?status=invalid&message=' . urlencode('This license key has expired. Please contact +91 7016797720 (sales@a-b-infotech.in) to renew.'));
                 exit;
             }
 
@@ -207,15 +227,15 @@ if (isset($_REQUEST['key'])) {
             $exp_date = !empty($row['expiredate']) ? $row['expiredate'] : 'never';
             $tier = (!empty($row['license_tier']) && strtolower($row['license_tier']) === 'basic') ? 'basic' : 'pro';
 
-            header('Location: http://127.0.0.1:5000/api/activate_callback?status=valid&key=' . urlencode($license_key) . '&expiredate=' . urlencode($exp_date) . '&tier=' . urlencode($tier));
+            header('Location: ' . $callback_base . '/api/activate_callback?status=valid&key=' . urlencode($license_key) . '&expiredate=' . urlencode($exp_date) . '&tier=' . urlencode($tier));
             exit;
         } else {
             // If license key not found: send error
-            header('Location: http://127.0.0.1:5000/api/activate_callback?status=invalid&message=' . urlencode('License key not found! Please check your license key or contact +91 7016797720 / sales@a-b-infotech.in.'));
+            header('Location: ' . $callback_base . '/api/activate_callback?status=invalid&message=' . urlencode('License key not found! Please check your license key or contact +91 7016797720 / sales@a-b-infotech.in.'));
             exit;
         }
     } catch (Exception $e) {
-        header('Location: http://127.0.0.1:5000/api/activate_callback?status=error&message=' . urlencode('Database Error: ' . $e->getMessage()));
+        header('Location: ' . $callback_base . '/api/activate_callback?status=error&message=' . urlencode('Database Error: ' . $e->getMessage()));
         exit;
     }
 }
@@ -1265,7 +1285,7 @@ body {
      OVERLAY 5: SERVER SETTINGS (CONFIGURE GLOBAL / WI-FI IP)
      ==================================================================== -->
 <div id="settings-overlay" class="overlay-backdrop">
-    <div class="glass-3d modal-3d" style="max-width: 480px; position: relative;">
+    <div class="glass-3d modal-3d" style="max-width: 500px; position: relative;">
         <button type="button" onclick="closeSettingsModal()" style="position:absolute; top:16px; right:18px; background:rgba(255,255,255,0.1); border:none; color:#cbd5e1; font-size:1.1rem; width:32px; height:32px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.2s;" title="Close popup">✕</button>
         <span class="modal-badge" style="background: rgba(13, 202, 240, 0.15); color:#0dcaf0; border: 1px solid rgba(13, 202, 240, 0.3);">
             ⚙️ Server Connection Settings
@@ -1273,11 +1293,27 @@ body {
         <h2 style="font-family:'Outfit',sans-serif; font-size:1.6rem; font-weight:800; margin-bottom:8px;">
             Signer IP Configuration
         </h2>
-        <p style="color:#94a3b8; font-size:0.88rem; line-height:1.5; margin-bottom: 20px;">
-            Enter your Phone or PC's <b>Global or Wi-Fi IP address</b>.<br>Port <code>5000</code> is automatic by default.
+        <p style="color:#94a3b8; font-size:0.88rem; line-height:1.5; margin-bottom: 14px;">
+            Connect to your PC or Android Mobile Signer over <b>Wi-Fi, Mobile Hotspot, or Global IP</b>.
         </p>
 
-        <div style="text-align: left; margin-bottom: 16px;">
+        <!-- Quick 1-Click Presets -->
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; justify-content: center;">
+            <button type="button" onclick="setPresetIp('127.0.0.1')" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
+                💻 Localhost (127.0.0.1)
+            </button>
+            <button type="button" onclick="setPresetIp('192.168.43.1')" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
+                🔥 Hotspot (192.168.43.1)
+            </button>
+            <button type="button" onclick="setPresetIp('192.168.1.')" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
+                📶 Wi-Fi LAN
+            </button>
+            <button type="button" onclick="focusGlobalIp()" class="btn-3d btn-tool" style="padding: 5px 11px; font-size: 0.75rem;">
+                🌐 Global WAN
+            </button>
+        </div>
+
+        <div style="text-align: left; margin-bottom: 14px;">
             <label style="font-size: 0.8rem; color: #94a3b8; font-weight: 700; display: block; margin-bottom: 6px;">
                 Server IP Address (Wi-Fi / Global / Localhost):
             </label>
@@ -1287,8 +1323,18 @@ body {
                 <span style="background: rgba(10, 15, 28, 0.7); border: 1px solid rgba(13, 202, 240, 0.28); border-radius: 10px; padding: 11px 12px; font-size: 0.88rem; color: #38bdf8; font-family: monospace;">:5000</span>
             </div>
             <div style="font-size: 0.75rem; color: #64748b; margin-top: 6px;">
-                Port <b>5000</b> is set by default. Leave blank or enter <code>127.0.0.1</code> for default local machine.
+                Port <b>5000</b> is automatic. Enter your Phone's Wi-Fi IP or Global IP shown on Android Tab 6.
             </div>
+        </div>
+
+        <!-- Real-Time Connection Test Bar -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 18px; background: rgba(10, 15, 28, 0.5); padding: 8px 12px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08);">
+            <span id="testConnStatus" style="font-size: 0.78rem; color: #94a3b8; text-align: left; flex: 1;">
+                Click 'Test' to check server reachability
+            </span>
+            <button type="button" onclick="testServerConnection()" id="btnTestConn" class="btn-3d btn-tool" style="padding: 5px 12px; font-size: 0.78rem; white-space: nowrap;">
+                ⚡ Test
+            </button>
         </div>
 
         <div style="display: flex; gap: 10px; justify-content: center;">
@@ -1587,17 +1633,97 @@ function getServerBaseIp() {
 }
 
 function getLocalServerUrl() {
-    const ip = getServerBaseIp();
-    return `http://${ip}:5000`;
+    let saved = localStorage.getItem('abinfo_signer_ip') || localStorage.getItem('abinfo_global_ip');
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('server')) saved = params.get('server');
+    if (params.get('ip')) saved = params.get('ip');
+    if (!saved || !saved.trim()) return 'http://127.0.0.1:5000';
+
+    let val = saved.trim();
+    if (!/^https?:\/\//i.test(val)) {
+        val = 'http://' + val;
+    }
+    try {
+        const u = new URL(val);
+        if (!u.port) {
+            val = `${u.protocol}//${u.hostname}:5000`;
+        }
+    } catch (e) {
+        if (!val.includes(':5000')) {
+            val = val.replace(/\/+$/, '') + ':5000';
+        }
+    }
+    return val.replace(/\/+$/, '');
 }
 
 window.getServerBaseIp = getServerBaseIp;
 window.getLocalServerUrl = getLocalServerUrl;
 window.getApiServerUrl = getLocalServerUrl;
 
+window.setPresetIp = function(ip) {
+    const inp = document.getElementById('settingsServerIp');
+    if (inp) {
+        inp.value = ip;
+        inp.focus();
+    }
+};
+
+window.focusGlobalIp = function() {
+    const inp = document.getElementById('settingsServerIp');
+    if (inp) {
+        if (inp.value === '127.0.0.1' || inp.value === '192.168.43.1') {
+            inp.value = '';
+        }
+        inp.placeholder = 'e.g. 103.150.24.12';
+        inp.focus();
+    }
+};
+
+window.testServerConnection = async function() {
+    const inp = document.getElementById('settingsServerIp');
+    const statusEl = document.getElementById('testConnStatus');
+    const btn = document.getElementById('btnTestConn');
+    if (!inp || !statusEl) return;
+    
+    let raw = inp.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    if (!raw) raw = '127.0.0.1';
+    let host = raw;
+    if (host.includes(':')) host = host.split(':')[0];
+    const testUrl = `http://${host}:5000/api/health`;
+
+    if (btn) btn.disabled = true;
+    statusEl.style.color = '#38bdf8';
+    statusEl.textContent = `⏳ Testing http://${host}:5000...`;
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(testUrl, { mode: 'cors', signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+            const data = await res.json();
+            statusEl.style.color = '#34d399';
+            statusEl.textContent = `🟢 Connected! v${data.version || '2.2.0'} (RUNNING)`;
+        } else {
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = `🔴 HTTP error: ${res.status}`;
+        }
+    } catch (e) {
+        statusEl.style.color = '#f87171';
+        statusEl.textContent = `🔴 Cannot reach http://${host}:5000 (Ensure app server is ON)`;
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+};
+
 window.openSettingsModal = function() {
     const inp = document.getElementById('settingsServerIp');
     if (inp) inp.value = getServerBaseIp();
+    const testStatus = document.getElementById('testConnStatus');
+    if (testStatus) {
+        testStatus.style.color = '#94a3b8';
+        testStatus.textContent = "Click 'Test' to check server reachability";
+    }
     const modal = document.getElementById('settings-overlay');
     if (modal) modal.style.display = 'flex';
 };
@@ -1623,6 +1749,7 @@ window.saveSettingsIp = function() {
     }
     closeSettingsModal();
     if (typeof checkBackgroundServer === 'function') checkBackgroundServer();
+    if (typeof window.loadDrivers === 'function') window.loadDrivers();
     if (typeof window.fetchCertificates === 'function') window.fetchCertificates(true);
 };
 
@@ -1633,11 +1760,11 @@ window.resetSettingsIp = function() {
     if (inp) inp.value = '127.0.0.1';
     closeSettingsModal();
     if (typeof checkBackgroundServer === 'function') checkBackgroundServer();
+    if (typeof window.loadDrivers === 'function') window.loadDrivers();
     if (typeof window.fetchCertificates === 'function') window.fetchCertificates(true);
 };
 
 document.addEventListener('DOMContentLoaded', function() {
-    let LOCAL_SERVER = getLocalServerUrl();
     const pdfjsLib = window['pdfjs-dist/build/pdf'];
     const canvas = document.getElementById('pdfCanvas');
     const ctx = canvas ? canvas.getContext('2d') : null;
@@ -1657,7 +1784,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load Token Drivers from Local Server
     async function loadDrivers() {
         try {
-            const response = await fetch(`${LOCAL_SERVER}/api/drivers`);
+            const response = await fetch(`${getLocalServerUrl()}/api/drivers`);
             const drivers = await response.json();
             const select = document.getElementById('driverDropdownWorkspace');
             if (!select) return;
@@ -1672,6 +1799,7 @@ document.addEventListener('DOMContentLoaded', function() {
             fetchCertificates();
         } catch (e) {}
     }
+    window.loadDrivers = loadDrivers;
 
     // Load Digital Certificates from Local Server
     window.fetchCertificates = async function(isRefresh = false) {
@@ -1685,7 +1813,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const pinVal = document.getElementById('tokenPinInput') ? document.getElementById('tokenPinInput').value.trim() : '';
             const pinParam = pinVal ? `&pin=${encodeURIComponent(pinVal)}` : '';
-            const url = `${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${isRefresh ? '&refresh=1' : ''}${pinParam}&_t=${Date.now()}`;
+            const url = `${getLocalServerUrl()}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${isRefresh ? '&refresh=1' : ''}${pinParam}&_t=${Date.now()}`;
             const response = await fetch(url);
             const certs = await response.json();
             if (!certSelect) return;
@@ -2107,7 +2235,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     formData.append('custom_logo', logoInput.files[0]);
                 }
 
-                const response = await fetch(`${LOCAL_SERVER}/api/sign`, { method: 'POST', body: formData });
+                const response = await fetch(`${getLocalServerUrl()}/api/sign`, { method: 'POST', body: formData });
 
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
