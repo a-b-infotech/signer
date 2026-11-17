@@ -340,12 +340,25 @@
                             android:textSize="12sp" />
 
                         <Button
+                            android:id="@+id/btnSignRefreshCerts"
+                            android:layout_width="wrap_content"
+                            android:layout_height="38dp"
+                            android:layout_marginStart="6dp"
+                            android:background="#0284C7"
+                            android:paddingHorizontal="10dp"
+                            android:text="🔄 Refresh"
+                            android:textAllCaps="false"
+                            android:textColor="#FFFFFF"
+                            android:textSize="12sp" />
+
+                        <Button
                             android:id="@+id/btnSignLoadP12"
                             android:layout_width="wrap_content"
                             android:layout_height="38dp"
-                            android:layout_marginStart="8dp"
+                            android:layout_marginStart="6dp"
                             android:background="#334155"
-                            android:text="Load P12/PFX"
+                            android:paddingHorizontal="8dp"
+                            android:text="Load P12"
                             android:textAllCaps="false"
                             android:textColor="#FFFFFF"
                             android:textSize="12sp" />

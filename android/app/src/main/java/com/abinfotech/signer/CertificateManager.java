@@ -222,6 +222,32 @@ public class CertificateManager {
         }
     }
 
+    public static boolean isClientCert(javax.security.cert.X509Certificate cert) {
+        if (cert == null) return false;
+        try {
+            String sub = cert.getSubjectDN() != null ? cert.getSubjectDN().getName().toLowerCase() : "";
+            String iss = cert.getIssuerDN() != null ? cert.getIssuerDN().getName().toLowerCase() : "";
+
+            // 1. Self-signed Root CA check
+            if (!sub.isEmpty() && sub.equalsIgnoreCase(iss)) {
+                return false;
+            }
+
+            // 2. CA naming heuristics
+            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
+                    || sub.contains("certifying authority") || sub.contains("cca india")
+                    || sub.contains("intermediate ca") || sub.contains("issuing ca")
+                    || sub.contains("trust provider ca") || sub.contains("national ca")) {
+                if (!sub.contains("ou=") || sub.contains("cn=sub") || sub.contains("cn=root")) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
     public static String extractCommonName(String dn) {
         if (dn == null || dn.trim().isEmpty()) return "Client Certificate";
         for (String part : dn.split(",")) {
@@ -262,6 +288,10 @@ public class CertificateManager {
                             if (tokenCerts != null && tokenCerts.length > 0) {
                                 for (int i = 0; i < tokenCerts.length; i++) {
                                     javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                    if (!isClientCert(tc)) {
+                                        // Skip Root CA / Sub CA
+                                        continue;
+                                    }
                                     String subjectDn = tc.getSubjectDN().getName();
                                     String clientName = extractCommonName(subjectDn);
                                     JSONObject obj = new JSONObject();

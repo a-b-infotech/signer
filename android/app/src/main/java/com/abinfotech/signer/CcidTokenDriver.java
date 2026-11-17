@@ -41,9 +41,12 @@ public class CcidTokenDriver {
     public static final int PID_HYP2003_1 = 0x0807;
     public static final int PID_HYP2003_2 = 0x2003;
 
-    // 2. mToken / CryptoID (Longmai PKI)
-    public static final int VID_LONGMAI_1 = 0x338c;
-    public static final int VID_LONGMAI_2 = 0x4c4d;
+    // 2. mToken / CryptoID (Century Longmai PKI)
+    // 0x055c is Beijing Century Longmai Technology Co., Ltd.
+    public static final int VID_LONGMAI_1 = 0x055c;
+    public static final int VID_LONGMAI_2 = 0x338c;
+    public static final int VID_LONGMAI_3 = 0x4c4d; // 'LM'
+    public static final int VID_LONGMAI_4 = 0x0925; // Lakeview / Longmai
 
     // 3. Watchdata ProxKey (Watchdata WDS)
     public static final int VID_WATCHDATA_1 = 0x163c;
@@ -56,10 +59,9 @@ public class CcidTokenDriver {
     public static final int VID_INNAIT_2 = 0x2007;
     public static final int VID_INNAIT_3 = 0x2ce3;
 
-    // 5. SafeNet eToken
+    // 5. SafeNet eToken (Gemalto / Thales)
     public static final int VID_SAFENET_1 = 0x0529;
     public static final int VID_SAFENET_2 = 0x08e6;
-    public static final int VID_SAFENET_3 = 0x055c;
 
     public static DetectedToken scanForToken(Context context) {
         UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
@@ -82,24 +84,54 @@ public class CcidTokenDriver {
                 }
             }
 
-            // 1. HYP2003 / ePass2003
+            // Inspect USB product & manufacturer descriptor strings if accessible
+            String prodName = "";
+            String mfgName = "";
+            try {
+                if (dev.getProductName() != null) prodName = dev.getProductName().toLowerCase();
+            } catch (Throwable ignored) {}
+            try {
+                if (dev.getManufacturerName() != null) mfgName = dev.getManufacturerName().toLowerCase();
+            } catch (Throwable ignored) {}
+            String combined = (prodName + " " + mfgName).trim();
+
+            // Match by product string descriptor heuristics first
+            if (combined.contains("mtoken") || combined.contains("longmai") || combined.contains("cryptoid")) {
+                return new DetectedToken("mToken / CryptoID", "Century Longmai PKI", vid, pid, dev, hasCcid);
+            }
+            if (combined.contains("epass") || combined.contains("hyp2003") || combined.contains("feitian")
+                    || combined.contains("entersafe") || combined.contains("hyperpki")) {
+                return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
+            }
+            if (combined.contains("proxkey") || combined.contains("watchdata")) {
+                return new DetectedToken("Watchdata ProxKey", "Watchdata WDS", vid, pid, dev, hasCcid);
+            }
+            if (combined.contains("innait") || combined.contains("precision") || combined.contains("emudhra")) {
+                return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
+            }
+            if (combined.contains("safenet") || combined.contains("etoken") || combined.contains("gemalto") || combined.contains("thales")) {
+                return new DetectedToken("SafeNet eToken", "Gemalto / Thales", vid, pid, dev, hasCcid);
+            }
+
+            // Match by USB Vendor IDs
+            // 1. mToken / CryptoID (Century Longmai - 0x055C, 0x338C, 0x4C4D, 0x0925)
+            if (vid == VID_LONGMAI_1 || vid == VID_LONGMAI_2 || vid == VID_LONGMAI_3 || vid == VID_LONGMAI_4) {
+                return new DetectedToken("mToken / CryptoID", "Century Longmai PKI", vid, pid, dev, hasCcid);
+            }
+            // 2. HYP2003 / ePass2003 (Feitian / EnterSafe - 0x096E)
             if (vid == VID_FEITIAN) {
                 return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
             }
-            // 2. mToken / CryptoID
-            if (vid == VID_LONGMAI_1 || vid == VID_LONGMAI_2) {
-                return new DetectedToken("mToken / CryptoID", "Longmai PKI", vid, pid, dev, hasCcid);
-            }
-            // 3. Watchdata ProxKey
+            // 3. Watchdata ProxKey (0x163C, 0x04B5, 0x1059, 0x04B4)
             if (vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2 || vid == VID_WATCHDATA_3 || vid == VID_WATCHDATA_4) {
                 return new DetectedToken("Watchdata ProxKey", "Watchdata WDS", vid, pid, dev, hasCcid);
             }
-            // 4. InnaIT Precision
+            // 4. InnaIT Precision (0x2CCF, 0x2007, 0x2CE3)
             if (vid == VID_INNAIT_1 || vid == VID_INNAIT_2 || vid == VID_INNAIT_3) {
                 return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
             }
-            // 5. SafeNet eToken
-            if (vid == VID_SAFENET_1 || vid == VID_SAFENET_2 || vid == VID_SAFENET_3) {
+            // 5. SafeNet eToken (0x0529, 0x08E6)
+            if (vid == VID_SAFENET_1 || vid == VID_SAFENET_2) {
                 return new DetectedToken("SafeNet eToken", "Gemalto / Thales", vid, pid, dev, hasCcid);
             }
             // Generic Smartcard / CCID

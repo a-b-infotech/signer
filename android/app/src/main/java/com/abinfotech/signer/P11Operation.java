@@ -1140,12 +1140,18 @@ public class P11Operation {
 						}
 					}
 					X509Certificate oneCert = X509Certificate.getInstance(bCert);
+					String sub = oneCert.getSubjectDN().getName().toLowerCase();
+					String iss = oneCert.getIssuerDN().getName().toLowerCase();
+					if (sub.equalsIgnoreCase(iss) || sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
+							|| sub.contains("certifying authority") || sub.contains("cca india")) {
+						continue;
+					}
 					clientCertList.add(oneCert);
 				} catch (Throwable ignored) {}
 			}
 		}
 
-		// Fallback: If strict client filter left list empty, return all valid certs
+		// Fallback: If strict client filter left list empty, only add non-CA certs
 		if (clientCertList.isEmpty() && certHandle.length > 0) {
 			for(int i = 0; i < certHandle.length; i++) {
 				CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
@@ -1156,7 +1162,13 @@ public class P11Operation {
 					myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
 					if (getValue[0].pValue != null) {
 						byte[] bCert = (byte[]) getValue[0].pValue;
-						clientCertList.add(X509Certificate.getInstance(bCert));
+						X509Certificate oneCert = X509Certificate.getInstance(bCert);
+						String sub = oneCert.getSubjectDN().getName().toLowerCase();
+						String iss = oneCert.getIssuerDN().getName().toLowerCase();
+						if (!sub.equalsIgnoreCase(iss) && !sub.contains("root ca") && !sub.contains("sub ca") && !sub.contains("sub-ca")
+								&& !sub.contains("certifying authority") && !sub.contains("cca india")) {
+							clientCertList.add(oneCert);
+						}
 					}
 				} catch (Throwable ignored) {}
 			}

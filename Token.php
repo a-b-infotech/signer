@@ -1136,6 +1136,9 @@ body {
                 <input type="text" id="globalIpInput" placeholder="127.0.0.1:5000 or Global IP:5000" style="padding: 7px 12px; background: rgba(15,23,42,0.85); border: 1px solid rgba(148,163,184,0.3); border-radius: 8px; color: #f8fafc; font-size: 0.82rem; flex: 1; text-align: center; font-family: monospace;">
                 <button type="button" onclick="saveGlobalIpSetting()" class="btn-3d btn-green" style="padding: 7px 14px; font-size: 0.82rem; cursor:pointer;">Save IP</button>
             </div>
+            <div style="font-size: 0.72rem; color: #64748b; margin-top: 6px; max-width: 480px; margin-left: auto; margin-right: auto; line-height: 1.4;">
+                💡 <b>Remote Connection Tip:</b> Wi-Fi works within the same network. For remote devices across different networks, turn <b>ON Phone Hotspot</b> &amp; connect PC to it (use <code>http://192.168.43.1:5000</code>), or configure Port 5000 Forwarding on your Wi-Fi router.
+            </div>
         </div>
     </div>
 </div>
@@ -1368,9 +1371,14 @@ if (fileInput) {
             <select class="glass-input" id="driverDropdownWorkspace"></select>
 
             <!-- 2. Certificate Selection -->
-            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
-                2. Digital Certificate
-            </label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:0;">
+                    2. Digital Certificate
+                </label>
+                <button type="button" id="btnRefreshCertsWeb" onclick="fetchCertificates(true)" title="Refresh Certificates" style="background:rgba(56, 189, 248, 0.15); border:1px solid rgba(56, 189, 248, 0.3); color:#38bdf8; border-radius:6px; cursor:pointer; font-size:0.75rem; padding:2px 8px; font-weight:600;">
+                    🔄 Refresh
+                </button>
+            </div>
             <select class="glass-input" name="certAlias" required>
                 <option value="">-- Choose Certificate --</option>
             </select>
@@ -1599,13 +1607,18 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Load Digital Certificates from Local Server
-    async function fetchCertificates() {
+    window.fetchCertificates = async function(isRefresh = false) {
         const driver = document.getElementById('driverDropdownWorkspace');
         if (!driver) return;
+        const certSelect = document.querySelector('select[name="certAlias"]');
+        const refBtn = document.getElementById('btnRefreshCertsWeb');
+        if (refBtn && isRefresh) refBtn.textContent = '⏳ ...';
+        if (certSelect && isRefresh) certSelect.innerHTML = '<option value="">-- Refreshing Certificates... --</option>';
+
         try {
-            const response = await fetch(`${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}`);
+            const url = `${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${isRefresh ? '&refresh=1' : ''}&_t=${Date.now()}`;
+            const response = await fetch(url);
             const certs = await response.json();
-            const certSelect = document.querySelector('select[name="certAlias"]');
             if (!certSelect) return;
             
             certSelect.innerHTML = '<option value="">-- Choose Certificate --</option>';
@@ -1618,8 +1631,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 opt.textContent = `${displayName} (${cert.source})`;
                 certSelect.appendChild(opt);
             });
-        } catch (e) {}
-    }
+            if (certs.length === 1 && certSelect.options.length > 1) {
+                certSelect.selectedIndex = 1;
+            }
+        } catch (e) {
+            if (certSelect && isRefresh) certSelect.innerHTML = '<option value="">-- No Certificates Found --</option>';
+        } finally {
+            if (refBtn) refBtn.textContent = '🔄 Refresh';
+        }
+    };
 
     // Render PDF Document
     <?php if (isset($_SESSION['pdfPath'])): ?>

@@ -189,6 +189,14 @@ public class LocalSignerServer {
                 String passParam = getQueryParam(query, "password");
                 if (passParam == null) passParam = getQueryParam(query, "pin");
                 if (passParam == null) passParam = "";
+                String refreshParam = getQueryParam(query, "refresh");
+                if ("1".equals(refreshParam) || "true".equalsIgnoreCase(refreshParam)) {
+                    try {
+                        P11Operation.disconnect();
+                        P11Operation.resetSession();
+                        UsbTokenManager.setupHardwareTokenConnection(context);
+                    } catch (Throwable ignored) {}
+                }
                 JSONArray certs = CertificateManager.listCertificatesJson(context, passParam);
                 sendJsonResponse(out, 200, certs.toString());
 

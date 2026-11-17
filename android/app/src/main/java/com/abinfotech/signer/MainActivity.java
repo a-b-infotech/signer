@@ -99,7 +99,7 @@ public class MainActivity extends Activity {
     private TextView tvTokenStatusBadge;
     private Spinner spTokenDriver;
     private TextView tvSignSelectedCert;
-    private Button btnSignFindCerts, btnSignLoadP12;
+    private Button btnSignFindCerts, btnSignRefreshCerts, btnSignLoadP12;
     private EditText etSignPin;
     private Spinner spSignReason;
     private EditText etSignLocation;
@@ -461,6 +461,7 @@ public class MainActivity extends Activity {
         spTokenDriver = (Spinner) findViewById(R.id.spTokenDriver);
         tvSignSelectedCert = (TextView) findViewById(R.id.tvSignSelectedCert);
         btnSignFindCerts = (Button) findViewById(R.id.btnSignFindCerts);
+        btnSignRefreshCerts = (Button) findViewById(R.id.btnSignRefreshCerts);
         btnSignLoadP12 = (Button) findViewById(R.id.btnSignLoadP12);
         etSignPin = (EditText) findViewById(R.id.etSignPin);
         spSignReason = (Spinner) findViewById(R.id.spSignReason);
@@ -724,6 +725,16 @@ public class MainActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     showCertificateSelectionDialog();
+                }
+            });
+        }
+
+        // Refresh Certificates Button
+        if (btnSignRefreshCerts != null) {
+            btnSignRefreshCerts.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    refreshHardwareTokenAndCertificates();
                 }
             });
         }
@@ -1302,7 +1313,9 @@ public class MainActivity extends Activity {
                         options.add("🔄 Refresh Global WAN IP Now");
                     }
                     options.add("📶 Copy Wi-Fi LAN: http://" + wifiIp + ":5000");
+                    options.add("🔥 Copy Hotspot URL: http://192.168.43.1:5000 (100% Remote)");
                     options.add("💻 Copy Localhost: http://127.0.0.1:5000");
+                    options.add("💡 Why doesn't direct Global WAN work? (Remote Guide)");
 
                     final String[] items = options.toArray(new String[0]);
                     new AlertDialog.Builder(MainActivity.this)
@@ -1316,9 +1329,25 @@ public class MainActivity extends Activity {
                                         Toast.makeText(MainActivity.this, "Resolving Public Global IP...", Toast.LENGTH_SHORT).show();
                                         return;
                                     }
+                                    if (chosen.contains("Remote Guide")) {
+                                        new AlertDialog.Builder(MainActivity.this)
+                                                .setTitle("Why Direct Global IP Needs Setup")
+                                                .setMessage("📶 Wi-Fi LAN works because both phone and PC share the local subnet.\n\n"
+                                                        + "🌐 Why Global WAN (Cellular/Internet) blocks:\n"
+                                                        + "Mobile operators (Jio, Airtel, Vi) use Carrier-Grade NAT (CGNAT) and Wi-Fi routers block external inbound connections on port 5000.\n\n"
+                                                        + "✅ 2 Simple Ways to Connect Remotely:\n"
+                                                        + "1. Phone Mobile Hotspot (Easiest - 100% Works):\n"
+                                                        + "Turn ON Phone Hotspot, connect your laptop/PC to it, and use http://192.168.43.1:5000 in Token.php.\n\n"
+                                                        + "2. Home Wi-Fi Router Port Forwarding:\n"
+                                                        + "In router settings (192.168.1.1), forward External Port 5000 to Phone Wi-Fi IP (" + wifiIp + ":5000).")
+                                                .setPositiveButton("OK", null)
+                                                .show();
+                                        return;
+                                    }
                                     String urlToCopy = "";
                                     if (chosen.contains("Global WAN")) urlToCopy = "http://" + wanIp + ":5000";
                                     else if (chosen.contains("Wi-Fi LAN")) urlToCopy = "http://" + wifiIp + ":5000";
+                                    else if (chosen.contains("Hotspot")) urlToCopy = "http://192.168.43.1:5000";
                                     else if (chosen.contains("Localhost")) urlToCopy = "http://127.0.0.1:5000";
 
                                     if (!urlToCopy.isEmpty()) {
@@ -1345,6 +1374,24 @@ public class MainActivity extends Activity {
         if (tvLicenseStatusText != null) {
             tvLicenseStatusText.setText("Status: " + LicenseManager.getLicenseStatus(this));
         }
+    }
+
+    private void refreshHardwareTokenAndCertificates() {
+        mSelectedCertAlias = "";
+        mSelectedCertDisplayName = "";
+        if (tvSignSelectedCert != null) {
+            tvSignSelectedCert.setText("-- Scanning Token & Certificates... --");
+        }
+        try {
+            UsbTokenManager.disconnectToken();
+            P11Operation.disconnect();
+            P11Operation.resetSession();
+            UsbTokenManager.setupHardwareTokenConnection(this);
+        } catch (Throwable ignored) {}
+
+        updateTokenStatus();
+        showCertificateSelectionDialog();
+        Toast.makeText(this, "🔄 Token connection & certificate list refreshed", Toast.LENGTH_SHORT).show();
     }
 
     private void showCertificateSelectionDialog() {
