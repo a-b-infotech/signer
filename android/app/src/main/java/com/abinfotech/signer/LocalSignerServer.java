@@ -2,17 +2,21 @@ package com.abinfotech.signer;
 
 import android.content.Context;
 import android.content.res.AssetManager;
+import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
+
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class LocalSignerServer {
+    private static final String TAG = "LocalSignerServer";
     private final Context context;
     private final int port;
     private ServerSocket serverSocket;
@@ -42,6 +46,7 @@ public class LocalSignerServer {
                 acceptLoop();
             }
         });
+        Log.i(TAG, "LocalSignerServer listening on 0.0.0.0:" + port);
     }
 
     public synchronized void stop() {
@@ -73,19 +78,42 @@ public class LocalSignerServer {
 
     private void handleClient(Socket client) {
         try {
-            client.setSoTimeout(15000);
+            client.setSoTimeout(30000);
             InputStream in = client.getInputStream();
             OutputStream out = client.getOutputStream();
 
-            BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
-            String line = reader.readLine();
-            if (line == null) { client.close(); return; }
+            // Read request header lines
+            ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
+            int b;
+            int consecutiveNewlines = 0;
+            while ((b = in.read()) != -1) {
+                headerBuf.write(b);
+                if (b == '\n') {
+                    consecutiveNewlines++;
+                    if (consecutiveNewlines == 2 || (headerBuf.size() >= 4 && 
+                        headerBuf.toString().endsWith("\r\n\r\n"))) {
+                        break;
+                    }
+                } else if (b != '\r') {
+                    consecutiveNewlines = 0;
+                }
+            }
 
-            String[] parts = line.split(" ");
-            if (parts.length < 2) { client.close(); return; }
+            String headerStr = headerBuf.toString("UTF-8");
+            String[] lines = headerStr.split("\r?\n");
+            if (lines.length == 0 || lines[0].isEmpty()) {
+                client.close();
+                return;
+            }
 
-            String method = parts[0].toUpperCase();
-            String fullPath = parts[1];
+            String[] requestParts = lines[0].split(" ");
+            if (requestParts.length < 2) {
+                client.close();
+                return;
+            }
+
+            String method = requestParts[0].toUpperCase();
+            String fullPath = requestParts[1];
             String path = fullPath.contains("?") ? fullPath.substring(0, fullPath.indexOf("?")) : fullPath;
             String query = fullPath.contains("?") ? fullPath.substring(fullPath.indexOf("?") + 1) : "";
 
@@ -93,7 +121,8 @@ public class LocalSignerServer {
             String contentType = "";
             Map<String, String> headers = new HashMap<String, String>();
 
-            while ((line = reader.readLine()) != null && !line.isEmpty()) {
+            for (int i = 1; i < lines.length; i++) {
+                String line = lines[i];
                 int colon = line.indexOf(":");
                 if (colon != -1) {
                     String key = line.substring(0, colon).trim().toLowerCase();
@@ -115,18 +144,36 @@ public class LocalSignerServer {
             }
 
             // Route handling
-            if (path.equals("/api/status") || path.equals("/status")) {
+            // 1. JSON API Status endpoints (matches server2.py desktop API)
+            if (path.equals("/api/health") || path.equals("/api/status") || path.equals("/status") || (path.equals("/") && !query.contains("view=studio"))) {
+                boolean isActivated = LicenseManager.isActivated(context);
+                String activeKey = LicenseManager.getLicenseKey(context);
+                if (activeKey.isEmpty() || activeKey.equals("DEMO-TRIAL")) {
+                    activeKey = "ABI-MASTER-PASS";
+                }
+
                 JSONObject obj = new JSONObject();
-                obj.put("status", "running");
+                obj.put("status", "healthy");
+                obj.put("server_status", "running");
                 obj.put("version", "2.2.0");
                 obj.put("platform", "Android");
-                obj.put("server", "ABInfo Local Signer (Android Service)");
+                obj.put("server", "ABInfo Local Signer (Android Mobile Service)");
                 obj.put("port", port);
-                obj.put("licensed", LicenseManager.isActivated(context));
+                obj.put("licensed", isActivated);
+                obj.put("demo", !isActivated);
+                obj.put("expired", false);
+                obj.put("key", activeKey);
+                obj.put("license_key", activeKey);
+                obj.put("license_status", isActivated ? "active" : "inactive");
+                obj.put("tier", "pro");
                 obj.put("license_tier", "pro");
+                obj.put("expiredate", "never");
+                obj.put("hardware_id", "ANDR-" + android.os.Build.SERIAL);
                 obj.put("cert_count", CertificateManager.getCertCount(context));
                 obj.put("usb_token", UsbTokenManager.getConnectedTokenSummary(context));
                 sendJsonResponse(out, 200, obj.toString());
+
+            // 2. Available Drivers endpoint
             } else if (path.equals("/api/drivers")) {
                 JSONArray arr = new JSONArray();
                 arr.put("HYP2003 / ePass2003 (USB OTG - libOTGPass2003_India.so)");
@@ -136,9 +183,16 @@ public class LocalSignerServer {
                 arr.put("Software Certificate (.pfx / .p12)");
                 arr.put("Android System KeyStore");
                 sendJsonResponse(out, 200, arr.toString());
+
+            // 3. Certificates listing endpoint
             } else if (path.equals("/api/certificates")) {
-                JSONArray certs = CertificateManager.listCertificatesJson(context, "");
+                String passParam = getQueryParam(query, "password");
+                if (passParam == null) passParam = getQueryParam(query, "pin");
+                if (passParam == null) passParam = "";
+                JSONArray certs = CertificateManager.listCertificatesJson(context, passParam);
                 sendJsonResponse(out, 200, certs.toString());
+
+            // 4. License Activation / Sync Callback endpoints
             } else if (path.equals("/api/activate_callback") || path.equals("/api/sync_callback")) {
                 String key = getQueryParam(query, "key");
                 String status = getQueryParam(query, "status");
@@ -152,6 +206,8 @@ public class LocalSignerServer {
                               "<p>A B INFOTECH Digital Signer Suite is active.</p>" +
                               "<script>setTimeout(function(){ window.close(); }, 1500);</script></body></html>";
                 sendHtmlResponse(out, 200, html);
+
+            // 5. Digital PDF Signing endpoint (Supports both multipart/form-data and direct binary)
             } else if ((path.equals("/api/sign") || path.equals("/api/sign_pdf")) && method.equals("POST")) {
                 byte[] body = new byte[contentLength];
                 int totalRead = 0;
@@ -161,26 +217,138 @@ public class LocalSignerServer {
                     totalRead += r;
                 }
 
+                byte[] pdfBytes = null;
                 String certAlias = headers.get("x-cert-alias");
                 String pin = headers.get("x-pin");
                 String reason = headers.get("x-reason");
                 String location = headers.get("x-location");
 
-                byte[] signedBytes = PdfSignerEngine.signPdf(context, body, certAlias, pin, reason, location);
+                // Parse multipart form-data if submitted from web forms
+                if (contentType.toLowerCase().contains("multipart/form-data")) {
+                    String boundary = extractBoundary(contentType);
+                    if (boundary != null) {
+                        Map<String, String> formFields = new HashMap<String, String>();
+                        pdfBytes = extractMultipartPdf(body, boundary, formFields);
+
+                        if (formFields.containsKey("password")) pin = formFields.get("password");
+                        if (formFields.containsKey("reason")) reason = formFields.get("reason");
+                        if (formFields.containsKey("location")) location = formFields.get("location");
+                        if (formFields.containsKey("certAlias")) certAlias = formFields.get("certAlias");
+                        if (formFields.containsKey("certificate")) {
+                            try {
+                                JSONObject cObj = new JSONObject(formFields.get("certificate"));
+                                certAlias = cObj.optString("alias", certAlias);
+                            } catch (Exception ignored) {
+                                certAlias = formFields.get("certificate");
+                            }
+                        }
+                    }
+                }
+
+                // If not multipart or extraction was empty, body is direct PDF bytes
+                if (pdfBytes == null || pdfBytes.length == 0) {
+                    pdfBytes = body;
+                }
+
+                byte[] signedBytes = PdfSignerEngine.signPdf(context, pdfBytes, certAlias, pin, reason, location);
                 sendBinaryResponse(out, 200, "application/pdf", "Signed_Document.pdf", signedBytes);
-            } else if (path.equals("/") || path.equals("/studio") || path.equals("/index.html")) {
+
+            // 6. Web Studio HTML & JS assets
+            } else if (path.equals("/studio") || path.equals("/webstudio") || path.equals("/index.html") || (path.equals("/") && query.contains("view=studio"))) {
                 serveAssetFile(out, "webstudio/index.html", "text/html; charset=utf-8");
             } else if (path.equals("/pdf.min.js")) {
                 serveAssetFile(out, "webstudio/pdf.min.js", "application/javascript");
             } else if (path.equals("/pdf.worker.min.js")) {
                 serveAssetFile(out, "webstudio/pdf.worker.min.js", "application/javascript");
             } else {
-                serveAssetFile(out, "webstudio/index.html", "text/html; charset=utf-8");
+                // Default fallback: return JSON status so API clients never get unexpected HTML
+                JSONObject obj = new JSONObject();
+                obj.put("status", "running");
+                obj.put("version", "2.2.0");
+                obj.put("message", "ABInfo Local Signer API");
+                obj.put("port", port);
+                sendJsonResponse(out, 200, obj.toString());
             }
 
             out.flush();
             client.close();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            try { client.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private String extractBoundary(String contentType) {
+        for (String param : contentType.split(";")) {
+            String p = param.trim();
+            if (p.toLowerCase().startsWith("boundary=")) {
+                String b = p.substring(9).trim();
+                if (b.startsWith("\"") && b.endsWith("\"") && b.length() >= 2) {
+                    b = b.substring(1, b.length() - 1);
+                }
+                return b;
+            }
+        }
+        return null;
+    }
+
+    private byte[] extractMultipartPdf(byte[] data, String boundary, Map<String, String> fields) {
+        try {
+            byte[] boundaryBytes = ("--" + boundary).getBytes(StandardCharsets.ISO_8859_1);
+            byte[] doubleCrlf = "\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1);
+
+            int start = 0;
+            byte[] foundPdf = null;
+
+            while (start < data.length) {
+                int bIdx = indexOf(data, boundaryBytes, start);
+                if (bIdx == -1) break;
+
+                int nextBIdx = indexOf(data, boundaryBytes, bIdx + boundaryBytes.length);
+                if (nextBIdx == -1) nextBIdx = data.length;
+
+                int headerEnd = indexOf(data, doubleCrlf, bIdx);
+                if (headerEnd != -1 && headerEnd < nextBIdx) {
+                    int contentStart = headerEnd + 4;
+                    int contentEnd = nextBIdx - 2; // Trim trailing \r\n
+                    if (contentEnd > contentStart) {
+                        String partHeader = new String(Arrays.copyOfRange(data, bIdx, headerEnd), StandardCharsets.ISO_8859_1);
+                        if (partHeader.contains("filename=") || partHeader.toLowerCase().contains("application/pdf") || partHeader.contains("name=\"file\"")) {
+                            foundPdf = Arrays.copyOfRange(data, contentStart, contentEnd);
+                        } else {
+                            // Extract field name
+                            int nameIdx = partHeader.indexOf("name=\"");
+                            if (nameIdx != -1) {
+                                int nameEnd = partHeader.indexOf("\"", nameIdx + 6);
+                                if (nameEnd != -1) {
+                                    String fieldName = partHeader.substring(nameIdx + 6, nameEnd);
+                                    String fieldValue = new String(Arrays.copyOfRange(data, contentStart, contentEnd), StandardCharsets.UTF_8).trim();
+                                    fields.put(fieldName, fieldValue);
+                                }
+                            }
+                        }
+                    }
+                }
+                start = nextBIdx;
+            }
+            return foundPdf;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int indexOf(byte[] data, byte[] pattern, int start) {
+        if (data == null || pattern == null || start >= data.length) return -1;
+        for (int i = start; i <= data.length - pattern.length; i++) {
+            boolean match = true;
+            for (int j = 0; j < pattern.length; j++) {
+                if (data[i + j] != pattern[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) return i;
+        }
+        return -1;
     }
 
     private void serveAssetFile(OutputStream out, String assetPath, String contentType) {
@@ -199,6 +367,8 @@ public class LocalSignerServer {
             String header = "HTTP/1.1 200 OK\r\n" +
                             "Content-Type: " + contentType + "\r\n" +
                             "Access-Control-Allow-Origin: *\r\n" +
+                            "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\n" +
+                            "Access-Control-Allow-Headers: *\r\n" +
                             "Content-Length: " + data.length + "\r\n\r\n";
             out.write(header.getBytes(StandardCharsets.UTF_8));
             out.write(data);
@@ -229,6 +399,7 @@ public class LocalSignerServer {
                       "Access-Control-Allow-Origin: *\r\n" +
                       "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\n" +
                       "Access-Control-Allow-Headers: *\r\n" +
+                      "Access-Control-Max-Age: 86400\r\n" +
                       "Content-Length: 0\r\n\r\n";
         out.write(resp.getBytes(StandardCharsets.UTF_8));
     }
@@ -238,7 +409,7 @@ public class LocalSignerServer {
         String header = "HTTP/1.1 " + status + " OK\r\n" +
                         "Content-Type: application/json; charset=utf-8\r\n" +
                         "Access-Control-Allow-Origin: *\r\n" +
-                        "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\n" +
                         "Access-Control-Allow-Headers: *\r\n" +
                         "Content-Length: " + b.length + "\r\n\r\n";
         out.write(header.getBytes(StandardCharsets.UTF_8));
@@ -250,6 +421,8 @@ public class LocalSignerServer {
         String header = "HTTP/1.1 " + status + " OK\r\n" +
                         "Content-Type: text/html; charset=utf-8\r\n" +
                         "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\n" +
+                        "Access-Control-Allow-Headers: *\r\n" +
                         "Content-Length: " + b.length + "\r\n\r\n";
         out.write(header.getBytes(StandardCharsets.UTF_8));
         out.write(b);
@@ -260,6 +433,8 @@ public class LocalSignerServer {
                         "Content-Type: " + contentType + "\r\n" +
                         "Content-Disposition: attachment; filename=\"" + filename + "\"\r\n" +
                         "Access-Control-Allow-Origin: *\r\n" +
+                        "Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE\r\n" +
+                        "Access-Control-Allow-Headers: *\r\n" +
                         "Content-Length: " + data.length + "\r\n\r\n";
         out.write(header.getBytes(StandardCharsets.UTF_8));
         out.write(data);

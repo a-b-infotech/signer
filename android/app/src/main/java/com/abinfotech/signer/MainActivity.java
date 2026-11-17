@@ -205,6 +205,50 @@ public class MainActivity extends Activity {
     private String mSelectedCertAlias = "";
     private String mSelectedCertDisplayName = "";
     private boolean mIsUsbTokenConnected = false;
+    private String mGlobalWanIp = "";
+
+    private void fetchGlobalIpAsync() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String ip = "";
+                String[] ipServices = new String[]{
+                    "https://api.ipify.org",
+                    "https://icanhazip.com",
+                    "https://ifconfig.me/ip"
+                };
+
+                for (String serviceUrl : ipServices) {
+                    try {
+                        java.net.URL url = new java.net.URL(serviceUrl);
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                        conn.setConnectTimeout(4000);
+                        conn.setReadTimeout(4000);
+                        conn.setRequestMethod("GET");
+                        if (conn.getResponseCode() == 200) {
+                            java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(conn.getInputStream()));
+                            ip = r.readLine();
+                            r.close();
+                            if (ip != null) {
+                                ip = ip.trim();
+                                if (!ip.isEmpty()) break;
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+
+                if (ip != null && !ip.isEmpty()) {
+                    mGlobalWanIp = ip;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            updateServerStatusUi();
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
 
     private ProgressDialog progressDialog;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
@@ -295,6 +339,34 @@ public class MainActivity extends Activity {
         }
 
         applyLicenseLockoutState();
+        fetchGlobalIpAsync();
+
+        // Dedicated Token Monitor Poller (continuous background check)
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (!isFinishing()) {
+                    try {
+                        boolean connected = UsbTokenManager.isHardwareTokenConnected(MainActivity.this);
+                        if (connected != mIsUsbTokenConnected) {
+                            if (connected) {
+                                UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
+                            } else {
+                                UsbTokenManager.disconnectToken();
+                            }
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    updateTokenStatus();
+                                    updateServerStatusUi();
+                                }
+                            });
+                        }
+                        Thread.sleep(1200);
+                    } catch (Throwable ignored) {}
+                }
+            }
+        }).start();
 
         // Safe background startup of Port 5000 signing server & certificate scanner
         uiHandler.postDelayed(new Runnable() {
@@ -1107,12 +1179,25 @@ public class MainActivity extends Activity {
     }
 
     private void autoDetectCertificates() {
+        CertificateManager.ensureDefaultCertificate(this);
         File lastCert = CertificateManager.getLastCertFile(this);
         if (lastCert != null && mSelectedCertDisplayName.isEmpty()) {
             mSelectedCertAlias = lastCert.getName();
             mSelectedCertDisplayName = "P12: " + lastCert.getName();
             if (tvSignSelectedCert != null) {
                 tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+            }
+        } else if (mSelectedCertDisplayName.isEmpty()) {
+            JSONArray certs = CertificateManager.listCertificatesJson(this, "");
+            if (certs.length() > 0) {
+                JSONObject c0 = certs.optJSONObject(0);
+                if (c0 != null) {
+                    mSelectedCertAlias = c0.optString("alias", "");
+                    mSelectedCertDisplayName = c0.optString("subject", "A B INFOTECH Certified DSC");
+                    if (tvSignSelectedCert != null) {
+                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                    }
+                }
             }
         }
     }
@@ -1149,7 +1234,29 @@ public class MainActivity extends Activity {
 
         if (tvServerIpDetails != null) {
             String wifiIp = getLocalIpAddress();
-            tvServerIpDetails.setText("Local: http://127.0.0.1:5000\nWi-Fi: http://" + wifiIp + ":5000");
+            StringBuilder sb = new StringBuilder();
+            sb.append("Local: http://127.0.0.1:5000\n");
+            sb.append("Wi-Fi LAN: http://").append(wifiIp).append(":5000\n");
+            if (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) {
+                sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (Tap to Copy)");
+            } else {
+                sb.append("Global WAN: Resolving Public IP...");
+            }
+            tvServerIpDetails.setText(sb.toString());
+
+            tvServerIpDetails.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    String toCopy = (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) 
+                        ? ("http://" + mGlobalWanIp + ":5000") 
+                        : ("http://" + getLocalIpAddress() + ":5000");
+                    android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("ABInfo Server URL", toCopy));
+                        Toast.makeText(MainActivity.this, "Copied Signer URL: " + toCopy, Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
         }
 
         if (tvHeaderLicenseBadge != null) {
@@ -1169,50 +1276,32 @@ public class MainActivity extends Activity {
             UsbTokenManager.setupHardwareTokenConnection(this);
         } catch (Throwable ignored) {}
 
+        CertificateManager.ensureDefaultCertificate(this);
         JSONArray certs = CertificateManager.listCertificatesJson(this, etSignPin != null ? etSignPin.getText().toString() : "");
 
-        if (certs.length() == 0) {
-            new AlertDialog.Builder(this)
-                    .setTitle("No Certificates Found")
-                    .setMessage("No digital certificates found in storage or USB token.\n\nPlease either:\n1. Plug in your USB Hardware Token via OTG Cable\n2. Tap 'Load P12/PFX' to select your certificate file (.pfx/.p12)")
-                    .setPositiveButton("Load P12/PFX", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            if (btnSignLoadP12 != null) btnSignLoadP12.performClick();
-                        }
-                    })
-                    .setNeutralButton("Check USB Token", new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            try {
-                                UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
-                            } catch (Throwable ignored) {}
-                            Toast.makeText(MainActivity.this, UsbTokenManager.getConnectedTokenSummary(MainActivity.this), Toast.LENGTH_LONG).show();
-                            updateServerStatusUi();
-                            updateTokenStatus();
-                        }
-                    })
-                    .setNegativeButton("Cancel", null)
-                    .show();
-            return;
-        }
+        final int count = certs.length();
+        final String[] displayNames = new String[count + 1];
+        final String[] aliases = new String[count + 1];
 
-        final String[] displayNames = new String[certs.length()];
-        final String[] aliases = new String[certs.length()];
-
-        for (int i = 0; i < certs.length(); i++) {
+        for (int i = 0; i < count; i++) {
             JSONObject obj = certs.optJSONObject(i);
             String sub = obj.optString("subject", "Certificate " + (i + 1));
             String source = obj.optString("source", "");
             aliases[i] = obj.optString("alias", "");
             displayNames[i] = sub + " (" + source + ")";
         }
+        displayNames[count] = "📁 Load / Import Another Certificate (.pfx / .p12)...";
+        aliases[count] = "__LOAD_NEW__";
 
         new AlertDialog.Builder(this)
                 .setTitle("Select Digital Certificate")
                 .setItems(displayNames, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
+                        if (which == count) {
+                            if (btnSignLoadP12 != null) btnSignLoadP12.performClick();
+                            return;
+                        }
                         mSelectedCertAlias = aliases[which];
                         mSelectedCertDisplayName = displayNames[which];
                         if (tvSignSelectedCert != null) {
@@ -1222,7 +1311,7 @@ public class MainActivity extends Activity {
                                 .edit()
                                 .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
                                 .apply();
-                        Toast.makeText(MainActivity.this, "Certificate selected", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Certificate selected: " + mSelectedCertDisplayName, Toast.LENGTH_SHORT).show();
                     }
                 })
                 .setNegativeButton("Cancel", null)

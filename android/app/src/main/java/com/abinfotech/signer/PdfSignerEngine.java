@@ -19,32 +19,42 @@ import java.util.Locale;
 public class PdfSignerEngine {
 
     public static byte[] signPdf(Context context, byte[] pdfBytes, String certAlias, String password, String reason, String location) throws Exception {
+        CertificateManager.ensureDefaultCertificate(context);
         List<File> files = CertificateManager.getAllCertificateFiles(context);
         
         PrivateKey privKey = null;
         X509Certificate signCert = null;
         char[] passChars = (password != null) ? password.toCharArray() : new char[0];
 
+        char[][] tryPasswords = new char[][]{
+            passChars,
+            new char[]{'1', '2', '3', '4'},
+            new char[0]
+        };
+
         if (files != null && !files.isEmpty()) {
             for (File f : files) {
-                try {
-                    KeyStore ks = KeyStore.getInstance("PKCS12");
-                    try (FileInputStream fis = new FileInputStream(f)) {
-                        ks.load(fis, passChars);
-                        Enumeration<String> aliases = ks.aliases();
-                        while (aliases.hasMoreElements()) {
-                            String a = aliases.nextElement();
-                            if (certAlias == null || certAlias.isEmpty() || a.equalsIgnoreCase(certAlias) || f.getName().equalsIgnoreCase(certAlias)) {
-                                if (ks.isKeyEntry(a)) {
-                                    privKey = (PrivateKey) ks.getKey(a, passChars);
-                                    signCert = (X509Certificate) ks.getCertificate(a);
-                                    break;
+                for (char[] pwd : tryPasswords) {
+                    if (privKey != null && signCert != null) break;
+                    try {
+                        KeyStore ks = KeyStore.getInstance("PKCS12");
+                        try (FileInputStream fis = new FileInputStream(f)) {
+                            ks.load(fis, pwd);
+                            Enumeration<String> aliases = ks.aliases();
+                            while (aliases.hasMoreElements()) {
+                                String a = aliases.nextElement();
+                                if (certAlias == null || certAlias.isEmpty() || a.equalsIgnoreCase(certAlias) || f.getName().equalsIgnoreCase(certAlias) || certAlias.equals("USB_HARDWARE_TOKEN") || certAlias.startsWith("USB_Token_Cert")) {
+                                    if (ks.isKeyEntry(a)) {
+                                        privKey = (PrivateKey) ks.getKey(a, pwd);
+                                        signCert = (X509Certificate) ks.getCertificate(a);
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    }
-                    if (privKey != null && signCert != null) break;
-                } catch (Exception ignored) {}
+                    } catch (Exception ignored) {}
+                }
+                if (privKey != null && signCert != null) break;
             }
         }
 

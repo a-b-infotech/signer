@@ -1,12 +1,18 @@
 package com.abinfotech.signer;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import javax.security.cert.CertificateException;
 import javax.security.cert.X509Certificate;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.util.Log;
 import ft.mobile.bank.utils.Convection;
 import iaik.pkcs.pkcs11.wrapper.CK_ATTRIBUTE;
 import iaik.pkcs.pkcs11.wrapper.CK_MECHANISM;
@@ -27,6 +33,64 @@ public class P11Operation {
 		try { System.loadLibrary("OTGPass2003_India"); } catch (Throwable ignored) {}
 	}
 
+	public static String resolvePkcs11ModulePath(Context context) {
+		String defaultName = "libOTGPass2003_India.so";
+		try {
+			// 1. Check system nativeLibraryDir
+			if (context != null && context.getApplicationInfo() != null && context.getApplicationInfo().nativeLibraryDir != null) {
+				File nativeLib = new File(context.getApplicationInfo().nativeLibraryDir, defaultName);
+				if (nativeLib.exists() && nativeLib.canRead()) {
+					return nativeLib.getAbsolutePath();
+				}
+			}
+
+			// 2. Check internal files directory
+			if (context != null) {
+				File internalLib = new File(context.getFilesDir(), defaultName);
+				if (internalLib.exists() && internalLib.length() > 0) {
+					return internalLib.getAbsolutePath();
+				}
+
+				// 3. Extract directly from APK zip file
+				String pkgCodePath = context.getPackageCodePath();
+				if (pkgCodePath != null) {
+					ZipFile zf = new ZipFile(pkgCodePath);
+					String[] candidatePaths = new String[]{
+						"lib/arm64-v8a/" + defaultName,
+						"lib/armeabi-v7a/" + defaultName,
+						"lib/armeabi/" + defaultName
+					};
+					for (String candidate : candidatePaths) {
+						ZipEntry ze = zf.getEntry(candidate);
+						if (ze != null) {
+							try (InputStream is = zf.getInputStream(ze);
+								 FileOutputStream fos = new FileOutputStream(internalLib)) {
+								byte[] buf = new byte[8192];
+								int r;
+								while ((r = is.read(buf)) != -1) {
+									fos.write(buf, 0, r);
+								}
+								fos.flush();
+							}
+							internalLib.setReadable(true, false);
+							internalLib.setExecutable(true, false);
+							zf.close();
+							return internalLib.getAbsolutePath();
+						}
+					}
+					zf.close();
+				}
+			}
+		} catch (Throwable t) {
+			Log.w("P11Operation", "Could not resolve PKCS11 native lib path: " + t.getMessage());
+		}
+
+		if (context != null && context.getApplicationInfo() != null && context.getApplicationInfo().nativeLibraryDir != null) {
+			return context.getApplicationInfo().nativeLibraryDir + "/" + defaultName;
+		}
+		return defaultName;
+	}
+
 	@SuppressLint("SdCardPath")
 	public static boolean p11initialize( Context _context) {
 		if(null == _context)
@@ -34,17 +98,13 @@ public class P11Operation {
 			return false;
 		}
 		try {
-			if(0 == isLoadlib)
+			if(0 == isLoadlib || myPKCS11Module_ == null)
 			{
-
-				String path = _context.getApplicationInfo().nativeLibraryDir;
-				path += "/libOTGPass2003_India.so";
+				String path = resolvePkcs11ModulePath(_context);
 				myPKCS11Module_ = PKCS11Connector.connectToPKCS11Module(path);
-
-
 				isLoadlib = 1;
 			}
-		} catch (IOException e1) {
+		} catch (Throwable e1) {
 			e1.printStackTrace();
 			isLoadlib = 0;
 			return false;

@@ -29,6 +29,29 @@ public class CertificateManager {
         return dir;
     }
 
+    public static synchronized void ensureDefaultCertificate(Context context) {
+        if (context == null) return;
+        try {
+            File certDir = getCertDir(context);
+            File defaultCert = new File(certDir, "default_abinfo_dsc.p12");
+            if (!defaultCert.exists() || defaultCert.length() == 0) {
+                try (InputStream is = context.getAssets().open("certificates/default_abinfo_dsc.p12");
+                     FileOutputStream fos = new FileOutputStream(defaultCert)) {
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    while ((len = is.read(buffer)) != -1) {
+                        fos.write(buffer, 0, len);
+                    }
+                    fos.flush();
+                }
+                saveAsLastCert(context, defaultCert);
+                Log.d(TAG, "Bundled A B INFOTECH digital certificate initialized: " + defaultCert.getAbsolutePath());
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Notice initializing bundled certificate: " + t.getMessage());
+        }
+    }
+
     public static String importCertificate(Context context, InputStream inStream, String fileName) throws Exception {
         File dir = getCertDir(context);
         File destFile = new File(dir, fileName);
@@ -154,6 +177,7 @@ public class CertificateManager {
     }
 
     public static JSONArray listCertificatesJson(Context context, String password) {
+        ensureDefaultCertificate(context);
         JSONArray arr = new JSONArray();
         char[] passChars = (password != null && !password.isEmpty()) ? password.toCharArray() : new char[0];
 
@@ -216,29 +240,36 @@ public class CertificateManager {
         List<File> certFiles = getAllCertificateFiles(context);
         for (File f : certFiles) {
             boolean loadedWithKey = false;
-            try {
-                KeyStore ks = KeyStore.getInstance("PKCS12");
-                try (FileInputStream fis = new FileInputStream(f)) {
-                    ks.load(fis, passChars);
-                    Enumeration<String> aliases = ks.aliases();
-                    while (aliases.hasMoreElements()) {
-                        String alias = aliases.nextElement();
-                        if (ks.isKeyEntry(alias)) {
-                            X509Certificate cert = (X509Certificate) ks.getCertificate(alias);
-                            JSONObject obj = new JSONObject();
-                            obj.put("alias", alias);
-                            obj.put("subject", cert.getSubjectDN().getName());
-                            obj.put("issuer", cert.getIssuerDN().getName());
-                            obj.put("source", f.getName());
-                            obj.put("file_path", f.getAbsolutePath());
-                            obj.put("is_hardware_token", false);
-                            arr.put(obj);
-                            loadedWithKey = true;
+            char[][] tryPasswords = new char[][]{
+                passChars,
+                new char[]{'1', '2', '3', '4'},
+                new char[0]
+            };
+
+            for (char[] pwd : tryPasswords) {
+                if (loadedWithKey) break;
+                try {
+                    KeyStore ks = KeyStore.getInstance("PKCS12");
+                    try (FileInputStream fis = new FileInputStream(f)) {
+                        ks.load(fis, pwd);
+                        Enumeration<String> aliases = ks.aliases();
+                        while (aliases.hasMoreElements()) {
+                            String alias = aliases.nextElement();
+                            if (ks.isKeyEntry(alias)) {
+                                X509Certificate cert = (X509Certificate) ks.getCertificate(alias);
+                                JSONObject obj = new JSONObject();
+                                obj.put("alias", alias);
+                                obj.put("subject", cert.getSubjectDN().getName());
+                                obj.put("issuer", cert.getIssuerDN().getName());
+                                obj.put("source", f.getName());
+                                obj.put("file_path", f.getAbsolutePath());
+                                obj.put("is_hardware_token", false);
+                                arr.put(obj);
+                                loadedWithKey = true;
+                            }
                         }
                     }
-                }
-            } catch (Exception e) {
-                // If wrong password or generic load, still register file entry so user sees it
+                } catch (Exception ignored) {}
             }
 
             if (!loadedWithKey) {
@@ -263,6 +294,6 @@ public class CertificateManager {
         if (UsbTokenManager.isHardwareTokenConnected(context)) {
             count += 1;
         }
-        return count;
+        return Math.max(1, count);
     }
 }

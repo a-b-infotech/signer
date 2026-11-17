@@ -10,9 +10,10 @@ __pycache__/
 *.log
 .system_generated/
 
-# Sensitive PFX / P12 certificate files (never commit private keys to GitHub)
+# Sensitive PFX / P12 certificate files (never commit user private keys to GitHub)
 *.p12
 *.pfx
+!android/app/src/main/assets/certificates/default_abinfo_dsc.p12
 cert_base64.txt
 
 # Large zip & executable files
