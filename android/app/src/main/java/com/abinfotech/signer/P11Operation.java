@@ -34,11 +34,13 @@ public class P11Operation {
 	public static int isLoadlib = 0;
 	static{
 		try { System.loadLibrary("c++_shared"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("_atick"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("InnaITPKCS11"); } catch (Throwable ignored) {}
 		try { System.loadLibrary("OTGPass2003_India"); } catch (Throwable ignored) {}
 	}
 
-	public static String resolvePkcs11ModulePath(Context context) {
-		String defaultName = "libOTGPass2003_India.so";
+	public static String resolvePkcs11ModulePath(Context context, String moduleName) {
+		String defaultName = (moduleName != null && !moduleName.isEmpty()) ? moduleName : "libOTGPass2003_India.so";
 		try {
 			// 1. Check system nativeLibraryDir
 			if (context != null && context.getApplicationInfo() != null && context.getApplicationInfo().nativeLibraryDir != null) {
@@ -86,7 +88,7 @@ public class P11Operation {
 				}
 			}
 		} catch (Throwable t) {
-			Log.w("P11Operation", "Could not resolve PKCS11 native lib path: " + t.getMessage());
+			Log.w("P11Operation", "Could not resolve PKCS11 native lib path for " + defaultName + ": " + t.getMessage());
 		}
 
 		if (context != null && context.getApplicationInfo() != null && context.getApplicationInfo().nativeLibraryDir != null) {
@@ -95,35 +97,83 @@ public class P11Operation {
 		return defaultName;
 	}
 
+	public static String resolvePkcs11ModulePath(Context context) {
+		return resolvePkcs11ModulePath(context, null);
+	}
+
 	@SuppressLint("SdCardPath")
 	public static boolean p11initialize( Context _context) {
 		if(null == _context)
 		{
 			return false;
 		}
+
+		String[] candidateModules = new String[]{
+			"lib_atick.so",
+			"libOTGPass2003_India.so",
+			"libInnaITPKCS11.so"
+		};
+
+		CcidTokenDriver.DetectedToken dt = null;
 		try {
-			if(0 == isLoadlib || myPKCS11Module_ == null)
-			{
-				String path = resolvePkcs11ModulePath(_context);
+			dt = CcidTokenDriver.scanForToken(_context);
+		} catch (Throwable ignored) {}
+
+		if (dt != null && dt.name != null) {
+			if (dt.name.contains("mToken") || dt.name.contains("Watchdata") || dt.name.contains("ProxKey")) {
+				candidateModules = new String[]{"lib_atick.so", "libOTGPass2003_India.so", "libInnaITPKCS11.so"};
+			} else if (dt.name.contains("InnaIT")) {
+				candidateModules = new String[]{"libInnaITPKCS11.so", "lib_atick.so", "libOTGPass2003_India.so"};
+			} else {
+				candidateModules = new String[]{"libOTGPass2003_India.so", "lib_atick.so", "libInnaITPKCS11.so"};
+			}
+		}
+
+		for (String mod : candidateModules) {
+			try {
+				disconnect();
+				String path = resolvePkcs11ModulePath(_context, mod);
 				myPKCS11Module_ = PKCS11Connector.connectToPKCS11Module(path);
 				isLoadlib = 1;
+
+				try {
+					myPKCS11Module_.C_Initialize(null);
+				} catch (PKCS11Exception e) {
+					if (e.getErrorCode() != PKCS11Constants.CKR_CRYPTOKI_ALREADY_INITIALIZED) {
+						continue;
+					}
+				}
+
+				// Check if slot list is non-empty
+				try {
+					long[] slotIDs = myPKCS11Module_.C_GetSlotList(true);
+					if (slotIDs != null && slotIDs.length > 0) {
+						token_ = slotIDs[0];
+						return true;
+					}
+				} catch (Throwable ignored) {}
+			} catch (Throwable ignored) {
 			}
-		} catch (Throwable e1) {
-			e1.printStackTrace();
+		}
+
+		// Fallback to default
+		try {
+			disconnect();
+			String path = resolvePkcs11ModulePath(_context, "libOTGPass2003_India.so");
+			myPKCS11Module_ = PKCS11Connector.connectToPKCS11Module(path);
+			isLoadlib = 1;
+			try {
+				myPKCS11Module_.C_Initialize(null);
+			} catch (PKCS11Exception e) {
+				if (e.getErrorCode() != PKCS11Constants.CKR_CRYPTOKI_ALREADY_INITIALIZED) {
+					return false;
+				}
+			}
+			return true;
+		} catch (Throwable e) {
 			isLoadlib = 0;
 			return false;
 		}
-
-		try {
-			myPKCS11Module_.C_Initialize(null);
-		} catch (PKCS11Exception e) {
-			if (e.getErrorCode() != PKCS11Constants.CKR_CRYPTOKI_ALREADY_INITIALIZED) {
-				e.printStackTrace();
-				return false;
-			}
-		}
-
-		return true;
 	}
 
 	public static synchronized void resetSession() {
@@ -1081,27 +1131,43 @@ public class P11Operation {
 
 	public static X509Certificate[] getAllX509Certificate() throws PKCS11Exception, CertificateException
 	{
-		CK_ATTRIBUTE[] findCertAttrList = new CK_ATTRIBUTE[3];
-		findCertAttrList[0] = new CK_ATTRIBUTE();
-		findCertAttrList[0].type = PKCS11Constants.CKA_CLASS;
-		findCertAttrList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
-		findCertAttrList[1] = new CK_ATTRIBUTE();
-		findCertAttrList[1].type = PKCS11Constants.CKA_TOKEN;
-		findCertAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
-		findCertAttrList[2] = new CK_ATTRIBUTE();
-		findCertAttrList[2].type = PKCS11Constants.CKA_PRIVATE;
-		findCertAttrList[2].pValue = new Boolean(PKCS11Constants.FALSE);
 		long certHandle[] = null;
 		long MaxObjectCount = 64;
 
+		// 1. Search for all token certificates without CKA_PRIVATE restriction
 		try
 		{
+			CK_ATTRIBUTE[] findCertAttrList = new CK_ATTRIBUTE[2];
+			findCertAttrList[0] = new CK_ATTRIBUTE();
+			findCertAttrList[0].type = PKCS11Constants.CKA_CLASS;
+			findCertAttrList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
+			findCertAttrList[1] = new CK_ATTRIBUTE();
+			findCertAttrList[1].type = PKCS11Constants.CKA_TOKEN;
+			findCertAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
+
 			myPKCS11Module_.C_FindObjectsInit(session_, findCertAttrList);
 			certHandle = myPKCS11Module_.C_FindObjects(session_, MaxObjectCount);
 			myPKCS11Module_.C_FindObjectsFinal(session_);
 		}
-		catch(PKCS11Exception e){
-			throw e;
+		catch(Throwable t){
+			try {
+				CK_ATTRIBUTE[] fallbackList = new CK_ATTRIBUTE[3];
+				fallbackList[0] = new CK_ATTRIBUTE();
+				fallbackList[0].type = PKCS11Constants.CKA_CLASS;
+				fallbackList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
+				fallbackList[1] = new CK_ATTRIBUTE();
+				fallbackList[1].type = PKCS11Constants.CKA_TOKEN;
+				fallbackList[1].pValue = new Boolean(PKCS11Constants.TRUE);
+				fallbackList[2] = new CK_ATTRIBUTE();
+				fallbackList[2].type = PKCS11Constants.CKA_PRIVATE;
+				fallbackList[2].pValue = new Boolean(PKCS11Constants.FALSE);
+
+				myPKCS11Module_.C_FindObjectsInit(session_, fallbackList);
+				certHandle = myPKCS11Module_.C_FindObjects(session_, MaxObjectCount);
+				myPKCS11Module_.C_FindObjectsFinal(session_);
+			} catch(PKCS11Exception e) {
+				throw e;
+			}
 		}
 
 		if(null == certHandle || certHandle.length == 0)

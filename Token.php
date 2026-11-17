@@ -1683,7 +1683,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (certSelect && isRefresh) certSelect.innerHTML = '<option value="">-- Refreshing Certificates... --</option>';
 
         try {
-            const url = `${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${isRefresh ? '&refresh=1' : ''}&_t=${Date.now()}`;
+            const pinVal = document.getElementById('tokenPinInput') ? document.getElementById('tokenPinInput').value.trim() : '';
+            const pinParam = pinVal ? `&pin=${encodeURIComponent(pinVal)}` : '';
+            const url = `${LOCAL_SERVER}/api/certificates?driver_name=${encodeURIComponent(driver.value)}${isRefresh ? '&refresh=1' : ''}${pinParam}&_t=${Date.now()}`;
             const response = await fetch(url);
             const certs = await response.json();
             if (!certSelect) return;
@@ -1692,14 +1694,27 @@ document.addEventListener('DOMContentLoaded', function() {
             certs.forEach(cert => {
                 const opt = document.createElement('option');
                 opt.value = cert.alias;
-                let displayName = cert.subject;
-                const match = cert.subject.match(/CN=([^,]+)/);
-                if (match) displayName = match[1];
-                opt.textContent = `${displayName} (${cert.source})`;
+                let displayName = cert.subject || 'Client Certificate';
+                const match = displayName.match(/CN=([^,]+)/i);
+                if (match) displayName = match[1].trim();
+                
+                if (cert.source && !cert.is_placeholder && !cert.source.includes("Enter PIN")) {
+                    opt.textContent = `${displayName} (${cert.source})`;
+                } else {
+                    opt.textContent = displayName;
+                }
                 certSelect.appendChild(opt);
             });
-            if (certs.length === 1 && certSelect.options.length > 1) {
-                certSelect.selectedIndex = 1;
+            if (certs.length >= 1 && certSelect.options.length > 1) {
+                // Auto-select first real cert if available
+                let selectIdx = 1;
+                for (let i = 0; i < certs.length; i++) {
+                    if (!certs[i].is_placeholder) {
+                        selectIdx = i + 1;
+                        break;
+                    }
+                }
+                certSelect.selectedIndex = selectIdx;
             }
         } catch (e) {
             if (certSelect && isRefresh) certSelect.innerHTML = '<option value="">-- No Certificates Found --</option>';
@@ -1752,6 +1767,18 @@ document.addEventListener('DOMContentLoaded', function() {
         const pinInput = document.getElementById('tokenPinInput');
         if (pinInput) pinInput.type = (pinInput.type === 'password') ? 'text' : 'password';
     };
+
+    // Auto-refresh certificates when user enters PIN
+    const tokenPinEl = document.getElementById('tokenPinInput');
+    if (tokenPinEl) {
+        tokenPinEl.addEventListener('input', function() {
+            if (this.value.trim().length >= 4) {
+                if (typeof window.fetchCertificates === 'function') {
+                    window.fetchCertificates(false);
+                }
+            }
+        });
+    }
 
     const prevBtn = document.getElementById('prevPageBtn');
     if (prevBtn) {

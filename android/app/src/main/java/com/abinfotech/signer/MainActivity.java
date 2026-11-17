@@ -686,14 +686,48 @@ public class MainActivity extends Activity {
     }
 
     private void setupActionListeners() {
-        // PIN Save
+        // PIN Save & Auto Certificate Refresh
         if (etSignPin != null) {
             etSignPin.addTextChangedListener(new TextWatcher() {
                 @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                 @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_PIN, s.toString()).apply();
                 }
-                @Override public void afterTextChanged(Editable s) {}
+                @Override public void afterTextChanged(Editable s) {
+                    final String pin = s != null ? s.toString().trim() : "";
+                    if (pin.length() >= 4 && UsbTokenManager.isHardwareTokenConnected(MainActivity.this)) {
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    final JSONArray certs = CertificateManager.listCertificatesJson(MainActivity.this, pin);
+                                    if (certs != null && certs.length() > 0) {
+                                        for (int i = 0; i < certs.length(); i++) {
+                                            JSONObject c = certs.optJSONObject(i);
+                                            if (c != null && !c.optBoolean("is_placeholder", false)) {
+                                                final String sub = c.optString("subject", "");
+                                                final String alias = c.optString("alias", "");
+                                                if (!sub.isEmpty()) {
+                                                    uiHandler.post(new Runnable() {
+                                                        @Override
+                                                        public void run() {
+                                                            mSelectedCertAlias = alias;
+                                                            mSelectedCertDisplayName = sub;
+                                                            if (tvSignSelectedCert != null) {
+                                                                tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                                                            }
+                                                        }
+                                                    });
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (Throwable ignored) {}
+                            }
+                        }).start();
+                    }
+                }
             });
         }
 
@@ -1220,9 +1254,27 @@ public class MainActivity extends Activity {
             tokenConnected = UsbTokenManager.isHardwareTokenConnected(this);
         } catch (Throwable ignored) {}
 
+        String currentPin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
+        if (currentPin.isEmpty()) {
+            currentPin = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_PIN, "");
+        }
+
         if (tokenConnected) {
-            JSONArray certs = CertificateManager.listCertificatesJson(this, etSignPin != null ? etSignPin.getText().toString() : "");
+            JSONArray certs = CertificateManager.listCertificatesJson(this, currentPin);
             if (certs.length() > 0) {
+                // First try to find a real client certificate (not placeholder)
+                for (int i = 0; i < certs.length(); i++) {
+                    JSONObject c = certs.optJSONObject(i);
+                    if (c != null && !c.optBoolean("is_placeholder", false)) {
+                        mSelectedCertAlias = c.optString("alias", "");
+                        mSelectedCertDisplayName = c.optString("subject", "USB Hardware Token");
+                        if (tvSignSelectedCert != null) {
+                            tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                        }
+                        return;
+                    }
+                }
+                // If only placeholder found, display friendly message
                 JSONObject c0 = certs.optJSONObject(0);
                 if (c0 != null) {
                     mSelectedCertAlias = c0.optString("alias", "");
@@ -1412,8 +1464,15 @@ public class MainActivity extends Activity {
             JSONObject obj = certs.optJSONObject(i);
             String sub = obj.optString("subject", "Certificate " + (i + 1));
             String source = obj.optString("source", "");
+            boolean isPlaceholder = obj.optBoolean("is_placeholder", false);
             aliases[i] = obj.optString("alias", "");
-            displayNames[i] = sub + " (" + source + ")";
+            if (isPlaceholder) {
+                displayNames[i] = sub;
+            } else if (source != null && !source.isEmpty() && !source.contains("Enter PIN")) {
+                displayNames[i] = sub + " (" + source + ")";
+            } else {
+                displayNames[i] = sub;
+            }
         }
         displayNames[count] = "📁 Load / Import Another Certificate (.pfx / .p12)...";
         aliases[count] = "__LOAD_NEW__";
@@ -1428,7 +1487,12 @@ public class MainActivity extends Activity {
                             return;
                         }
                         mSelectedCertAlias = aliases[which];
-                        mSelectedCertDisplayName = displayNames[which];
+                        JSONObject selectedObj = (which < count) ? certs.optJSONObject(which) : null;
+                        if (selectedObj != null && !selectedObj.optBoolean("is_placeholder", false)) {
+                            mSelectedCertDisplayName = selectedObj.optString("subject", displayNames[which]);
+                        } else {
+                            mSelectedCertDisplayName = displayNames[which];
+                        }
                         if (tvSignSelectedCert != null) {
                             tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
                         }
