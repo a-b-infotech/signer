@@ -8,10 +8,20 @@ session_start();
 date_default_timezone_set('Asia/Kolkata');
 
 // ====================================================================
-// DYNAMIC LOCAL SERVER IP CONFIGURATION (From Settings)
+// DYNAMIC LOCAL SERVER & GLOBAL WAN IP CONFIGURATION (From Settings / API)
 // ====================================================================
-$server_raw = isset($_COOKIE['abinfo_server_ip']) ? trim($_COOKIE['abinfo_server_ip']) : '127.0.0.1';
-if (empty($server_raw)) $server_raw = '127.0.0.1';
+$server_raw = '';
+if (isset($_REQUEST['server_ip']) && !empty(trim($_REQUEST['server_ip']))) {
+    $server_raw = trim($_REQUEST['server_ip']);
+    @setcookie('abinfo_server_ip', $server_raw, time() + 86400 * 365, '/');
+} elseif (isset($_REQUEST['global_ip']) && !empty(trim($_REQUEST['global_ip']))) {
+    $server_raw = trim($_REQUEST['global_ip']);
+    @setcookie('abinfo_server_ip', $server_raw, time() + 86400 * 365, '/');
+} elseif (isset($_COOKIE['abinfo_server_ip']) && !empty(trim($_COOKIE['abinfo_server_ip']))) {
+    $server_raw = trim($_COOKIE['abinfo_server_ip']);
+} else {
+    $server_raw = '127.0.0.1';
+}
 
 // Build properly formatted URL preserving custom ports, global IPs and protocols
 if (preg_match('#^https?://#i', $server_raw)) {
@@ -23,6 +33,74 @@ if (preg_match('#^https?://#i', $server_raw)) {
     } else {
         $LOCAL_API_BASE = "http://{$server_clean}:5000";
     }
+}
+
+// API action handlers for setting/getting Global IP & proxying calls to local server
+if (isset($_GET['action']) && $_GET['action'] === 'set_server_ip') {
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    $ip = trim($_REQUEST['server_ip'] ?? $_REQUEST['global_ip'] ?? '127.0.0.1');
+    @setcookie('abinfo_server_ip', $ip, time() + 86400 * 365, '/');
+    echo json_encode(['status' => 'success', 'server_ip' => $ip, 'local_api_base' => $LOCAL_API_BASE]);
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'get_server_ip') {
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    echo json_encode(['status' => 'success', 'server_ip' => $server_raw, 'local_api_base' => $LOCAL_API_BASE]);
+    exit;
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Headers: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit; }
+
+    $endpoint = isset($_GET['endpoint']) ? '/' . ltrim($_GET['endpoint'], '/') : '/api/health';
+    $targetUrl = $LOCAL_API_BASE . $endpoint;
+
+    $ch = curl_init($targetUrl);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        curl_setopt($ch, CURLOPT_POST, true);
+        $body = file_get_contents('php://input');
+        if (!empty($body)) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        } elseif (!empty($_POST)) {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($_POST));
+        }
+    }
+
+    $headers = [];
+    if (isset($_SERVER['CONTENT_TYPE'])) {
+        $headers[] = 'Content-Type: ' . $_SERVER['CONTENT_TYPE'];
+    }
+    if (!empty($headers)) {
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    }
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    curl_close($ch);
+
+    if ($response === false || $httpCode === 0) {
+        http_response_code(502);
+        header('Content-Type: application/json');
+        echo json_encode(['status' => 'error', 'message' => "Could not reach Signing Server at {$LOCAL_API_BASE} via Global IP. Please check port forwarding or network."]);
+        exit;
+    }
+
+    http_response_code($httpCode);
+    if ($contentType) header('Content-Type: ' . $contentType);
+    echo $response;
+    exit;
 }
 
 // ====================================================================
@@ -1666,7 +1744,7 @@ async function saveSettings() {
 
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 4000); // 4s timeout
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
             
             // Ping the provided IP / host / URL
             const res = await fetch(testUrl, { mode: 'cors', signal: controller.signal });
@@ -1675,21 +1753,29 @@ async function saveSettings() {
             if (!res.ok) {
                 throw new Error(`HTTP Error: ${res.status}`);
             }
-
-            // If reachable, save directly
-            localStorage.setItem('abinfo_server_ip', cleaned);
-            document.cookie = "abinfo_server_ip=" + encodeURIComponent(cleaned) + "; path=/; max-age=31536000";
-            
         } catch (err) {
-            // Still save user choice so they are never blocked from setting Global IP / Remote URLs
-            localStorage.setItem('abinfo_server_ip', cleaned);
-            document.cookie = "abinfo_server_ip=" + encodeURIComponent(cleaned) + "; path=/; max-age=31536000";
-            console.warn("Server ping notice for " + targetBase + ":", err);
+            // Test via backend proxy fallback for HTTPS / Global WAN IPs
+            try {
+                await fetch('Token.php?action=set_server_ip&server_ip=' + encodeURIComponent(cleaned));
+                const pRes = await fetch('Token.php?action=proxy_api&endpoint=/api/health');
+                if (!pRes.ok) throw new Error('Proxy check failed');
+            } catch (proxyErr) {
+                console.warn("Server ping notice for " + targetBase + ":", err);
+            }
         }
+
+        localStorage.setItem('abinfo_server_ip', cleaned);
+        document.cookie = "abinfo_server_ip=" + encodeURIComponent(cleaned) + "; path=/; max-age=31536000";
+        try {
+            fetch('Token.php?action=set_server_ip&server_ip=' + encodeURIComponent(cleaned));
+        } catch (e) {}
     } else {
         // Fallback to localhost if left blank
         localStorage.removeItem('abinfo_server_ip');
         document.cookie = "abinfo_server_ip=; path=/; max-age=0";
+        try {
+            fetch('Token.php?action=set_server_ip&server_ip=127.0.0.1');
+        } catch (e) {}
     }
     
     // Everything saved - close and refresh system
@@ -2391,12 +2477,24 @@ async function checkBackgroundServer() {
     const licenseTierText = document.getElementById('licenseTierText');
 
     try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-        // Call using dynamic URL generator
-        const res = await fetch(`${getLocalServerUrl()}/api/health`, { mode: 'cors', signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (res.ok) {
+        let res;
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 2000);
+            res = await fetch(`${getLocalServerUrl()}/api/health`, { mode: 'cors', signal: controller.signal });
+            clearTimeout(timeoutId);
+        } catch (directErr) {
+            // Direct call failed (e.g. Mixed Content, CORS, or WAN Global IP) - try proxy
+            try {
+                const proxyCtrl = new AbortController();
+                const pTimeout = setTimeout(() => proxyCtrl.abort(), 3500);
+                res = await fetch(`Token.php?action=proxy_api&endpoint=/api/health`, { signal: proxyCtrl.signal });
+                clearTimeout(pTimeout);
+            } catch (pErr) {
+                throw directErr;
+            }
+        }
+        if (res && res.ok) {
             document.getElementById('offline-overlay').style.display = 'none';
             const upOff = document.getElementById('uploadOfflineBanner');
             if (upOff) upOff.style.display = 'none';

@@ -134,8 +134,18 @@ public class UsbTokenManager {
             return false;
         }
 
+        // If connection is already open and valid for the same device, reuse it!
+        if (sActiveConnection != null && sConnectedDevice != null && sConnectedDevice.getDeviceId() == device.getDeviceId()
+                && sBulkInEndpoint != null && sBulkOutEndpoint != null) {
+            return true;
+        }
+
         // Permission already granted: open connection and claim interface
         try {
+            if (sActiveConnection != null) {
+                try { sActiveConnection.close(); } catch (Throwable ignored) {}
+                sActiveConnection = null;
+            }
             UsbDeviceConnection conn = manager.openDevice(device);
             if (conn == null) {
                 Log.e(TAG, "Could not open UsbDeviceConnection for device");
@@ -197,23 +207,25 @@ public class UsbTokenManager {
                 sBulkInEndpoint = bulkIn;
                 sBulkOutEndpoint = bulkOut;
 
-                // Wire endpoints into Feitian / HyperPKI SDK (MyApplication & JniCallBack)
-                try {
-                    com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
-                    if (myApp != null) {
-                        myApp.setUsbDeviceConnection(conn);
-                        myApp.setInUsbEndpoint(bulkIn);
-                        myApp.setOutUsbEndpoint(bulkOut);
-                        Log.d(TAG, "MyApplication endpoints successfully wired");
+                // Wire endpoints into Feitian / HyperPKI SDK ONLY if token is genuine Feitian
+                if (device.getVendorId() == CcidTokenDriver.VID_FEITIAN) {
+                    try {
+                        com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
+                        if (myApp != null) {
+                            myApp.setUsbDeviceConnection(conn);
+                            myApp.setInUsbEndpoint(bulkIn);
+                            myApp.setOutUsbEndpoint(bulkOut);
+                            Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token");
+                        }
+                        com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
+                        if (cb != null) {
+                            cb.setidVendor(device.getVendorId());
+                            cb.setidProduct(device.getProductId());
+                            Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "HyperPKI JniCallBack setup notice: " + t.getMessage());
                     }
-                    com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
-                    if (cb != null) {
-                        cb.setidVendor(device.getVendorId());
-                        cb.setidProduct(device.getProductId());
-                        Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
-                    }
-                } catch (Throwable t) {
-                    Log.w(TAG, "HyperPKI JniCallBack setup notice: " + t.getMessage());
                 }
 
                 return true;

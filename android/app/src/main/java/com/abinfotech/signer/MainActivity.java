@@ -996,6 +996,36 @@ public class MainActivity extends Activity {
             });
         }
 
+        // Auto-read client certificate when PIN is typed into etSignPin
+        if (etSignPin != null) {
+            etSignPin.addTextChangedListener(new android.text.TextWatcher() {
+                private Runnable readRunnable;
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+                @Override
+                public void afterTextChanged(final android.text.Editable s) {
+                    if (s == null) return;
+                    final String pin = s.toString().trim();
+                    if (pin.length() >= 4 && UsbTokenManager.isHardwareTokenConnected(MainActivity.this)) {
+                        if (readRunnable != null) {
+                            uiHandler.removeCallbacks(readRunnable);
+                        }
+                        readRunnable = new Runnable() {
+                            @Override
+                            public void run() {
+                                readHardwareTokenCertificatesWithPin(pin, false);
+                            }
+                        };
+                        uiHandler.postDelayed(readRunnable, 600);
+                    }
+                }
+            });
+        }
+
         // Find Certificates Dialog
         if (btnSignFindCerts != null) {
             btnSignFindCerts.setOnClickListener(new View.OnClickListener() {
@@ -1524,31 +1554,24 @@ public class MainActivity extends Activity {
             for (int i = 0; i < certs.length(); i++) {
                 JSONObject c = certs.optJSONObject(i);
                 if (c != null && !c.optBoolean("is_placeholder", false)) {
-                    mSelectedCertAlias = c.optString("alias", "");
-                    mSelectedCertDisplayName = c.optString("subject", "USB Hardware Token");
-                    if (tvSignSelectedCert != null) {
-                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
-                    }
-                    return;
-                }
-            }
-            JSONObject c0 = certs.optJSONObject(0);
-            if (c0 != null) {
-                mSelectedCertAlias = c0.optString("alias", "");
-                boolean isPlaceholder = c0.optBoolean("is_placeholder", false);
-                if (isPlaceholder) {
-                    mSelectedCertDisplayName = "";
-                    if (tvSignSelectedCert != null) {
-                        tvSignSelectedCert.setText("Enter PIN & Tap 'Find Certificates'");
-                    }
-                } else {
-                    mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
-                    if (tvSignSelectedCert != null) {
-                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                    String sub = c.optString("subject", "");
+                    if (!sub.isEmpty()) {
+                        mSelectedCertAlias = c.optString("alias", "");
+                        mSelectedCertDisplayName = sub;
+                        if (tvSignSelectedCert != null) {
+                            tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                        }
+                        return;
                     }
                 }
-                return;
             }
+            // Only placeholder available
+            mSelectedCertDisplayName = "";
+            mSelectedCertAlias = "";
+            if (tvSignSelectedCert != null) {
+                tvSignSelectedCert.setText("Enter PIN to Load Certificate");
+            }
+            return;
         }
 
         File lastCert = CertificateManager.getLastCertFile(MainActivity.this);
@@ -1562,12 +1585,15 @@ public class MainActivity extends Activity {
         }
 
         if (certs.length() > 0) {
-            JSONObject c0 = certs.optJSONObject(0);
-            if (c0 != null) {
-                mSelectedCertAlias = c0.optString("alias", "");
-                mSelectedCertDisplayName = c0.optString("subject", "A B INFOTECH Certified DSC");
-                if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+            for (int i = 0; i < certs.length(); i++) {
+                JSONObject c = certs.optJSONObject(i);
+                if (c != null && !c.optBoolean("is_placeholder", false)) {
+                    mSelectedCertAlias = c.optString("alias", "");
+                    mSelectedCertDisplayName = c.optString("subject", "Client Certificate");
+                    if (tvSignSelectedCert != null) {
+                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                    }
+                    return;
                 }
             }
         }
@@ -1711,7 +1737,7 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    UsbTokenManager.disconnectToken();
+                    UsbTokenManager.disconnectToken(MainActivity.this);
                     P11Operation.disconnect();
                     P11Operation.resetSession();
                     UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
@@ -1737,13 +1763,19 @@ public class MainActivity extends Activity {
     }
 
     private void showCertificateSelectionDialog() {
+        final String pin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
+        if (!pin.isEmpty() && UsbTokenManager.isHardwareTokenConnected(MainActivity.this)) {
+            // PIN is already entered in UI: immediately unlock token & load client certificate!
+            readHardwareTokenCertificatesWithPin(pin, true);
+            return;
+        }
+
         if (progressDialog != null) {
             progressDialog.setMessage("Scanning for digital certificates...");
             progressDialog.setCancelable(false);
             progressDialog.show();
         }
 
-        final String pin = etSignPin != null ? etSignPin.getText().toString().trim() : "";
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -1760,8 +1792,7 @@ public class MainActivity extends Activity {
                             try { progressDialog.dismiss(); } catch (Throwable ignored) {}
                         }
 
-                        // If only placeholder found (token locked), prompt for PIN immediately!
-                        boolean hasOnlyPlaceholder = false;
+                        // If token connected but no client certificate loaded, prompt for PIN immediately!
                         int realCertCount = 0;
                         if (certs != null) {
                             for (int i = 0; i < certs.length(); i++) {
@@ -1770,12 +1801,9 @@ public class MainActivity extends Activity {
                                     realCertCount++;
                                 }
                             }
-                            if (realCertCount == 0 && certs.length() > 0) {
-                                hasOnlyPlaceholder = true;
-                            }
                         }
 
-                        if (hasOnlyPlaceholder) {
+                        if (realCertCount == 0 && UsbTokenManager.isHardwareTokenConnected(MainActivity.this)) {
                             promptPinAndReadTokenCert();
                             return;
                         }
@@ -1790,42 +1818,52 @@ public class MainActivity extends Activity {
 
     private void showCertificateDialogWithList(final JSONArray certs) {
         final int count = (certs != null) ? certs.length() : 0;
-        final String[] displayNames = new String[count + 1];
-        final String[] aliases = new String[count + 1];
+        final List<String> displayNamesList = new ArrayList<>();
+        final List<String> aliasesList = new ArrayList<>();
+        final List<JSONObject> certObjectsList = new ArrayList<>();
 
         for (int i = 0; i < count; i++) {
             JSONObject obj = certs.optJSONObject(i);
+            if (obj == null) continue;
+            boolean isPlaceholder = obj.optBoolean("is_placeholder", false);
+            if (isPlaceholder) {
+                // Strictly skip all token/driver placeholders - only show real client certificates!
+                continue;
+            }
             String sub = obj.optString("subject", "Certificate " + (i + 1));
             String source = obj.optString("source", "");
-            boolean isPlaceholder = obj.optBoolean("is_placeholder", false);
-            aliases[i] = obj.optString("alias", "");
-            if (isPlaceholder) {
-                displayNames[i] = sub;
-            } else if (source != null && !source.isEmpty() && !source.contains("Enter PIN")) {
-                displayNames[i] = sub + " (" + source + ")";
-            } else {
-                displayNames[i] = sub;
+            String alias = obj.optString("alias", "");
+            String dispName = sub;
+            if (source != null && !source.isEmpty() && !source.contains("Enter PIN")) {
+                dispName = sub + " (" + source + ")";
             }
+            displayNamesList.add(dispName);
+            aliasesList.add(alias);
+            certObjectsList.add(obj);
         }
-        displayNames[count] = "📁 Load / Import Another Certificate (.pfx / .p12)...";
-        aliases[count] = "__LOAD_NEW__";
+
+        displayNamesList.add("📁 Load / Import Another Certificate (.pfx / .p12)...");
+        aliasesList.add("__LOAD_NEW__");
+
+        final String[] displayNames = displayNamesList.toArray(new String[0]);
+        final String[] aliases = aliasesList.toArray(new String[0]);
+        final int loadNewIdx = displayNamesList.size() - 1;
 
         new AlertDialog.Builder(this)
                 .setTitle("Select Digital Certificate")
                 .setItems(displayNames, new DialogInterface.OnClickListener() {
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
-                        if (which == count) {
+                        if (which == loadNewIdx) {
                             if (btnSignLoadP12 != null) btnSignLoadP12.performClick();
                             return;
                         }
-                        mSelectedCertAlias = aliases[which];
-                        JSONObject selectedObj = (which < count) ? certs.optJSONObject(which) : null;
+                        JSONObject selectedObj = (which < certObjectsList.size()) ? certObjectsList.get(which) : null;
                         if (selectedObj != null && selectedObj.optBoolean("is_placeholder", false)) {
-                            // User tapped on token placeholder (e.g. Enter PIN to view Certificate)!
                             promptPinAndReadTokenCert();
                             return;
                         }
+                        mSelectedCertAlias = aliases[which];
                         if (selectedObj != null) {
                             mSelectedCertDisplayName = selectedObj.optString("subject", displayNames[which]);
                         } else {
@@ -1848,7 +1886,7 @@ public class MainActivity extends Activity {
     private void promptPinAndReadTokenCert() {
         final String existingPin = (etSignPin != null) ? etSignPin.getText().toString().trim() : "";
         if (!existingPin.isEmpty()) {
-            readHardwareTokenCertificatesWithPin(existingPin);
+            readHardwareTokenCertificatesWithPin(existingPin, true);
             return;
         }
 
@@ -1873,7 +1911,7 @@ public class MainActivity extends Activity {
                         if (etSignPin != null) {
                             etSignPin.setText(pin);
                         }
-                        readHardwareTokenCertificatesWithPin(pin);
+                        readHardwareTokenCertificatesWithPin(pin, true);
                     }
                 })
                 .setNegativeButton("Cancel", null)
@@ -1881,7 +1919,11 @@ public class MainActivity extends Activity {
     }
 
     private void readHardwareTokenCertificatesWithPin(final String pin) {
-        if (progressDialog != null) {
+        readHardwareTokenCertificatesWithPin(pin, true);
+    }
+
+    private void readHardwareTokenCertificatesWithPin(final String pin, final boolean showDialogOnError) {
+        if (showDialogOnError && progressDialog != null) {
             progressDialog.setMessage("Logging into token & reading client certificate...");
             progressDialog.setCancelable(false);
             progressDialog.show();
@@ -1930,7 +1972,7 @@ public class MainActivity extends Activity {
                                 }
                             }
                         }
-                        if (!found) {
+                        if (!found && showDialogOnError) {
                             int realCount = 0;
                             if (certs != null) {
                                 for (int i = 0; i < certs.length(); i++) {

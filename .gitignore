@@ -29,6 +29,7 @@ android/build_output/
 android/**/build/
 android/.gradle/
 android/temp_reference_files/
+temp_reference_files/
 *.keystore
 
 # Local OS metadata

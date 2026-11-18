@@ -210,16 +210,14 @@ public class CertificateManager {
                 }
             }
 
-            // 4. Subject DN and CN CA string heuristics (Reject Root CA and Sub-CA)
+            // 4. Common Name (CN) and Subject CA string heuristics (Filter Root CA and Sub-CA strictly)
             String sub = cert.getSubjectDN() != null ? cert.getSubjectDN().getName().toLowerCase() : "";
             String cn = extractCommonName(sub).toLowerCase();
-            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca") || sub.contains("subca")
-                    || sub.contains("certifying authority") || sub.contains("certification authority")
-                    || sub.contains("cca india") || sub.contains("intermediate ca") || sub.contains("issuing ca")
-                    || sub.contains("trust provider ca") || sub.contains("trust provider")
-                    || sub.contains("national ca") || sub.contains("class 2 ca") || sub.contains("class 3 ca")
-                    || cn.contains("root") || cn.contains("sub ca") || cn.contains("sub-ca")
-                    || cn.contains("authority") || cn.contains("issuing") || cn.contains("intermediate")) {
+            if (cn.contains("sub ca") || cn.contains("sub-ca") || cn.contains("subca") || cn.contains("root ca")
+                    || cn.contains("certifying authority") || cn.contains("certification authority")
+                    || cn.contains("cca india") || cn.contains("intermediate ca") || cn.contains("issuing ca")
+                    || cn.endsWith(" ca") || cn.startsWith("ca ") || cn.equals("ca")
+                    || sub.contains("ou=certifying authority") || sub.contains("ou=sub-ca") || sub.contains("ou=root ca") || sub.contains("ou=issuing ca")) {
                 return false;
             }
 
@@ -242,13 +240,11 @@ public class CertificateManager {
 
             // 2. CA naming heuristics - rigorously filter ANY CA certificate
             String cn = extractCommonName(sub).toLowerCase();
-            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca") || sub.contains("subca")
-                    || sub.contains("certifying authority") || sub.contains("certification authority")
-                    || sub.contains("cca india") || sub.contains("intermediate ca") || sub.contains("issuing ca")
-                    || sub.contains("trust provider ca") || sub.contains("trust provider")
-                    || sub.contains("national ca") || sub.contains("class 2 ca") || sub.contains("class 3 ca")
-                    || cn.contains("root") || cn.contains("sub ca") || cn.contains("sub-ca")
-                    || cn.contains("authority") || cn.contains("issuing") || cn.contains("intermediate")) {
+            if (cn.contains("sub ca") || cn.contains("sub-ca") || cn.contains("subca") || cn.contains("root ca")
+                    || cn.contains("certifying authority") || cn.contains("certification authority")
+                    || cn.contains("cca india") || cn.contains("intermediate ca") || cn.contains("issuing ca")
+                    || cn.endsWith(" ca") || cn.startsWith("ca ") || cn.equals("ca")
+                    || sub.contains("ou=certifying authority") || sub.contains("ou=sub-ca") || sub.contains("ou=root ca") || sub.contains("ou=issuing ca")) {
                 return false;
             }
             return true;
@@ -307,56 +303,59 @@ public class CertificateManager {
                     // Permission is granted! Safely connect
                     boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
                     if (connOk) {
-                        // Method A: Native PKCS#11 driver (Feitian, mToken / Longmai, InnaIT, ProxKey)
-                        try {
-                            P11Operation.resetSession();
-                            boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
-                            if (initOk) {
-                                if (0 == P11Operation.getSlotInfo()) {
-                                    P11Operation.openSession();
-                                    if (!activePin.isEmpty()) {
-                                        try {
-                                            P11Operation.loginUser(activePin);
-                                        } catch (Throwable t) {
-                                            Log.w(TAG, "P11 login notice: " + t.getMessage());
-                                        }
-                                    }
-                                    javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
-                                    if (tokenCerts != null && tokenCerts.length > 0) {
-                                        for (int i = 0; i < tokenCerts.length; i++) {
-                                            javax.security.cert.X509Certificate tc = tokenCerts[i];
-                                            if (!isClientCert(tc)) {
-                                                // Skip Root CA / Sub CA
-                                                continue;
+                        // Method A: Native PKCS#11 driver - ONLY FOR FEITIAN (VID 0x096E)!
+                        // Do NOT call P11 for mToken, ProxKey, SafeNet as it stalls CCID USB endpoints.
+                        if (detected.vendorId == CcidTokenDriver.VID_FEITIAN) {
+                            try {
+                                P11Operation.resetSession();
+                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
+                                if (initOk) {
+                                    if (0 == P11Operation.getSlotInfo()) {
+                                        P11Operation.openSession();
+                                        if (!activePin.isEmpty()) {
+                                            try {
+                                                P11Operation.loginUser(activePin);
+                                            } catch (Throwable t) {
+                                                Log.w(TAG, "P11 login notice: " + t.getMessage());
                                             }
-                                            String subjectDn = tc.getSubjectDN().getName();
-                                            String clientName = extractCommonName(subjectDn);
-                                            String issuerName = extractCommonName(tc.getIssuerDN().getName());
-                                            JSONObject obj = new JSONObject();
-                                            obj.put("alias", "USB_Token_Cert_" + i);
-                                            obj.put("subject", clientName);
-                                            obj.put("issuer", issuerName);
-                                            obj.put("source", "USB Hardware Token");
-                                            obj.put("file_path", "PKCS11://token/cert/" + i);
-                                            obj.put("is_hardware_token", true);
-                                            arr.put(obj);
-                                            tokenCertsFound = true;
+                                        }
+                                        javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
+                                        if (tokenCerts != null && tokenCerts.length > 0) {
+                                            for (int i = 0; i < tokenCerts.length; i++) {
+                                                javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                                if (!isClientCert(tc)) {
+                                                    // Skip Root CA / Sub CA
+                                                    continue;
+                                                }
+                                                String subjectDn = tc.getSubjectDN().getName();
+                                                String clientName = extractCommonName(subjectDn);
+                                                String issuerName = extractCommonName(tc.getIssuerDN().getName());
+                                                JSONObject obj = new JSONObject();
+                                                obj.put("alias", "USB_Token_Cert_" + i);
+                                                obj.put("subject", clientName);
+                                                obj.put("issuer", issuerName);
+                                                obj.put("source", detected.name);
+                                                obj.put("file_path", "PKCS11://token/cert/" + i);
+                                                obj.put("is_hardware_token", true);
+                                                arr.put(obj);
+                                                tokenCertsFound = true;
 
-                                            if (context != null) {
-                                                try {
-                                                    context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
-                                                            .edit()
-                                                            .putString("last_token_client_name", clientName)
-                                                            .putString("last_token_issuer_name", issuerName)
-                                                            .apply();
-                                                } catch (Throwable ignored) {}
+                                                if (context != null) {
+                                                    try {
+                                                        context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
+                                                                .edit()
+                                                                .putString("last_token_client_name", clientName)
+                                                                .putString("last_token_issuer_name", issuerName)
+                                                                .apply();
+                                                    } catch (Throwable ignored) {}
+                                                }
                                             }
                                         }
                                     }
                                 }
+                            } catch (Throwable t) {
+                                Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
                             }
-                        } catch (Throwable t) {
-                            Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
                         }
 
                         // Method B: Direct USB CCID APDU reader (Universal for mToken, ProxKey, InnaIT, SafeNet)
@@ -370,8 +369,8 @@ public class CertificateManager {
                                             JSONObject obj = new JSONObject();
                                             obj.put("alias", "CCID_Token_Cert_" + i);
                                             obj.put("subject", ci.clientName.trim());
-                                            obj.put("issuer", (ci.issuerName != null && !ci.issuerName.trim().isEmpty()) ? ci.issuerName.trim() : "USB Hardware Token");
-                                            obj.put("source", "USB Hardware Token");
+                                            obj.put("issuer", (ci.issuerName != null && !ci.issuerName.trim().isEmpty()) ? ci.issuerName.trim() : detected.brand);
+                                            obj.put("source", detected.name);
                                             obj.put("file_path", "CCID://token/cert/" + i);
                                             obj.put("is_hardware_token", true);
                                             arr.put(obj);
@@ -382,7 +381,7 @@ public class CertificateManager {
                                                     context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
                                                             .edit()
                                                             .putString("last_token_client_name", ci.clientName.trim())
-                                                            .putString("last_token_issuer_name", ci.issuerName != null ? ci.issuerName.trim() : "USB Hardware Token")
+                                                            .putString("last_token_issuer_name", ci.issuerName != null ? ci.issuerName.trim() : detected.brand)
                                                             .apply();
                                                 } catch (Throwable ignored) {}
                                             }
