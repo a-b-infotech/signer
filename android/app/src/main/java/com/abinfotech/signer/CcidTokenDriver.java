@@ -18,7 +18,7 @@ import java.util.List;
 
 /**
  * Pure Java CCID (Chip Card Interface Device) USB OTG Driver
- * Directly communicates with USB Cryptographic Tokens (HYP2003, mToken, ProxKey, InnaIT)
+ * Directly communicates with USB Cryptographic Tokens (HYP2003, mToken, ProxKey, InnaIT, SafeNet)
  * across any Android device without requiring incompatible native C/C++ libraries.
  */
 public class CcidTokenDriver {
@@ -80,6 +80,7 @@ public class CcidTokenDriver {
     public static final int VID_SAFENET_2 = 0x08e6;
 
     public static DetectedToken scanForToken(Context context) {
+        if (context == null) return null;
         UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
         if (manager == null) return null;
 
@@ -158,73 +159,8 @@ public class CcidTokenDriver {
         return null;
     }
 
-    public static byte[] sendApduCommand(Context context, DetectedToken token, byte[] apdu) {
-        if (token == null || token.device == null) return null;
-        UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
-        if (manager == null || !manager.hasPermission(token.device)) return null;
-
-        UsbDeviceConnection conn = manager.openDevice(token.device);
-        if (conn == null) return null;
-
-        try {
-            UsbInterface ccidInterface = null;
-            UsbEndpoint outEndpoint = null;
-            UsbEndpoint inEndpoint = null;
-
-            for (int i = 0; i < token.device.getInterfaceCount(); i++) {
-                UsbInterface intf = token.device.getInterface(i);
-                for (int j = 0; j < intf.getEndpointCount(); j++) {
-                    UsbEndpoint ep = intf.getEndpoint(j);
-                    if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                        if (ep.getDirection() == UsbConstants.USB_DIR_OUT) outEndpoint = ep;
-                        if (ep.getDirection() == UsbConstants.USB_DIR_IN) inEndpoint = ep;
-                    }
-                }
-                if (outEndpoint != null && inEndpoint != null) {
-                    ccidInterface = intf;
-                    break;
-                }
-            }
-
-            if (ccidInterface != null) {
-                conn.claimInterface(ccidInterface, true);
-
-                // Optional power on to ensure card ready
-                byte[] pwrOn = new byte[]{0x62, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-                conn.bulkTransfer(outEndpoint, pwrOn, pwrOn.length, 1000);
-                byte[] atrBuf = new byte[512];
-                conn.bulkTransfer(inEndpoint, atrBuf, atrBuf.length, 1000);
-
-                // Build CCID PC_to_RDR_XfrBlock (0x6F) message
-                byte[] ccidMsg = new byte[10 + apdu.length];
-                ccidMsg[0] = 0x6F; // Message Type
-                int len = apdu.length;
-                ccidMsg[1] = (byte) (len & 0xFF);
-                ccidMsg[2] = (byte) ((len >> 8) & 0xFF);
-                ccidMsg[3] = (byte) ((len >> 16) & 0xFF);
-                ccidMsg[4] = (byte) ((len >> 24) & 0xFF);
-                ccidMsg[5] = 0x00; // Slot number
-                ccidMsg[6] = 0x01; // Sequence number
-                System.arraycopy(apdu, 0, ccidMsg, 10, apdu.length);
-
-                conn.bulkTransfer(outEndpoint, ccidMsg, ccidMsg.length, 3000);
-
-                byte[] respBuf = new byte[1024];
-                int read = conn.bulkTransfer(inEndpoint, respBuf, respBuf.length, 3000);
-                if (read > 10) {
-                    byte[] apduResp = new byte[read - 10];
-                    System.arraycopy(respBuf, 10, apduResp, 0, read - 10);
-                    return apduResp;
-                }
-            }
-        } catch (Exception ignored) {
-        } finally {
-            try { conn.close(); } catch (Throwable ignored) {}
-        }
-        return null;
-    }
-
     public static byte[] execCcidApdu(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, byte[] apdu, int seq) {
+        if (conn == null || outEp == null || inEp == null || apdu == null) return null;
         try {
             byte[] ccidMsg = new byte[10 + apdu.length];
             ccidMsg[0] = 0x6F; // PC_to_RDR_XfrBlock
@@ -235,18 +171,95 @@ public class CcidTokenDriver {
             ccidMsg[4] = (byte) ((len >> 24) & 0xFF);
             ccidMsg[5] = 0x00; // Slot 0
             ccidMsg[6] = (byte) (seq & 0xFF);
+            ccidMsg[7] = 0x00; // bBWI
+            ccidMsg[8] = 0x00; // wLevelParameter
+            ccidMsg[9] = 0x00;
             System.arraycopy(apdu, 0, ccidMsg, 10, apdu.length);
 
-            conn.bulkTransfer(outEp, ccidMsg, ccidMsg.length, 3000);
+            int sent = conn.bulkTransfer(outEp, ccidMsg, ccidMsg.length, 3000);
+            if (sent < 0) return null;
 
             byte[] respBuf = new byte[2048];
             int read = conn.bulkTransfer(inEp, respBuf, respBuf.length, 3000);
-            if (read > 10) {
+            if (read >= 10 && respBuf[0] == (byte) 0x80) { // RDR_to_PC_DataBlock
+                int dwLength = (respBuf[1] & 0xFF) | ((respBuf[2] & 0xFF) << 8) | ((respBuf[3] & 0xFF) << 16) | ((respBuf[4] & 0xFF) << 24);
+                if (dwLength > 0 && dwLength <= (read - 10)) {
+                    byte[] apduResp = new byte[dwLength];
+                    System.arraycopy(respBuf, 10, apduResp, 0, dwLength);
+
+                    // Check if card returned 61 xx (SW1 = 0x61: xx bytes available for GET RESPONSE)
+                    if (dwLength == 2 && (apduResp[0] & 0xFF) == 0x61) {
+                        int le = apduResp[1] & 0xFF;
+                        byte[] getRespApdu = new byte[]{0x00, (byte) 0xC0, 0x00, 0x00, (byte) (le == 0 ? 0x00 : le)};
+                        byte[] getRespData = execCcidApdu(conn, outEp, inEp, getRespApdu, seq + 1);
+                        if (getRespData != null && getRespData.length > 0) {
+                            return getRespData;
+                        }
+                    } else if (dwLength == 2 && (apduResp[0] & 0xFF) == 0x6C) {
+                        // SW1 = 0x6C: Wrong Le, retry with exact Le = SW2
+                        byte correctLe = apduResp[1];
+                        byte[] retryApdu = apdu.clone();
+                        retryApdu[retryApdu.length - 1] = correctLe;
+                        return execCcidApdu(conn, outEp, inEp, retryApdu, seq + 1);
+                    }
+
+                    return apduResp;
+                } else if (dwLength == 0) {
+                    return new byte[0];
+                }
+            } else if (read > 10) {
+                // Fallback for non-standard CCID frames
                 byte[] apduResp = new byte[read - 10];
                 System.arraycopy(respBuf, 10, apduResp, 0, read - 10);
                 return apduResp;
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            Log.w(TAG, "execCcidApdu notice: " + t.getMessage());
+        }
+        return null;
+    }
+
+    public static CcidCertInfo parseX509Der(byte[] rawData) {
+        if (rawData == null || rawData.length < 100) return null;
+        try {
+            // Find 0x30 0x82 start
+            int start = -1;
+            for (int i = 0; i < rawData.length - 4; i++) {
+                if ((rawData[i] & 0xFF) == 0x30 && (rawData[i + 1] & 0xFF) == 0x82) {
+                    start = i;
+                    break;
+                }
+            }
+            if (start < 0) return null;
+            int certLen = (((rawData[start + 2] & 0xFF) << 8) | (rawData[start + 3] & 0xFF)) + 4;
+            if (certLen <= 0 || certLen > rawData.length - start) {
+                certLen = rawData.length - start;
+            }
+
+            byte[] certBytes = new byte[certLen];
+            System.arraycopy(rawData, start, certBytes, 0, certLen);
+
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            X509Certificate x509 = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(certBytes));
+            if (x509 != null) {
+                // Rigorous client cert check (skips Root CA and Sub CA!)
+                if (!CertificateManager.isClientCertificate(x509)) {
+                    Log.d(TAG, "Skipping CA/chain certificate: " + x509.getSubjectDN());
+                    return null;
+                }
+                CcidCertInfo ci = new CcidCertInfo();
+                String sub = x509.getSubjectDN() != null ? x509.getSubjectDN().getName() : "";
+                String iss = x509.getIssuerDN() != null ? x509.getIssuerDN().getName() : "";
+                ci.clientName = CertificateManager.extractCommonName(sub);
+                ci.issuerName = CertificateManager.extractCommonName(iss);
+                ci.rawCertBytes = certBytes;
+                ci.x509Cert = x509;
+                Log.d(TAG, "✅ Client Certificate Found CN=" + ci.clientName + " Issuer=" + ci.issuerName);
+                return ci;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "parseX509Der notice: " + t.getMessage());
+        }
         return null;
     }
 
@@ -255,162 +268,204 @@ public class CcidTokenDriver {
         DetectedToken token = scanForToken(context);
         if (token == null || token.device == null) return results;
 
-        UsbManager manager = (UsbManager) context.getSystemService(Context.USB_SERVICE);
-        if (manager == null || !manager.hasPermission(token.device)) return results;
+        boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
+        if (!connOk) return results;
 
-        UsbDeviceConnection conn = manager.openDevice(token.device);
-        if (conn == null) return results;
+        UsbDeviceConnection conn = UsbTokenManager.getActiveConnection();
+        UsbEndpoint inEp = UsbTokenManager.getBulkInEndpoint();
+        UsbEndpoint outEp = UsbTokenManager.getBulkOutEndpoint();
+        if (conn == null || inEp == null || outEp == null) return results;
 
         try {
-            UsbInterface ccidIntf = null;
-            UsbEndpoint outEp = null;
-            UsbEndpoint inEp = null;
-
-            for (int i = 0; i < token.device.getInterfaceCount(); i++) {
-                UsbInterface intf = token.device.getInterface(i);
-                for (int j = 0; j < intf.getEndpointCount(); j++) {
-                    UsbEndpoint ep = intf.getEndpoint(j);
-                    if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                        if (ep.getDirection() == UsbConstants.USB_DIR_OUT) outEp = ep;
-                        if (ep.getDirection() == UsbConstants.USB_DIR_IN) inEp = ep;
-                    }
-                }
-                if (outEp != null && inEp != null) {
-                    ccidIntf = intf;
-                    break;
-                }
-            }
-
-            if (ccidIntf == null) return results;
-            conn.claimInterface(ccidIntf, true);
-
             // 1. Power On Card (CCID PC_to_RDR_IccPowerOn - 0x62)
             byte[] pwrOn = new byte[]{0x62, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-            conn.bulkTransfer(outEp, pwrOn, pwrOn.length, 3000);
-            byte[] atrBuf = new byte[1024];
-            conn.bulkTransfer(inEp, atrBuf, atrBuf.length, 3000);
+            conn.bulkTransfer(outEp, pwrOn, pwrOn.length, 1000);
+            byte[] atrBuf = new byte[512];
+            conn.bulkTransfer(inEp, atrBuf, atrBuf.length, 1000);
 
             int seq = 1;
 
-            // 2. If PIN provided, attempt VERIFY PIN APDUs
+            // 2. PIN verification if provided
             if (pin != null && !pin.trim().isEmpty()) {
                 try {
                     byte[] pinBytes = pin.trim().getBytes("UTF-8");
-                    byte[] verifyApdu = new byte[5 + pinBytes.length];
-                    verifyApdu[0] = 0x00;
-                    verifyApdu[1] = 0x20;
-                    verifyApdu[2] = 0x00;
-                    verifyApdu[3] = 0x00; // P2 = 0x00
-                    verifyApdu[4] = (byte) pinBytes.length;
-                    System.arraycopy(pinBytes, 0, verifyApdu, 5, pinBytes.length);
-                    execCcidApdu(conn, outEp, inEp, verifyApdu, seq++);
+                    // Standard ISO 7816 VERIFY
+                    byte[] v1 = new byte[5 + pinBytes.length];
+                    v1[0] = 0x00; v1[1] = 0x20; v1[2] = 0x00; v1[3] = 0x00; v1[4] = (byte) pinBytes.length;
+                    System.arraycopy(pinBytes, 0, v1, 5, pinBytes.length);
+                    execCcidApdu(conn, outEp, inEp, v1, seq++);
 
-                    verifyApdu[3] = 0x01; // P2 = 0x01
-                    execCcidApdu(conn, outEp, inEp, verifyApdu, seq++);
+                    v1[3] = 0x01; // P2 = 0x01
+                    execCcidApdu(conn, outEp, inEp, v1, seq++);
+
+                    // SKF VERIFY PIN (80 38 00 00 len PIN)
+                    byte[] v2 = new byte[5 + pinBytes.length];
+                    v2[0] = (byte) 0x80; v2[1] = 0x38; v2[2] = 0x00; v2[3] = 0x00; v2[4] = (byte) pinBytes.length;
+                    System.arraycopy(pinBytes, 0, v2, 5, pinBytes.length);
+                    execCcidApdu(conn, outEp, inEp, v2, seq++);
                 } catch (Throwable ignored) {}
             }
 
-            // 3. Select PKCS#15 Application / Master File
-            // AID: PKCS#15 A000000063504B43532D3135
-            byte[] selPkcs15 = new byte[]{
-                0x00, (byte)0xA4, 0x04, 0x00, 0x0C,
-                (byte)0xA0, 0x00, 0x00, 0x00, 0x63, 0x50, 0x4B, 0x43, 0x53, 0x2D, 0x31, 0x35
-            };
-            execCcidApdu(conn, outEp, inEp, selPkcs15, seq++);
+            // 3. SKF Protocol Strategy (for mToken / CryptoID and Chinese PKI tokens)
+            try {
+                // SKF_ENUM_APP: 80 22 00 00 00
+                byte[] enumAppResp = execCcidApdu(conn, outEp, inEp, new byte[]{(byte) 0x80, 0x22, 0x00, 0x00, 0x00}, seq++);
+                List<String> appNames = new ArrayList<>();
+                if (enumAppResp != null && enumAppResp.length > 2) {
+                    int start = 0;
+                    for (int i = 0; i < enumAppResp.length - 2; i++) {
+                        if (enumAppResp[i] == 0x00) {
+                            if (i > start) {
+                                String app = new String(enumAppResp, start, i - start, "UTF-8").trim();
+                                if (!app.isEmpty()) appNames.add(app);
+                            }
+                            start = i + 1;
+                        }
+                    }
+                }
+                if (appNames.isEmpty()) {
+                    appNames.add("ENTERPRISE");
+                    appNames.add("UserApp");
+                    appNames.add("mToken");
+                    appNames.add("Default");
+                }
 
-            // Or Select MF: 3F 00
-            byte[] selMf = new byte[]{0x00, (byte)0xA4, 0x00, 0x00, 0x02, 0x3F, 0x00};
-            execCcidApdu(conn, outEp, inEp, selMf, seq++);
+                for (String appName : appNames) {
+                    byte[] appBytes = appName.getBytes("UTF-8");
+                    byte[] openAppApdu = new byte[5 + appBytes.length];
+                    openAppApdu[0] = (byte) 0x80; openAppApdu[1] = 0x26; openAppApdu[2] = 0x00; openAppApdu[3] = 0x00;
+                    openAppApdu[4] = (byte) appBytes.length;
+                    System.arraycopy(appBytes, 0, openAppApdu, 5, appBytes.length);
+                    byte[] openAppResp = execCcidApdu(conn, outEp, inEp, openAppApdu, seq++);
+                    if (openAppResp == null || openAppResp.length < 2) continue;
 
-            // 4. Candidate Elementary Files (EF) for X.509 Certificates across tokens
-            int[] candidateEfs = new int[]{0x3401, 0x3411, 0x5015, 0x4545, 0xC001, 0x2F02, 0x3F01, 0x3402, 0x3403};
+                    // Enumerate containers: SKF_ENUM_CONT: 80 46 00 00 00
+                    byte[] enumContResp = execCcidApdu(conn, outEp, inEp, new byte[]{(byte) 0x80, 0x46, 0x00, 0x00, 0x00}, seq++);
+                    List<String> contNames = new ArrayList<>();
+                    if (enumContResp != null && enumContResp.length > 2) {
+                        int cstart = 0;
+                        for (int i = 0; i < enumContResp.length - 2; i++) {
+                            if (enumContResp[i] == 0x00) {
+                                if (i > cstart) {
+                                    String cont = new String(enumContResp, cstart, i - cstart, "UTF-8").trim();
+                                    if (!cont.isEmpty()) contNames.add(cont);
+                                }
+                                cstart = i + 1;
+                            }
+                        }
+                    }
+                    if (contNames.isEmpty()) {
+                        contNames.add("Container1");
+                        contNames.add("Container01");
+                        contNames.add("User1");
+                        contNames.add("SignCert");
+                        contNames.add("Default");
+                    }
 
-            for (int ef : candidateEfs) {
+                    for (String contName : contNames) {
+                        byte[] contBytes = contName.getBytes("UTF-8");
+                        byte[] openContApdu = new byte[5 + contBytes.length];
+                        openContApdu[0] = (byte) 0x80; openContApdu[1] = 0x42; openContApdu[2] = 0x00; openContApdu[3] = 0x00;
+                        openContApdu[4] = (byte) contBytes.length;
+                        System.arraycopy(contBytes, 0, openContApdu, 5, contBytes.length);
+                        execCcidApdu(conn, outEp, inEp, openContApdu, seq++);
+
+                        // Export Certificate: 80 48 00 00 00 (Sign cert) / 80 48 01 00 00 / 80 44 ...
+                        byte[][] expApdus = new byte[][]{
+                            new byte[]{(byte) 0x80, 0x48, 0x00, 0x00, 0x00},
+                            new byte[]{(byte) 0x80, 0x48, 0x01, 0x00, 0x00},
+                            new byte[]{(byte) 0x80, 0x44, 0x00, 0x00, 0x00},
+                            new byte[]{(byte) 0x80, 0x44, 0x01, 0x00, 0x00}
+                        };
+                        for (byte[] expApdu : expApdus) {
+                            byte[] certResp = execCcidApdu(conn, outEp, inEp, expApdu, seq++);
+                            if (certResp != null && certResp.length > 50) {
+                                CcidCertInfo certInfo = parseX509Der(certResp);
+                                if (certInfo != null) {
+                                    results.add(certInfo);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "SKF probe notice: " + t.getMessage());
+            }
+
+            // 4. ISO 7816-4 EF File Scanning Strategy (Universally works across all tokens)
+            if (results.isEmpty()) {
                 try {
-                    byte hi = (byte) ((ef >> 8) & 0xFF);
-                    byte lo = (byte) (ef & 0xFF);
+                    // Select Master File 3F00
+                    execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x00}, seq++);
 
-                    // SELECT FILE
-                    byte[] selFile = new byte[]{0x00, (byte)0xA4, 0x00, 0x00, 0x02, hi, lo};
-                    byte[] selResp = execCcidApdu(conn, outEp, inEp, selFile, seq++);
-                    if (selResp == null || selResp.length < 2) {
-                        selFile[2] = 0x02;
-                        selResp = execCcidApdu(conn, outEp, inEp, selFile, seq++);
-                    }
+                    // Candidate EFs across Indian & Global PKI USB tokens
+                    int[] candidateEfs = new int[]{
+                        0x0001, 0x0002, 0x0003, 0x0004, 0x7001, 0x7002, 0x7003,
+                        0x3401, 0x3402, 0x3403, 0x3411, 0x5015, 0x4545, 0xC001, 0x2F02, 0x3F01
+                    };
 
-                    // READ BINARY first chunk (offset 0, up to 256 bytes)
-                    byte[] readBin = new byte[]{0x00, (byte)0xB0, 0x00, 0x00, 0x00};
-                    byte[] binResp = execCcidApdu(conn, outEp, inEp, readBin, seq++);
+                    for (int ef : candidateEfs) {
+                        byte hi = (byte) ((ef >> 8) & 0xFF);
+                        byte lo = (byte) (ef & 0xFF);
 
-                    if (binResp != null && binResp.length > 10) {
-                        // Scan for ASN.1 DER sequence: 0x30 0x82
-                        int derStart = -1;
-                        for (int k = 0; k < binResp.length - 4; k++) {
-                            if ((binResp[k] & 0xFF) == 0x30 && (binResp[k + 1] & 0xFF) == 0x82) {
-                                derStart = k;
-                                break;
-                            }
+                        // Try SELECT FILE
+                        byte[] selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, hi, lo}, seq++);
+                        if (selResp == null || selResp.length < 2) {
+                            selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x02, 0x00, 0x02, hi, lo}, seq++);
+                        }
+                        if (selResp == null || selResp.length < 2) {
+                            selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x04, 0x02, hi, lo}, seq++);
                         }
 
-                        if (derStart >= 0) {
-                            int certLen = (((binResp[derStart + 2] & 0xFF) << 8) | (binResp[derStart + 3] & 0xFF)) + 4;
-                            if (certLen > 300 && certLen < 8192) {
-                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                                baos.write(binResp, derStart, binResp.length - derStart);
-
-                                int currentOffset = binResp.length - derStart;
-                                while (baos.size() < certLen && currentOffset < certLen + 256) {
-                                    byte offHi = (byte) ((currentOffset >> 8) & 0xFF);
-                                    byte offLo = (byte) (currentOffset & 0xFF);
-                                    int toRead = Math.min(256, certLen - baos.size());
-                                    byte[] chunkCmd = new byte[]{0x00, (byte)0xB0, offHi, offLo, (byte)(toRead == 256 ? 0x00 : toRead)};
-                                    byte[] chunkResp = execCcidApdu(conn, outEp, inEp, chunkCmd, seq++);
-                                    if (chunkResp == null || chunkResp.length <= 2) break;
-                                    int copyLen = chunkResp.length;
-                                    if (chunkResp.length >= 2 && (chunkResp[chunkResp.length - 2] & 0xFF) == 0x90 && (chunkResp[chunkResp.length - 1] & 0xFF) == 0x00) {
-                                        copyLen -= 2;
-                                    }
-                                    if (copyLen <= 0) break;
-                                    baos.write(chunkResp, 0, copyLen);
-                                    currentOffset += copyLen;
+                        // Read binary chunk (offset 0, up to 256 bytes)
+                        byte[] binResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xB0, 0x00, 0x00, 0x00}, seq++);
+                        if (binResp != null && binResp.length > 10) {
+                            int derStart = -1;
+                            for (int k = 0; k < binResp.length - 4; k++) {
+                                if ((binResp[k] & 0xFF) == 0x30 && (binResp[k + 1] & 0xFF) == 0x82) {
+                                    derStart = k;
+                                    break;
                                 }
+                            }
+                            if (derStart >= 0) {
+                                int certLen = (((binResp[derStart + 2] & 0xFF) << 8) | (binResp[derStart + 3] & 0xFF)) + 4;
+                                if (certLen > 250 && certLen < 8192) {
+                                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                    baos.write(binResp, derStart, binResp.length - derStart);
 
-                                byte[] fullCertBytes = baos.toByteArray();
-                                if (fullCertBytes.length >= certLen) {
-                                    try {
-                                        CertificateFactory cf = CertificateFactory.getInstance("X.509");
-                                        X509Certificate x509 = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(fullCertBytes));
-                                        if (x509 != null) {
-                                            String subDn = x509.getSubjectDN() != null ? x509.getSubjectDN().getName() : "";
-                                            String issDn = x509.getIssuerDN() != null ? x509.getIssuerDN().getName() : "";
-                                            String cn = CertificateManager.extractCommonName(subDn);
-                                            String issCn = CertificateManager.extractCommonName(issDn);
-
-                                            if (CertificateManager.isClientCertificate(x509)) {
-                                                CcidCertInfo info = new CcidCertInfo();
-                                                info.clientName = cn;
-                                                info.issuerName = issCn;
-                                                info.rawCertBytes = fullCertBytes;
-                                                info.x509Cert = x509;
-                                                results.add(info);
-                                            }
+                                    int curOffset = binResp.length - derStart;
+                                    while (baos.size() < certLen && curOffset < certLen + 256) {
+                                        byte offHi = (byte) ((curOffset >> 8) & 0xFF);
+                                        byte offLo = (byte) (curOffset & 0xFF);
+                                        int toRead = Math.min(256, certLen - baos.size());
+                                        byte[] chunkCmd = new byte[]{0x00, (byte) 0xB0, offHi, offLo, (byte) (toRead == 256 ? 0x00 : toRead)};
+                                        byte[] chunkResp = execCcidApdu(conn, outEp, inEp, chunkCmd, seq++);
+                                        if (chunkResp == null || chunkResp.length <= 2) break;
+                                        int copyLen = chunkResp.length;
+                                        if (chunkResp.length >= 2 && (chunkResp[chunkResp.length - 2] & 0xFF) == 0x90 && (chunkResp[chunkResp.length - 1] & 0xFF) == 0x00) {
+                                            copyLen -= 2;
                                         }
-                                    } catch (Throwable parseErr) {
-                                        Log.w(TAG, "DER parse notice: " + parseErr.getMessage());
+                                        if (copyLen <= 0) break;
+                                        baos.write(chunkResp, 0, copyLen);
+                                        curOffset += copyLen;
+                                    }
+
+                                    byte[] fullBytes = baos.toByteArray();
+                                    CcidCertInfo cinfo = parseX509Der(fullBytes);
+                                    if (cinfo != null) {
+                                        results.add(cinfo);
                                     }
                                 }
                             }
                         }
                     }
-                } catch (Throwable ignoredEf) {}
+                } catch (Throwable t) {
+                    Log.w(TAG, "EF scan notice: " + t.getMessage());
+                }
             }
         } catch (Throwable t) {
-            Log.w(TAG, "readCertificatesViaCcid notice: " + t.getMessage());
-        } finally {
-            try { conn.close(); } catch (Throwable ignored) {}
+            Log.e(TAG, "CCID cert read exception: " + t.getMessage(), t);
         }
-
         return results;
     }
 }
-

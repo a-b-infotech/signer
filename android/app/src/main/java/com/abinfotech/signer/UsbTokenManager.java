@@ -21,6 +21,9 @@ public class UsbTokenManager {
 
     private static UsbDevice sConnectedDevice = null;
     private static UsbDeviceConnection sActiveConnection = null;
+    private static UsbInterface sActiveInterface = null;
+    private static UsbEndpoint sBulkInEndpoint = null;
+    private static UsbEndpoint sBulkOutEndpoint = null;
 
     public static class TokenInfo {
         public String name;
@@ -62,6 +65,22 @@ public class UsbTokenManager {
 
     public static synchronized UsbDeviceConnection getActiveConnection() {
         return sActiveConnection;
+    }
+
+    public static synchronized UsbEndpoint getBulkInEndpoint() {
+        return sBulkInEndpoint;
+    }
+
+    public static synchronized UsbEndpoint getBulkOutEndpoint() {
+        return sBulkOutEndpoint;
+    }
+
+    public static synchronized UsbInterface getActiveInterface() {
+        return sActiveInterface;
+    }
+
+    public static synchronized UsbDevice getConnectedDevice() {
+        return sConnectedDevice;
     }
 
     public static String getConnectedTokenSummary(Context context) {
@@ -154,6 +173,9 @@ public class UsbTokenManager {
             if (targetIntf != null) {
                 boolean claimed = conn.claimInterface(targetIntf, true);
                 Log.d(TAG, "Claimed USB Interface " + targetIntf.getId() + ": " + claimed);
+                sActiveInterface = targetIntf;
+                sBulkInEndpoint = bulkIn;
+                sBulkOutEndpoint = bulkOut;
 
                 // Wire endpoints into Feitian / HyperPKI SDK (MyApplication & JniCallBack)
                 try {
@@ -185,11 +207,19 @@ public class UsbTokenManager {
 
     public static synchronized void disconnectToken() {
         if (sActiveConnection != null) {
+            if (sActiveInterface != null) {
+                try {
+                    sActiveConnection.releaseInterface(sActiveInterface);
+                } catch (Throwable ignored) {}
+                sActiveInterface = null;
+            }
             try {
                 sActiveConnection.close();
             } catch (Throwable ignored) {}
             sActiveConnection = null;
         }
+        sBulkInEndpoint = null;
+        sBulkOutEndpoint = null;
         sConnectedDevice = null;
         try {
             com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();

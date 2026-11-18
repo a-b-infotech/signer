@@ -1743,9 +1743,15 @@ public class MainActivity extends Activity {
 
                         // If only placeholder found (token locked), prompt for PIN immediately!
                         boolean hasOnlyPlaceholder = false;
-                        if (certs != null && certs.length() == 1) {
-                            JSONObject singleObj = certs.optJSONObject(0);
-                            if (singleObj != null && singleObj.optBoolean("is_placeholder", false)) {
+                        int realCertCount = 0;
+                        if (certs != null) {
+                            for (int i = 0; i < certs.length(); i++) {
+                                JSONObject o = certs.optJSONObject(i);
+                                if (o != null && !o.optBoolean("is_placeholder", false)) {
+                                    realCertCount++;
+                                }
+                            }
+                            if (realCertCount == 0 && certs.length() > 0) {
                                 hasOnlyPlaceholder = true;
                             }
                         }
@@ -1894,7 +1900,10 @@ public class MainActivity extends Activity {
                                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                                             .edit()
                                             .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
+                                            .putString("last_token_client_name", sub)
                                             .putString(PREF_PIN, pin)
+                                            .putString("user_pin", pin)
+                                            .putString("token_pin", pin)
                                             .apply();
                                     Toast.makeText(MainActivity.this, "✅ Certificate Loaded: " + sub, Toast.LENGTH_LONG).show();
                                     found = true;
