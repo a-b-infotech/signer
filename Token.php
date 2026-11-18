@@ -1446,9 +1446,14 @@ if (fileInput) {
             <select class="glass-input" id="driverDropdownWorkspace"></select>
 
             <!-- 2. Certificate Selection -->
-            <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:4px;">
-                2. Digital Certificate
-            </label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="font-size:0.78rem; color:#94a3b8; font-weight:700; margin-bottom:0;">
+                    2. Digital Certificate
+                </label>
+                <button type="button" onclick="if(window.fetchCertificates) window.fetchCertificates();" title="Refresh Certificates" style="background:none; border:none; color:#38bdf8; cursor:pointer; font-size:0.75rem; font-weight:600; padding:0; display:flex; align-items:center; gap:3px;">
+                    🔄 Refresh
+                </button>
+            </div>
             <select class="glass-input" name="certAlias" required>
                 <option value="">-- Choose Certificate --</option>
             </select>
@@ -1741,28 +1746,59 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (e) {}
     };
 
-    // Load Digital Certificates from Local Server
-    async function fetchCertificates() {
+    // Load Digital Certificates from Local Server (Client Certificates ONLY)
+    window.fetchCertificates = async function() {
         const driver = document.getElementById('driverDropdownWorkspace');
-        if (!driver) return;
+        const certSelect = document.querySelector('select[name="certAlias"]');
+        if (!certSelect) return;
+
+        const driverParam = driver ? encodeURIComponent(driver.value) : '';
+        const prevVal = certSelect.value;
         try {
-            const response = await fetch(`${getLocalServerUrl()}/api/certificates?driver_name=${encodeURIComponent(driver.value)}`);
+            const response = await fetch(`${getLocalServerUrl()}/api/certificates?driver_name=${driverParam}&refresh=1`);
             const certs = await response.json();
-            const certSelect = document.querySelector('select[name="certAlias"]');
-            if (!certSelect) return;
             
             certSelect.innerHTML = '<option value="">-- Choose Certificate --</option>';
-            certs.forEach(cert => {
-                const opt = document.createElement('option');
-                opt.value = cert.alias;
-                let displayName = cert.subject;
-                const match = cert.subject.match(/CN=([^,]+)/);
-                if (match) displayName = match[1];
-                opt.textContent = `${displayName} (${cert.source})`;
-                certSelect.appendChild(opt);
-            });
-        } catch (e) {}
-    }
+            let foundPrev = false;
+            let firstClientCert = null;
+
+            if (Array.isArray(certs)) {
+                certs.forEach(cert => {
+                    let displayName = cert.subject || '';
+                    const match = cert.subject ? cert.subject.match(/CN=([^,]+)/i) : null;
+                    if (match) displayName = match[1].trim();
+
+                    // Rigorously filter Root CA and Sub-CA certificates (display ONLY client certificates)
+                    const checkStr = (displayName + ' ' + (cert.issuer || '') + ' ' + (cert.subject || '')).toLowerCase();
+                    if (checkStr.includes('root ca') || checkStr.includes('sub ca') || checkStr.includes('sub-ca') ||
+                        checkStr.includes('subca') || checkStr.includes('certifying authority') ||
+                        checkStr.includes('certification authority') || checkStr.includes('cca india') ||
+                        checkStr.includes('intermediate') || checkStr.includes('issuing ca') ||
+                        checkStr.includes('class 2 ca') || checkStr.includes('class 3 ca') ||
+                        cert.is_placeholder === true) {
+                        return; // Exclude CA and placeholders from signable list
+                    }
+
+                    const opt = document.createElement('option');
+                    opt.value = cert.alias;
+                    opt.textContent = `${displayName} (${cert.source || 'USB Token'})`;
+                    if (prevVal && cert.alias === prevVal) {
+                        opt.selected = true;
+                        foundPrev = true;
+                    }
+                    if (!firstClientCert) firstClientCert = cert.alias;
+                    certSelect.appendChild(opt);
+                });
+            }
+
+            if (!foundPrev && firstClientCert && certSelect.options.length === 2) {
+                certSelect.value = firstClientCert;
+            }
+        } catch (e) {
+            console.warn("fetchCertificates notice:", e);
+        }
+    };
+    const fetchCertificates = window.fetchCertificates;
 
     // Render PDF Document
     pdfjsLib.getDocument('<?= str_replace('\\', '/', $_SESSION['pdfPath']) ?>').promise.then(pdf => {

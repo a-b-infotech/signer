@@ -112,7 +112,7 @@ public class UsbTokenManager {
         UsbDevice device = detected.device;
         if (sConnectedDevice != null && (!sConnectedDevice.getDeviceName().equals(device.getDeviceName()) || sConnectedDevice.getDeviceId() != device.getDeviceId())) {
             Log.d(TAG, "Different USB Token detected! Resetting previous token connection.");
-            disconnectToken();
+            disconnectToken(context);
             P11Operation.disconnect();
         }
         sConnectedDevice = device;
@@ -148,31 +148,51 @@ public class UsbTokenManager {
             UsbEndpoint bulkOut = null;
 
             int intfCount = device.getInterfaceCount();
-            for (int i = 0; i < intfCount; i++) {
-                UsbInterface intf = device.getInterface(i);
-                UsbEndpoint tempIn = null;
-                UsbEndpoint tempOut = null;
-                for (int j = 0; j < intf.getEndpointCount(); j++) {
-                    UsbEndpoint ep = intf.getEndpoint(j);
-                    if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                        if (ep.getDirection() == UsbConstants.USB_DIR_IN) {
-                            tempIn = ep;
-                        } else if (ep.getDirection() == UsbConstants.USB_DIR_OUT) {
-                            tempOut = ep;
+
+            // Pass 0: Strictly find CCID Smartcard interface (Class 11 / 0x0B) or Smartcard Vendor (Class 255)
+            // Pass 1: Fallback to any non-MassStorage interface
+            for (int pass = 0; pass < 2; pass++) {
+                for (int i = 0; i < intfCount; i++) {
+                    UsbInterface intf = device.getInterface(i);
+                    int intfClass = intf.getInterfaceClass();
+
+                    // CRITICAL: NEVER claim Mass Storage (Class 8 / Virtual CD-ROM installer)
+                    if (intfClass == UsbConstants.USB_CLASS_MASS_STORAGE || intfClass == 8) {
+                        continue;
+                    }
+
+                    if (pass == 0) {
+                        // Must be CCID (11 / USB_CLASS_CSCID) or Vendor-specific smartcard (255)
+                        if (intfClass != 11 && intfClass != UsbConstants.USB_CLASS_CSCID && intfClass != 255) {
+                            continue;
                         }
                     }
+
+                    UsbEndpoint tempIn = null;
+                    UsbEndpoint tempOut = null;
+                    for (int j = 0; j < intf.getEndpointCount(); j++) {
+                        UsbEndpoint ep = intf.getEndpoint(j);
+                        if (ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                            if (ep.getDirection() == UsbConstants.USB_DIR_IN) {
+                                tempIn = ep;
+                            } else if (ep.getDirection() == UsbConstants.USB_DIR_OUT) {
+                                tempOut = ep;
+                            }
+                        }
+                    }
+                    if (tempIn != null && tempOut != null) {
+                        targetIntf = intf;
+                        bulkIn = tempIn;
+                        bulkOut = tempOut;
+                        break;
+                    }
                 }
-                if (tempIn != null && tempOut != null) {
-                    targetIntf = intf;
-                    bulkIn = tempIn;
-                    bulkOut = tempOut;
-                    break;
-                }
+                if (targetIntf != null) break;
             }
 
             if (targetIntf != null) {
                 boolean claimed = conn.claimInterface(targetIntf, true);
-                Log.d(TAG, "Claimed USB Interface " + targetIntf.getId() + ": " + claimed);
+                Log.d(TAG, "Claimed USB Interface " + targetIntf.getId() + " (Class " + targetIntf.getInterfaceClass() + "): " + claimed);
                 sActiveInterface = targetIntf;
                 sBulkInEndpoint = bulkIn;
                 sBulkOutEndpoint = bulkOut;
@@ -203,6 +223,27 @@ public class UsbTokenManager {
         }
 
         return false;
+    }
+
+    public static synchronized void disconnectToken(Context context) {
+        disconnectToken();
+        if (context != null) {
+            try {
+                context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .remove("last_token_client_name")
+                        .remove("last_token_issuer_name")
+                        .remove("last_token_device_id")
+                        .remove("selected_cert_name")
+                        .apply();
+                context.getSharedPreferences("AbinfoPdfSignerPrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .remove("selected_cert_name")
+                        .remove("last_token_client_name")
+                        .remove("last_token_issuer_name")
+                        .apply();
+            } catch (Throwable ignored) {}
+        }
     }
 
     public static synchronized void disconnectToken() {

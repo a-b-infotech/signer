@@ -201,6 +201,7 @@ public class LocalSignerServer {
                     try {
                         P11Operation.disconnect();
                         P11Operation.resetSession();
+                        UsbTokenManager.disconnectToken(context);
                         UsbTokenManager.setupHardwareTokenConnection(context);
                     } catch (Throwable ignored) {}
                 }

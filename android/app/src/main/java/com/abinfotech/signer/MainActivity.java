@@ -212,7 +212,17 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() {
             @Override
             public void run() {
+                android.net.wifi.WifiManager.MulticastLock mLock = null;
                 try {
+                    try {
+                        android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                        if (wm != null) {
+                            mLock = wm.createMulticastLock("upnp_multicast_lock");
+                            mLock.setReferenceCounted(false);
+                            mLock.acquire();
+                        }
+                    } catch (Throwable ignored) {}
+
                     final String localIp = getLocalIpAddress();
                     if (localIp == null || localIp.isEmpty() || localIp.equals("127.0.0.1")) return;
 
@@ -224,7 +234,7 @@ public class MainActivity extends Activity {
                             + "ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\r\n";
 
                     java.net.DatagramSocket socket = new java.net.DatagramSocket();
-                    socket.setSoTimeout(2500);
+                    socket.setSoTimeout(3000);
                     byte[] sendData = ssdpQuery.getBytes(java.nio.charset.StandardCharsets.UTF_8);
                     java.net.DatagramPacket sendPacket = new java.net.DatagramPacket(sendData, sendData.length,
                             java.net.InetAddress.getByName("239.255.255.250"), 1900);
@@ -320,6 +330,12 @@ public class MainActivity extends Activity {
                     }
                 } catch (Throwable t) {
                     Log.w(TAG, "UPnP IGD notice: " + t.getMessage());
+                } finally {
+                    try {
+                        if (mLock != null && mLock.isHeld()) {
+                            mLock.release();
+                        }
+                    } catch (Throwable ignored) {}
                 }
             }
         }).start();
@@ -426,6 +442,13 @@ public class MainActivity extends Activity {
                 Toast.makeText(context, "USB Device Attached: Connecting...", Toast.LENGTH_SHORT).show();
                 mSelectedCertDisplayName = "";
                 mSelectedCertAlias = "";
+                try {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(PREF_SELECTED_CERT).remove("last_token_client_name").remove("last_token_issuer_name").apply();
+                    getSharedPreferences("AbinfoSignerPrefs", MODE_PRIVATE).edit().remove("last_token_client_name").remove("last_token_issuer_name").apply();
+                } catch (Throwable ignored) {}
+                if (tvSignSelectedCert != null) {
+                    tvSignSelectedCert.setText("Scanning Token... Enter PIN");
+                }
                 new Thread(new Runnable() {
                     @Override
                     public void run() {
@@ -442,10 +465,17 @@ public class MainActivity extends Activity {
                 }).start();
             } else if (UsbManager.ACTION_USB_DEVICE_DETACHED.equals(action)) {
                 Toast.makeText(context, "USB Token Detached", Toast.LENGTH_SHORT).show();
-                UsbTokenManager.disconnectToken();
+                UsbTokenManager.disconnectToken(context);
                 P11Operation.disconnect();
                 mSelectedCertDisplayName = "";
                 mSelectedCertAlias = "";
+                try {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(PREF_SELECTED_CERT).remove("last_token_client_name").remove("last_token_issuer_name").apply();
+                    getSharedPreferences("AbinfoSignerPrefs", MODE_PRIVATE).edit().remove("last_token_client_name").remove("last_token_issuer_name").apply();
+                } catch (Throwable ignored) {}
+                if (tvSignSelectedCert != null) {
+                    tvSignSelectedCert.setText("Connect USB Token & Enter PIN");
+                }
                 updateServerStatusUi();
                 updateTokenStatus();
                 autoDetectCertificatesAsync();
@@ -1502,25 +1532,14 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
-            // If only placeholder found, check if cached client name is available
-            String cachedClient = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", null);
-            if (cachedClient != null && !cachedClient.trim().isEmpty()) {
-                mSelectedCertAlias = "USB_HARDWARE_TOKEN";
-                mSelectedCertDisplayName = cachedClient.trim();
-                if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
-                }
-                return;
-            }
-
             JSONObject c0 = certs.optJSONObject(0);
             if (c0 != null) {
                 mSelectedCertAlias = c0.optString("alias", "");
                 boolean isPlaceholder = c0.optBoolean("is_placeholder", false);
                 if (isPlaceholder) {
-                    mSelectedCertDisplayName = "Click to Unlock Certificate (Enter PIN)";
+                    mSelectedCertDisplayName = "";
                     if (tvSignSelectedCert != null) {
-                        tvSignSelectedCert.setText(mSelectedCertDisplayName);
+                        tvSignSelectedCert.setText("Enter PIN & Tap 'Find Certificates'");
                     }
                 } else {
                     mSelectedCertDisplayName = c0.optString("subject", "USB Hardware Token");
@@ -1912,7 +1931,24 @@ public class MainActivity extends Activity {
                             }
                         }
                         if (!found) {
-                            showCertificateDialogWithList(certs);
+                            int realCount = 0;
+                            if (certs != null) {
+                                for (int i = 0; i < certs.length(); i++) {
+                                    JSONObject o = certs.optJSONObject(i);
+                                    if (o != null && !o.optBoolean("is_placeholder", false)) {
+                                        realCount++;
+                                    }
+                                }
+                            }
+                            if (realCount == 0) {
+                                new AlertDialog.Builder(MainActivity.this)
+                                        .setTitle("Certificate Not Found")
+                                        .setMessage("Could not read client digital certificate from USB token with PIN '" + pin + "'.\n\nPlease ensure:\n1. The USB Token PIN is entered correctly\n2. The token contains a valid DSC client certificate\n3. Tap 'Find Certificates' to retry")
+                                        .setPositiveButton("OK", null)
+                                        .show();
+                            } else {
+                                showCertificateDialogWithList(certs);
+                            }
                         }
                     }
                 });

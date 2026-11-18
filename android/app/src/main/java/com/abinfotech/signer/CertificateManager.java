@@ -199,6 +199,9 @@ public class CertificateManager {
             if (ku != null && ku.length > 5 && ku[5]) {
                 return false;
             }
+            if (ku != null && ku.length > 6 && ku[6]) {
+                return false;
+            }
 
             // 3. Self-signed check: Root CA has Subject == Issuer
             if (cert.getSubjectDN() != null && cert.getIssuerDN() != null) {
@@ -207,19 +210,22 @@ public class CertificateManager {
                 }
             }
 
-            // 4. Subject DN CA string heuristics
+            // 4. Subject DN and CN CA string heuristics (Reject Root CA and Sub-CA)
             String sub = cert.getSubjectDN() != null ? cert.getSubjectDN().getName().toLowerCase() : "";
-            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
-                    || sub.contains("certifying authority") || sub.contains("cca india")
-                    || sub.contains("intermediate ca") || sub.contains("issuing ca")
-                    || sub.contains("trust provider ca") || sub.contains("national ca")
-                    || sub.contains("class 2 ca") || sub.contains("class 3 ca")) {
+            String cn = extractCommonName(sub).toLowerCase();
+            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca") || sub.contains("subca")
+                    || sub.contains("certifying authority") || sub.contains("certification authority")
+                    || sub.contains("cca india") || sub.contains("intermediate ca") || sub.contains("issuing ca")
+                    || sub.contains("trust provider ca") || sub.contains("trust provider")
+                    || sub.contains("national ca") || sub.contains("class 2 ca") || sub.contains("class 3 ca")
+                    || cn.contains("root") || cn.contains("sub ca") || cn.contains("sub-ca")
+                    || cn.contains("authority") || cn.contains("issuing") || cn.contains("intermediate")) {
                 return false;
             }
 
             return true;
         } catch (Throwable t) {
-            return true;
+            return false;
         }
     }
 
@@ -235,16 +241,19 @@ public class CertificateManager {
             }
 
             // 2. CA naming heuristics - rigorously filter ANY CA certificate
-            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
-                    || sub.contains("certifying authority") || sub.contains("cca india")
-                    || sub.contains("intermediate ca") || sub.contains("issuing ca")
-                    || sub.contains("trust provider ca") || sub.contains("national ca")
-                    || sub.contains("class 2 ca") || sub.contains("class 3 ca")) {
+            String cn = extractCommonName(sub).toLowerCase();
+            if (sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca") || sub.contains("subca")
+                    || sub.contains("certifying authority") || sub.contains("certification authority")
+                    || sub.contains("cca india") || sub.contains("intermediate ca") || sub.contains("issuing ca")
+                    || sub.contains("trust provider ca") || sub.contains("trust provider")
+                    || sub.contains("national ca") || sub.contains("class 2 ca") || sub.contains("class 3 ca")
+                    || cn.contains("root") || cn.contains("sub ca") || cn.contains("sub-ca")
+                    || cn.contains("authority") || cn.contains("issuing") || cn.contains("intermediate")) {
                 return false;
             }
             return true;
         } catch (Throwable t) {
-            return true;
+            return false;
         }
     }
 
@@ -386,30 +395,7 @@ public class CertificateManager {
                         }
                     }
 
-                    // Method C: Cached client name from previous read
-                if (!tokenCertsFound && context != null) {
-                    String cachedClientName = null;
-                    String cachedIssuerName = null;
-                    try {
-                        android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
-                        cachedClientName = sp.getString("last_token_client_name", null);
-                        cachedIssuerName = sp.getString("last_token_issuer_name", null);
-                    } catch (Throwable ignored) {}
-
-                    if (cachedClientName != null && !cachedClientName.trim().isEmpty()) {
-                        JSONObject obj = new JSONObject();
-                        obj.put("alias", "USB_HARDWARE_TOKEN");
-                        obj.put("subject", cachedClientName.trim());
-                        obj.put("issuer", (cachedIssuerName != null && !cachedIssuerName.trim().isEmpty()) ? cachedIssuerName.trim() : "USB Hardware Token");
-                        obj.put("source", "USB Hardware Token");
-                        obj.put("file_path", "PKCS11://hardware/token");
-                        obj.put("is_hardware_token", true);
-                        arr.put(obj);
-                        tokenCertsFound = true;
-                    }
-                }
-
-                // Method D: Prompt for PIN if certificate cannot be read without PIN
+                // Prompt for PIN if certificate cannot be read without PIN
                 if (!tokenCertsFound) {
                     CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(context);
                     String tokenTitle = (dt != null && dt.name != null) ? dt.name : "USB Token";

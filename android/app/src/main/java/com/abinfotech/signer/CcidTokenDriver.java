@@ -183,9 +183,21 @@ public class CcidTokenDriver {
             int read = conn.bulkTransfer(inEp, respBuf, respBuf.length, 3000);
             if (read >= 10 && respBuf[0] == (byte) 0x80) { // RDR_to_PC_DataBlock
                 int dwLength = (respBuf[1] & 0xFF) | ((respBuf[2] & 0xFF) << 8) | ((respBuf[3] & 0xFF) << 16) | ((respBuf[4] & 0xFF) << 24);
-                if (dwLength > 0 && dwLength <= (read - 10)) {
+                if (dwLength > 0) {
                     byte[] apduResp = new byte[dwLength];
-                    System.arraycopy(respBuf, 10, apduResp, 0, dwLength);
+                    int firstChunk = Math.min(dwLength, Math.max(0, read - 10));
+                    if (firstChunk > 0) {
+                        System.arraycopy(respBuf, 10, apduResp, 0, firstChunk);
+                    }
+                    int received = firstChunk;
+                    // Multi-packet loop: read all remaining USB packets until dwLength bytes are received
+                    while (received < dwLength) {
+                        byte[] chunk = new byte[Math.min(2048, dwLength - received)];
+                        int r = conn.bulkTransfer(inEp, chunk, chunk.length, 3000);
+                        if (r <= 0) break;
+                        System.arraycopy(chunk, 0, apduResp, received, r);
+                        received += r;
+                    }
 
                     // Check if card returned 61 xx (SW1 = 0x61: xx bytes available for GET RESPONSE)
                     if (dwLength == 2 && (apduResp[0] & 0xFF) == 0x61) {
@@ -338,6 +350,31 @@ public class CcidTokenDriver {
                     System.arraycopy(appBytes, 0, openAppApdu, 5, appBytes.length);
                     byte[] openAppResp = execCcidApdu(conn, outEp, inEp, openAppApdu, seq++);
                     if (openAppResp == null || openAppResp.length < 2) continue;
+
+                    // Verify PIN inside the opened application
+                    if (pin != null && !pin.trim().isEmpty()) {
+                        try {
+                            byte[] pinBytes = pin.trim().getBytes("UTF-8");
+                            // SKF_VerifyPIN: 80 38 01 00 len PIN (User PIN)
+                            byte[] vPinUser = new byte[5 + pinBytes.length];
+                            vPinUser[0] = (byte) 0x80; vPinUser[1] = 0x38; vPinUser[2] = 0x01; vPinUser[3] = 0x00; vPinUser[4] = (byte) pinBytes.length;
+                            System.arraycopy(pinBytes, 0, vPinUser, 5, pinBytes.length);
+                            execCcidApdu(conn, outEp, inEp, vPinUser, seq++);
+
+                            // 80 38 00 00 len PIN
+                            vPinUser[2] = 0x00;
+                            execCcidApdu(conn, outEp, inEp, vPinUser, seq++);
+
+                            // ISO VERIFY: 00 20 00 81 len PIN / 00 20 00 01
+                            byte[] vIso = new byte[5 + pinBytes.length];
+                            vIso[0] = 0x00; vIso[1] = 0x20; vIso[2] = 0x00; vIso[3] = (byte) 0x81; vIso[4] = (byte) pinBytes.length;
+                            System.arraycopy(pinBytes, 0, vIso, 5, pinBytes.length);
+                            execCcidApdu(conn, outEp, inEp, vIso, seq++);
+
+                            vIso[3] = 0x01;
+                            execCcidApdu(conn, outEp, inEp, vIso, seq++);
+                        } catch (Throwable ignored) {}
+                    }
 
                     // Enumerate containers: SKF_ENUM_CONT: 80 46 00 00 00
                     byte[] enumContResp = execCcidApdu(conn, outEp, inEp, new byte[]{(byte) 0x80, 0x46, 0x00, 0x00, 0x00}, seq++);
