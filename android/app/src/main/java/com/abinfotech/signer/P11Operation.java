@@ -110,8 +110,7 @@ public class P11Operation {
 		// libOTGPass2003_India.so is the unified native PKCS#11 module & JNI bridge
 		// supporting Feitian (0x096e), Longmai mToken (0x055c, 0x338c), Watchdata ProxKey (0x24dc), SafeNet (0x04b9), and InnaIT (0x2617)
 		String[] candidateModules = new String[]{
-			"libOTGPass2003_India.so",
-			"libInnaITPKCS11.so"
+			"libOTGPass2003_India.so"
 		};
 
 		for (String mod : candidateModules) {

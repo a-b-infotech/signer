@@ -23,17 +23,20 @@ if (isset($_REQUEST['server_ip']) && !empty(trim($_REQUEST['server_ip']))) {
     $server_raw = '127.0.0.1';
 }
 
-// Build properly formatted URL preserving custom ports, global IPs and protocols
-if (preg_match('#^https?://#i', $server_raw)) {
-    $LOCAL_API_BASE = rtrim($server_raw, '/');
-} else {
-    $server_clean = rtrim($server_raw, '/');
-    if (strpos($server_clean, ':') !== false) {
-        $LOCAL_API_BASE = "http://{$server_clean}";
-    } else {
-        $LOCAL_API_BASE = "http://{$server_clean}:5000";
+// Helper to construct normalized base URL for local/remote/global IP
+function format_local_api_base($raw_ip) {
+    $raw_ip = trim($raw_ip ?: '127.0.0.1');
+    if (preg_match('#^https?://#i', $raw_ip)) {
+        return rtrim($raw_ip, '/');
     }
+    $clean = rtrim($raw_ip, '/');
+    if (strpos($clean, ':') !== false) {
+        return "http://{$clean}";
+    }
+    return "http://{$clean}:5000";
 }
+
+$LOCAL_API_BASE = format_local_api_base($server_raw);
 
 // API action handlers for setting/getting Global IP & proxying calls to local server
 if (isset($_GET['action']) && $_GET['action'] === 'set_server_ip') {
@@ -41,6 +44,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'set_server_ip') {
     header('Access-Control-Allow-Origin: *');
     $ip = trim($_REQUEST['server_ip'] ?? $_REQUEST['global_ip'] ?? '127.0.0.1');
     @setcookie('abinfo_server_ip', $ip, time() + 86400 * 365, '/');
+    $LOCAL_API_BASE = format_local_api_base($ip);
     echo json_encode(['status' => 'success', 'server_ip' => $ip, 'local_api_base' => $LOCAL_API_BASE]);
     exit;
 }
@@ -59,12 +63,20 @@ if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit; }
 
     $endpoint = isset($_GET['endpoint']) ? '/' . ltrim($_GET['endpoint'], '/') : '/api/health';
+    // Append any extra query parameters passed to proxy_api that belong to the target endpoint
+    $extraParams = $_GET;
+    unset($extraParams['action']);
+    unset($extraParams['endpoint']);
+    if (!empty($extraParams)) {
+        $sep = (strpos($endpoint, '?') === false) ? '?' : '&';
+        $endpoint .= $sep . http_build_query($extraParams);
+    }
     $targetUrl = $LOCAL_API_BASE . $endpoint;
 
     $ch = curl_init($targetUrl);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 8);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -1706,6 +1718,33 @@ function getLocalServerUrl() {
     return `http://${raw}:5000`;
 }
 
+// Resilient API caller supporting Localhost, Local Wi-Fi & WAN Global IP (Transparent Proxy Fallback)
+async function callSignerApi(endpoint, options = {}) {
+    const directUrl = `${getLocalServerUrl()}${endpoint}`;
+    try {
+        const controller = new AbortController();
+        const timeoutMs = options.timeout || 4000;
+        const tid = setTimeout(() => controller.abort(), timeoutMs);
+        const directOptions = Object.assign({}, options, { signal: controller.signal, mode: 'cors' });
+        delete directOptions.timeout;
+        const res = await fetch(directUrl, directOptions);
+        clearTimeout(tid);
+        if (res.ok) return res;
+    } catch (directErr) {
+        // Direct browser fetch failed (Mixed content HTTPS->HTTP, CORS, or WAN Global IP)
+    }
+
+    // Transparent Server-Side Proxy Fallback (Guaranteed to reach Global IP without browser mixed-content blocks)
+    try {
+        const proxyUrl = `Token.php?action=proxy_api&endpoint=${encodeURIComponent(endpoint)}`;
+        const proxyOptions = Object.assign({}, options);
+        delete proxyOptions.timeout;
+        return await fetch(proxyUrl, proxyOptions);
+    } catch (proxyErr) {
+        throw proxyErr;
+    }
+}
+
 // Settings Modal Logic
 function openSettingsModal() {
     let currentIp = localStorage.getItem('abinfo_server_ip') || '127.0.0.1';
@@ -1816,7 +1855,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Make loadDrivers global so saveSettings() can call it
     window.loadDrivers = async function() {
         try {
-            const response = await fetch(`${getLocalServerUrl()}/api/drivers`);
+            const response = await callSignerApi('/api/drivers');
             const drivers = await response.json();
             const select = document.getElementById('driverDropdownWorkspace');
             if (!select) return;
@@ -1841,7 +1880,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const driverParam = driver ? encodeURIComponent(driver.value) : '';
         const prevVal = certSelect.value;
         try {
-            const response = await fetch(`${getLocalServerUrl()}/api/certificates?driver_name=${driverParam}&refresh=1`);
+            const response = await callSignerApi(`/api/certificates?driver_name=${driverParam}&refresh=1`);
             const certs = await response.json();
             
             certSelect.innerHTML = '<option value="">-- Choose Certificate --</option>';
@@ -2256,8 +2295,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     formData.append('custom_logo', logoInput.files[0]);
                 }
 
-                // Call using dynamic URL generator
-                const response = await fetch(`${getLocalServerUrl()}/api/sign`, { method: 'POST', body: formData });
+                // Call using dynamic URL generator with WAN Global IP & WiFi fallback
+                const response = await callSignerApi('/api/sign', { method: 'POST', body: formData, timeout: 60000 });
 
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
@@ -2477,23 +2516,7 @@ async function checkBackgroundServer() {
     const licenseTierText = document.getElementById('licenseTierText');
 
     try {
-        let res;
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000);
-            res = await fetch(`${getLocalServerUrl()}/api/health`, { mode: 'cors', signal: controller.signal });
-            clearTimeout(timeoutId);
-        } catch (directErr) {
-            // Direct call failed (e.g. Mixed Content, CORS, or WAN Global IP) - try proxy
-            try {
-                const proxyCtrl = new AbortController();
-                const pTimeout = setTimeout(() => proxyCtrl.abort(), 3500);
-                res = await fetch(`Token.php?action=proxy_api&endpoint=/api/health`, { signal: proxyCtrl.signal });
-                clearTimeout(pTimeout);
-            } catch (pErr) {
-                throw directErr;
-            }
-        }
+        let res = await callSignerApi('/api/health', { timeout: 3500 });
         if (res && res.ok) {
             document.getElementById('offline-overlay').style.display = 'none';
             const upOff = document.getElementById('uploadOfflineBanner');
