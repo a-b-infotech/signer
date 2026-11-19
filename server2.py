@@ -1579,6 +1579,14 @@ def _pick_best_pkcs11_dll(candidates):
 
 
 def find_epass_driver_path():
+    if CURRENT_OS == 'Darwin':
+        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libcastle.dylib")
+        candidates = [local_mac, "/Library/EnterSafe/libcastle.dylib", "/usr/local/lib/libcastle.dylib"]
+        return _pick_best_pkcs11_dll(candidates)
+    elif CURRENT_OS == 'Linux':
+        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libcastle.so")
+        candidates = [local_lin, "/usr/lib/libcastle.so.1.0.0", "/usr/lib/libcastle.so", "/usr/local/lib/libcastle.so"]
+        return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
@@ -1648,6 +1656,14 @@ def find_epass_driver_path():
 
 
 def find_innait_driver_path():
+    if CURRENT_OS == 'Darwin':
+        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libinnait_pkcs11.dylib")
+        candidates = [local_mac, "/usr/local/lib/libinnait_pkcs11.dylib", "/Library/InnaIT/libinnait_pkcs11.dylib"]
+        return _pick_best_pkcs11_dll(candidates)
+    elif CURRENT_OS == 'Linux':
+        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libinnait_pkcs11.so")
+        candidates = [local_lin, "/usr/lib/libinnait_pkcs11.so", "/usr/local/lib/libinnait_pkcs11.so"]
+        return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
@@ -1715,6 +1731,14 @@ def find_innait_driver_path():
 
 
 def find_mtoken_driver_path():
+    if CURRENT_OS == 'Darwin':
+        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libcryptoid_pkcs11.dylib")
+        candidates = [local_mac, "/Library/mToken/libcryptoid_pkcs11.dylib", "/usr/local/lib/libcryptoid_pkcs11.dylib"]
+        return _pick_best_pkcs11_dll(candidates)
+    elif CURRENT_OS == 'Linux':
+        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libcryptoid_pkcs11.so")
+        candidates = [local_lin, "/usr/lib/libcryptoid_pkcs11.so", "/opt/CryptoID/x64/lib/libcryptoid_pkcs11.so"]
+        return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
@@ -1768,6 +1792,14 @@ def find_mtoken_driver_path():
 
 
 def find_proxkey_driver_path():
+    if CURRENT_OS == 'Darwin':
+        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libWD_PKCS11.dylib")
+        candidates = [local_mac, "/Library/ProxKey/libWD_PKCS11.dylib", "/usr/local/lib/libWD_PKCS11.dylib"]
+        return _pick_best_pkcs11_dll(candidates)
+    elif CURRENT_OS == 'Linux':
+        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libWatchdataPKCS11.so")
+        candidates = [local_lin, "/usr/lib/libWatchdataPKCS11.so", "/usr/lib/WatchData/ProxKey/lib/libWatchdataPKCS11.so"]
+        return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
@@ -1909,50 +1941,34 @@ def get_platform_drivers():
             
 
     elif CURRENT_OS == 'Darwin':
-        mac_bundled = os.path.join(APP_DIR, "drivers", "macos")
-        for drv_name, f_name in [
-            ("ePass2003 Token (macOS)", "libcastle.dylib"),
-            ("ProxKey India (macOS)", "libWD_PKCS11.dylib"),
-            ("mToken / CryptoID (macOS)", "libcryptoid_pkcs11.dylib"),
-            ("InnaIT Token (macOS)", "libinnait_pkcs11.dylib")
-        ]:
-            b_path = os.path.join(mac_bundled, f_name)
-            if os.path.exists(b_path):
-                drivers[drv_name] = b_path
+        epass = find_epass_driver_path() or "/Library/EnterSafe/libcastle.dylib"
+        proxkey = find_proxkey_driver_path() or "/Library/ProxKey/libWD_PKCS11.dylib"
+        mtoken = find_mtoken_driver_path() or "/Library/mToken/libcryptoid_pkcs11.dylib"
+        innait = find_innait_driver_path() or "/usr/local/lib/libinnait_pkcs11.dylib"
+        opensc = os.path.join(APP_DIR, "drivers", "macos", "opensc-pkcs11.so")
+        if not os.path.exists(opensc):
+            opensc = "/opt/homebrew/lib/opensc-pkcs11.so"
 
-        if "ePass2003 Token (macOS)" not in drivers:
-            drivers["ePass2003 Token (macOS)"] = "/Library/EnterSafe/libcastle.dylib"
-        if "ProxKey India (macOS)" not in drivers:
-            drivers["ProxKey India (macOS)"] = "/Library/ProxKey/libWD_PKCS11.dylib"
-        if "mToken / CryptoID (macOS)" not in drivers:
-            drivers["mToken / CryptoID (macOS)"] = "/Library/mToken/libcryptoid_pkcs11.dylib"
-        if "InnaIT Token (macOS)" not in drivers:
-            drivers["InnaIT Token (macOS)"] = "/usr/local/lib/libinnait_pkcs11.dylib"
-        drivers["OpenSC (macOS)"] = "/opt/homebrew/lib/opensc-pkcs11.so"
+        drivers["ePass2003 Token (macOS)"] = epass
+        drivers["ProxKey India (macOS)"] = proxkey
+        drivers["mToken / CryptoID (macOS)"] = mtoken
+        drivers["InnaIT Token (macOS)"] = innait
+        drivers["OpenSC (macOS)"] = opensc
 
     else:
-        linux_bundled = os.path.join(APP_DIR, "drivers", "linux")
-        for drv_name, f_name in [
-            ("ePass2003 Token (Linux)", "libcastle.so"),
-            ("ProxKey India (Linux)", "libWatchdataPKCS11.so"),
-            ("mToken / CryptoID (Linux)", "libcryptoid_pkcs11.so"),
-            ("InnaIT Token (Linux)", "libinnait_pkcs11.so"),
-            ("OpenSC (Linux)", "opensc-pkcs11.so")
-        ]:
-            b_path = os.path.join(linux_bundled, f_name)
-            if os.path.exists(b_path):
-                drivers[drv_name] = b_path
+        epass = find_epass_driver_path() or "/usr/lib/libcastle.so.1.0.0"
+        proxkey = find_proxkey_driver_path() or "/usr/lib/libWatchdataPKCS11.so"
+        mtoken = find_mtoken_driver_path() or "/usr/lib/libcryptoid_pkcs11.so"
+        innait = find_innait_driver_path() or "/usr/lib/libinnait_pkcs11.so"
+        opensc = os.path.join(APP_DIR, "drivers", "linux", "opensc-pkcs11.so")
+        if not os.path.exists(opensc):
+            opensc = "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"
 
-        if "ePass2003 Token (Linux)" not in drivers:
-            drivers["ePass2003 Token (Linux)"] = "/usr/lib/libcastle.so.1.0.0"
-        if "ProxKey India (Linux)" not in drivers:
-            drivers["ProxKey India (Linux)"] = "/usr/lib/libWatchdataPKCS11.so"
-        if "mToken / CryptoID (Linux)" not in drivers:
-            drivers["mToken / CryptoID (Linux)"] = "/usr/lib/libcryptoid_pkcs11.so"
-        if "InnaIT Token (Linux)" not in drivers:
-            drivers["InnaIT Token (Linux)"] = "/usr/lib/libinnait_pkcs11.so"
-        if "OpenSC (Linux)" not in drivers:
-            drivers["OpenSC (Linux)"] = "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"
+        drivers["ePass2003 Token (Linux)"] = epass
+        drivers["ProxKey India (Linux)"] = proxkey
+        drivers["mToken / CryptoID (Linux)"] = mtoken
+        drivers["InnaIT Token (Linux)"] = innait
+        drivers["OpenSC (Linux)"] = opensc
 
 
 
