@@ -302,6 +302,9 @@ public class CertificateManager {
                     if (cachedClient.isEmpty() || cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token")) {
                         cachedClient = "ABHISHEK BHARATKUMAR SHETH";
                     }
+                    if (cachedClient.contains("(")) {
+                        cachedClient = cachedClient.substring(0, cachedClient.indexOf("(")).trim();
+                    }
 
                     JSONObject obj = new JSONObject();
                     obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
@@ -429,6 +432,9 @@ public class CertificateManager {
                             }
                             if (cachedClient.isEmpty() || cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token") || cachedClient.contains("Select")) {
                                 cachedClient = "ABHISHEK BHARATKUMAR SHETH";
+                            }
+                            if (cachedClient.contains("(")) {
+                                cachedClient = cachedClient.substring(0, cachedClient.indexOf("(")).trim();
                             }
                             String clientName = cachedClient;
                             String issuerName = (!cachedIssuer.isEmpty()) ? cachedIssuer : detected.brand;

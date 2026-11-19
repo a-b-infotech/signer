@@ -1580,12 +1580,41 @@ def _pick_best_pkcs11_dll(candidates):
 
 def find_epass_driver_path():
     if CURRENT_OS == 'Darwin':
-        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libcastle.dylib")
-        candidates = [local_mac, "/Library/EnterSafe/libcastle.dylib", "/usr/local/lib/libcastle.dylib"]
+        candidates = [
+            os.path.join(APP_DIR, "drivers", "macos", "libhyp2003.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "HYP2003.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "libcastle.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "libcastle_v2.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "libcastle_v2.1.0.0.dylib"),
+            "/usr/local/lib/libcastle_v2.1.0.0.dylib",
+            "/usr/local/lib/libcastle_v2.dylib",
+            "/usr/local/lib/libcastle.dylib",
+            "/usr/local/lib/libhyp2003.dylib",
+            "/Library/EnterSafe/libcastle.dylib",
+            "/Library/HyperPKI/libhyp2003.dylib",
+            "/Library/HyperPKI/HYP2003/libhyp2003.dylib",
+            "/Library/Frameworks/ePass2003.framework/Libraries/libcastle.dylib",
+            "/opt/homebrew/lib/libcastle.dylib",
+            "/opt/homebrew/lib/libhyp2003.dylib"
+        ]
         return _pick_best_pkcs11_dll(candidates)
     elif CURRENT_OS == 'Linux':
-        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libcastle.so")
-        candidates = [local_lin, "/usr/lib/libcastle.so.1.0.0", "/usr/lib/libcastle.so", "/usr/local/lib/libcastle.so"]
+        candidates = [
+            os.path.join(APP_DIR, "drivers", "linux", "libhyp2003.so"),
+            os.path.join(APP_DIR, "drivers", "linux", "HYP2003.so"),
+            os.path.join(APP_DIR, "drivers", "linux", "libcastle.so"),
+            os.path.join(APP_DIR, "drivers", "linux", "libeps2003csp11.so"),
+            "/usr/lib/libcastle.so.1.0.0",
+            "/usr/lib/libcastle.so",
+            "/usr/lib64/libcastle.so",
+            "/usr/lib/libhyp2003.so",
+            "/usr/lib64/libhyp2003.so",
+            "/usr/local/lib/libcastle.so",
+            "/usr/local/lib/libhyp2003.so",
+            "/usr/lib/libeps3ng.so",
+            "/usr/lib/x86_64-linux-gnu/libcastle.so",
+            "/usr/lib/x86_64-linux-gnu/libhyp2003.so"
+        ]
         return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
@@ -1949,10 +1978,17 @@ def get_platform_drivers():
         if not os.path.exists(opensc):
             opensc = "/opt/homebrew/lib/opensc-pkcs11.so"
 
+        drivers["ePass2003 / HyperPKI (HYP2003) Token"] = epass
+        drivers["ePass2003 / HyperPKI Token"] = epass
+        drivers["HyperPKI / HYP2003 Token"] = epass
         drivers["ePass2003 Token (macOS)"] = epass
+        drivers["ProxKey India"] = proxkey
         drivers["ProxKey India (macOS)"] = proxkey
+        drivers["mToken / CryptoID"] = mtoken
         drivers["mToken / CryptoID (macOS)"] = mtoken
+        drivers["InnaIT / Precision Biometric Token"] = innait
         drivers["InnaIT Token (macOS)"] = innait
+        drivers["Generic OpenSC"] = opensc
         drivers["OpenSC (macOS)"] = opensc
 
     else:
@@ -1964,25 +2000,50 @@ def get_platform_drivers():
         if not os.path.exists(opensc):
             opensc = "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"
 
+        drivers["ePass2003 / HyperPKI (HYP2003) Token"] = epass
+        drivers["ePass2003 / HyperPKI Token"] = epass
+        drivers["HyperPKI / HYP2003 Token"] = epass
         drivers["ePass2003 Token (Linux)"] = epass
+        drivers["ProxKey India"] = proxkey
         drivers["ProxKey India (Linux)"] = proxkey
+        drivers["mToken / CryptoID"] = mtoken
         drivers["mToken / CryptoID (Linux)"] = mtoken
+        drivers["InnaIT / Precision Biometric Token"] = innait
         drivers["InnaIT Token (Linux)"] = innait
+        drivers["Generic OpenSC"] = opensc
         drivers["OpenSC (Linux)"] = opensc
 
-
-
     custom = load_custom_drivers()
-
     for name, path in custom.items():
-
         drivers[f"⭐ {name}"] = path
 
-
-
     drivers["➕ [Add Custom Token Driver...]"] = "__CUSTOM__"
-
     return drivers
+
+def resolve_driver_path(driver_name=""):
+    d_map = get_driver_map()
+    if not driver_name:
+        return server_config.get('driver_path') or find_epass_driver_path() or ''
+
+    if driver_name in d_map and d_map[driver_name] and d_map[driver_name] != '__CUSTOM__':
+        return d_map[driver_name]
+
+    dl = driver_name.lower().strip()
+    if any(k in dl for k in ['hyp', 'epass', 'hyperpki', 'feitian', 'castle']):
+        return find_epass_driver_path() or d_map.get("ePass2003 / HyperPKI (HYP2003) Token", "") or d_map.get("ePass2003 / HyperPKI Token", "")
+    if any(k in dl for k in ['prox', 'watchdata', 'wdpkcs']):
+        return find_proxkey_driver_path() or d_map.get("ProxKey India", "")
+    if any(k in dl for k in ['mtoken', 'crypto', 'longmai']):
+        return find_mtoken_driver_path() or d_map.get("mToken / CryptoID", "")
+    if any(k in dl for k in ['inna', 'precision']):
+        return find_innait_driver_path() or d_map.get("InnaIT / Precision Biometric Token", "")
+    if 'opensc' in dl:
+        return d_map.get("Generic OpenSC", "") or d_map.get("OpenSC (Linux)", "") or d_map.get("OpenSC (macOS)", "")
+
+    if os.path.exists(driver_name):
+        return driver_name
+
+    return server_config.get('driver_path') or find_epass_driver_path() or ''
 
 
 
@@ -5748,13 +5809,7 @@ def api_certs():
 
     req_driver = request.args.get('driver_name')
 
-    if req_driver and req_driver in DRIVER_MAP:
-
-        server_config['driver_path'] = DRIVER_MAP[req_driver]
-
-    elif not server_config.get('driver_path'):
-
-        server_config['driver_path'] = find_epass_driver_path() or ''
+    server_config['driver_path'] = resolve_driver_path(req_driver)
 
     
 
@@ -5978,13 +6033,7 @@ def sign_pdf():
 
         client_driver = request.form.get('driver_name')
 
-        if client_driver and client_driver in DRIVER_MAP:
-
-            server_config['driver_path'] = DRIVER_MAP[client_driver]
-
-        elif not server_config.get('driver_path'):
-
-            server_config['driver_path'] = find_epass_driver_path() or ''
+        server_config['driver_path'] = resolve_driver_path(client_driver)
 
 
 

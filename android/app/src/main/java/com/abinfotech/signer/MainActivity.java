@@ -685,6 +685,9 @@ public class MainActivity extends Activity {
                 if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
                     clientName = "ABHISHEK BHARATKUMAR SHETH";
                 }
+                if (clientName.contains("(")) {
+                    clientName = clientName.substring(0, clientName.indexOf("(")).trim();
+                }
                 CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
                 String tokenSrc = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
                 mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
@@ -1638,6 +1641,9 @@ public class MainActivity extends Activity {
                 if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
                     clientName = "ABHISHEK BHARATKUMAR SHETH";
                 }
+                if (clientName.contains("(")) {
+                    clientName = clientName.substring(0, clientName.indexOf("(")).trim();
+                }
                 CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
                 String tokenSrc = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
                 mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
@@ -1885,17 +1891,24 @@ public class MainActivity extends Activity {
             if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
                 clientName = "ABHISHEK BHARATKUMAR SHETH";
             }
+            if (clientName.contains("(")) {
+                clientName = clientName.substring(0, clientName.indexOf("(")).trim();
+            }
+            CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
+            String tokenSrc = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
+            String tokenBrand = (dt != null && dt.brand != null) ? dt.brand : "Century Longmai PKI";
+
             JSONObject obj = new JSONObject();
             try {
                 obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
                 obj.put("subject", clientName);
-                obj.put("issuer", "Century Longmai PKI");
-                obj.put("source", "mToken / CryptoID");
+                obj.put("issuer", tokenBrand);
+                obj.put("source", tokenSrc);
                 obj.put("is_hardware_token", true);
                 obj.put("is_placeholder", false);
             } catch (Throwable ignored) {}
 
-            displayNamesList.add(clientName + " (mToken / CryptoID)");
+            displayNamesList.add(clientName + " (" + tokenSrc + ")");
             aliasesList.add("USB_HARDWARE_TOKEN_CERT");
             certObjectsList.add(obj);
         }
