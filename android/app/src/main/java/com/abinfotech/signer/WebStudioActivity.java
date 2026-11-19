@@ -1,6 +1,9 @@
 package com.abinfotech.signer;
 
 import android.app.Activity;
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.WebChromeClient;
@@ -10,10 +13,16 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.ProgressBar;
+import android.widget.Toast;
 
 public class WebStudioActivity extends Activity {
+    public static final String URL_CLOUD = "https://sign.a-b-infotech.in/Token.php";
+    public static final String URL_LOCAL = "http://127.0.0.1:5000/studio";
+    public static final String URL_INBUILT_ASSET = "file:///android_asset/webstudio/index.html";
+
     private WebView webView;
     private ProgressBar progressBar;
+    private int currentUrlTier = 0; // 0: Cloud, 1: Local, 2: Inbuilt
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -41,9 +50,8 @@ public class WebStudioActivity extends Activity {
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                // If remote fails, fallback to local offline asset
                 if (request != null && request.isForMainFrame()) {
-                    view.loadUrl("file:///android_asset/webstudio/index.html");
+                    fallbackToNextTier(view);
                 }
             }
         });
@@ -62,12 +70,48 @@ public class WebStudioActivity extends Activity {
             }
         });
 
-        // First try local Port 5000 server, then fallback to local asset
-        if (SignerServerService.serverInstance != null && SignerServerService.serverInstance.isRunning()) {
-            webView.loadUrl("http://127.0.0.1:5000/studio");
+        loadDualInbuiltUrl();
+    }
+
+    private void loadDualInbuiltUrl() {
+        if (isNetworkAvailable()) {
+            currentUrlTier = 0;
+            webView.loadUrl(URL_CLOUD);
+        } else if (SignerServerService.serverInstance != null && SignerServerService.serverInstance.isRunning()) {
+            currentUrlTier = 1;
+            webView.loadUrl(URL_LOCAL);
         } else {
-            webView.loadUrl("file:///android_asset/webstudio/index.html");
+            currentUrlTier = 2;
+            webView.loadUrl(URL_INBUILT_ASSET);
         }
+    }
+
+    private void fallbackToNextTier(WebView view) {
+        if (currentUrlTier == 0) {
+            // Cloud failed, fallback to local server (Tier 1)
+            currentUrlTier = 1;
+            if (SignerServerService.serverInstance != null && SignerServerService.serverInstance.isRunning()) {
+                view.loadUrl(URL_LOCAL);
+            } else {
+                currentUrlTier = 2;
+                view.loadUrl(URL_INBUILT_ASSET);
+            }
+        } else if (currentUrlTier == 1) {
+            // Local failed, fallback to inbuilt asset (Tier 2)
+            currentUrlTier = 2;
+            view.loadUrl(URL_INBUILT_ASSET);
+        }
+    }
+
+    private boolean isNetworkAvailable() {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                NetworkInfo netInfo = cm.getActiveNetworkInfo();
+                return netInfo != null && netInfo.isConnected();
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     @Override

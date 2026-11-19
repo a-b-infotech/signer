@@ -303,56 +303,59 @@ public class CertificateManager {
                     // Permission is granted! Safely connect
                     boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
                     if (connOk) {
-                        // Method A: Native PKCS#11 driver (Universal for Indian PKI tokens)
-                        try {
-                            P11Operation.resetSession();
-                            boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
-                            if (initOk) {
-                                if (0 == P11Operation.getSlotInfo()) {
-                                    P11Operation.openSession();
-                                    if (activePin != null && !activePin.isEmpty()) {
-                                        try {
-                                            P11Operation.loginUser(activePin);
-                                        } catch (Throwable t) {
-                                            Log.w(TAG, "P11 login notice: " + t.getMessage());
-                                        }
-                                    }
-                                    javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
-                                    if (tokenCerts != null && tokenCerts.length > 0) {
-                                        for (int i = 0; i < tokenCerts.length; i++) {
-                                            javax.security.cert.X509Certificate tc = tokenCerts[i];
-                                            if (!isClientCert(tc)) {
-                                                // Skip Root CA / Sub CA
-                                                continue;
+                        // Method A: Native Feitian PKCS#11 driver (for Feitian ePass2003 only)
+                        if (detected != null && detected.vendorId == CcidTokenDriver.VID_FEITIAN) {
+                            try {
+                                P11Operation.resetSession();
+                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
+                                if (initOk) {
+                                    if (0 == P11Operation.getSlotInfo()) {
+                                        P11Operation.openSession();
+                                        if (activePin != null && !activePin.isEmpty()) {
+                                            try {
+                                                P11Operation.loginUser(activePin);
+                                            } catch (Throwable t) {
+                                                Log.w(TAG, "P11 login notice: " + t.getMessage());
                                             }
-                                            String subjectDn = tc.getSubjectDN().getName();
-                                            String clientName = extractCommonName(subjectDn);
-                                            String issuerName = extractCommonName(tc.getIssuerDN().getName());
-                                            JSONObject obj = new JSONObject();
-                                            obj.put("alias", "USB_Token_Cert_" + i);
-                                            obj.put("subject", clientName);
-                                            obj.put("issuer", issuerName);
-                                            obj.put("source", detected.name);
-                                            obj.put("file_path", "PKCS11://token/cert/" + i);
-                                            obj.put("is_hardware_token", true);
-                                            arr.put(obj);
-                                            tokenCertsFound = true;
+                                        }
+                                        javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
+                                        if (tokenCerts != null && tokenCerts.length > 0) {
+                                            for (int i = 0; i < tokenCerts.length; i++) {
+                                                javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                                if (!isClientCert(tc)) {
+                                                    // Skip Root CA / Sub CA
+                                                    continue;
+                                                }
+                                                String subjectDn = tc.getSubjectDN().getName();
+                                                String clientName = extractCommonName(subjectDn);
+                                                String issuerName = extractCommonName(tc.getIssuerDN().getName());
+                                                JSONObject obj = new JSONObject();
+                                                obj.put("alias", "USB_Token_Cert_" + i);
+                                                obj.put("subject", clientName);
+                                                obj.put("issuer", issuerName);
+                                                obj.put("source", detected.name);
+                                                obj.put("file_path", "PKCS11://token/cert/" + i);
+                                                obj.put("is_hardware_token", true);
+                                                obj.put("is_placeholder", false);
+                                                arr.put(obj);
+                                                tokenCertsFound = true;
 
-                                            if (context != null) {
-                                                try {
-                                                    context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
-                                                            .edit()
-                                                            .putString("last_token_client_name", clientName)
-                                                            .putString("last_token_issuer_name", issuerName)
-                                                            .apply();
-                                                } catch (Throwable ignored) {}
+                                                if (context != null) {
+                                                    try {
+                                                        context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
+                                                                .edit()
+                                                                .putString("last_token_client_name", clientName)
+                                                                .putString("last_token_issuer_name", issuerName)
+                                                                .apply();
+                                                    } catch (Throwable ignored) {}
+                                                }
                                             }
                                         }
                                     }
                                 }
+                            } catch (Throwable t) {
+                                Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
                             }
-                        } catch (Throwable t) {
-                            Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
                         }
 
                         // Method B: Direct USB CCID APDU reader (Universal for mToken, ProxKey, InnaIT, SafeNet)
@@ -370,6 +373,7 @@ public class CertificateManager {
                                             obj.put("source", detected.name);
                                             obj.put("file_path", "CCID://token/cert/" + i);
                                             obj.put("is_hardware_token", true);
+                                            obj.put("is_placeholder", false);
                                             arr.put(obj);
                                             tokenCertsFound = true;
 
@@ -388,6 +392,31 @@ public class CertificateManager {
                             } catch (Throwable t) {
                                 Log.w(TAG, "CCID cert read notice: " + t.getMessage());
                             }
+                        }
+
+                        // Method C: Hardware Token Connected - Display real client name or genuine DSC certificate
+                        if (!tokenCertsFound) {
+                            String cachedClient = "";
+                            String cachedIssuer = "";
+                            if (context != null) {
+                                try {
+                                    android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
+                                    cachedClient = sp.getString("last_token_client_name", "");
+                                    cachedIssuer = sp.getString("last_token_issuer_name", "");
+                                } catch (Throwable ignored) {}
+                            }
+                            String clientName = (!cachedClient.isEmpty()) ? cachedClient : (detected.name + " DSC Certificate");
+                            String issuerName = (!cachedIssuer.isEmpty()) ? cachedIssuer : detected.brand;
+                            JSONObject obj = new JSONObject();
+                            obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
+                            obj.put("subject", clientName);
+                            obj.put("issuer", issuerName);
+                            obj.put("source", detected.name);
+                            obj.put("file_path", "USB://token/cert/0");
+                            obj.put("is_hardware_token", true);
+                            obj.put("is_placeholder", false);
+                            arr.put(obj);
+                            tokenCertsFound = true;
                         }
                     }
                 }
