@@ -319,11 +319,11 @@ public class CertificateManager {
                     // Permission is granted! Safely connect
                     boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
                     if (connOk) {
-                        // Method A: Native Feitian PKCS#11 driver (for Feitian ePass2003 only)
-                        if (detected != null && detected.vendorId == CcidTokenDriver.VID_FEITIAN) {
+                        // Method A: Native PKCS#11 driver (for Feitian, mToken/CryptoID, Watchdata ProxKey, InnaIT)
+                        if (detected != null) {
                             try {
                                 P11Operation.resetSession();
-                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext());
+                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext(), detected.vendorId);
                                 if (initOk) {
                                     if (0 == P11Operation.getSlotInfo()) {
                                         P11Operation.openSession();

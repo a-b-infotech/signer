@@ -34,7 +34,20 @@ public class P11Operation {
 	public static int isLoadlib = 0;
 	static{
 		try { System.loadLibrary("c++_shared"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("usb"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("pcsclite"); } catch (Throwable ignored) {}
 		try { System.loadLibrary("_atick"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("WDAssist"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("proxkey"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("WatchdataPKCS11"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("mtoken"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("mTokenGM"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("cryptoid_pkcs11"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("hyp2003"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("castle"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("ep2003"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("innait_pkcs11"); } catch (Throwable ignored) {}
+		try { System.loadLibrary("inneit"); } catch (Throwable ignored) {}
 		try { System.loadLibrary("InnaITPKCS11"); } catch (Throwable ignored) {}
 		try { System.loadLibrary("OTGPass2003_India"); } catch (Throwable ignored) {}
 	}
@@ -101,19 +114,54 @@ public class P11Operation {
 		return resolvePkcs11ModulePath(context, null);
 	}
 
-	@SuppressLint("SdCardPath")
 	public static boolean p11initialize(Context _context) {
+		return p11initialize(_context, 0);
+	}
+
+	@SuppressLint("SdCardPath")
+	public static boolean p11initialize(Context _context, int vendorId) {
 		if(null == _context) {
 			return false;
 		}
 
-		// libOTGPass2003_India.so is the unified native PKCS#11 module & JNI bridge
-		// supporting Feitian (0x096e), Longmai mToken (0x055c, 0x338c), Watchdata ProxKey (0x24dc), SafeNet (0x04b9), and InnaIT (0x2617)
-		String[] candidateModules = new String[]{
-			"libOTGPass2003_India.so"
-		};
+		List<String> candidateList = new ArrayList<>();
+		if (vendorId == 0x24dc) { // Watchdata ProxKey
+			candidateList.add("libWatchdataPKCS11.so");
+			candidateList.add("libproxkey.so");
+			candidateList.add("libWDAssist.so");
+		} else if (vendorId == 0x055c || vendorId == 0x338c) { // Longmai mToken / CryptoID
+			candidateList.add("libcryptoid_pkcs11.so");
+			candidateList.add("libmtoken.so");
+			candidateList.add("libmTokenGM.so");
+		} else if (vendorId == 0x2617) { // InnaIT
+			candidateList.add("libInnaITPKCS11.so");
+			candidateList.add("libinnait_pkcs11.so");
+			candidateList.add("libinneit.so");
+		} else if (vendorId == 0x096e) { // Feitian / HYP2003
+			candidateList.add("libOTGPass2003_India.so");
+			candidateList.add("libhyp2003.so");
+			candidateList.add("libcastle.so");
+			candidateList.add("libep2003.so");
+		}
 
-		for (String mod : candidateModules) {
+		// Fallback candidates
+		String[] allCandidates = new String[]{
+			"libOTGPass2003_India.so",
+			"libWatchdataPKCS11.so",
+			"libcryptoid_pkcs11.so",
+			"libmtoken.so",
+			"libproxkey.so",
+			"libhyp2003.so",
+			"libcastle.so",
+			"libInnaITPKCS11.so"
+		};
+		for (String c : allCandidates) {
+			if (!candidateList.contains(c)) {
+				candidateList.add(c);
+			}
+		}
+
+		for (String mod : candidateList) {
 			try {
 				disconnect();
 				String path = resolvePkcs11ModulePath(_context, mod);

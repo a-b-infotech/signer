@@ -58,7 +58,22 @@ android_libs = [
     "libc++_shared.so",
     "libInnaITPKCS11.so",
     "libOTGPass2003_India.so",
-    "lib_atick.so"
+    "lib_atick.so",
+    "libWatchdataPKCS11.so",
+    "libproxkey.so",
+    "libWDAssist.so",
+    "libcryptoid_pkcs11.so",
+    "libmtoken.so",
+    "libmTokenGM.so",
+    "libcastle.so",
+    "libhyp2003.so",
+    "libep2003.so",
+    "libinnait_pkcs11.so",
+    "libinneit.so",
+    "libopensc.so",
+    "libpcsclite.so",
+    "libtrustkey.so",
+    "libusb.so"
 ]
 
 for abi in ["arm64-v8a", "armeabi-v7a", "armeabi"]:
