@@ -475,6 +475,19 @@ public class CcidTokenDriver {
                                 }
                             }
                             break;
+                        } else if (sw1 == 0x67) {
+                            // Wrong length: retry with standard 128-byte chunk
+                            chunkCmd[4] = (byte) 0x80;
+                            byte[] retryChunk = execCcidApdu(conn, outEp, inEp, chunkCmd, seq++);
+                            if (retryChunk != null && retryChunk.length > 2) {
+                                int rlen = retryChunk.length - 2;
+                                int rsw1 = retryChunk[retryChunk.length - 2] & 0xFF;
+                                if (rsw1 == 0x90 && rlen > 0) {
+                                    fileStream.write(retryChunk, 0, rlen);
+                                    fileOffset += rlen;
+                                }
+                            }
+                            break;
                         } else {
                             break;
                         }
@@ -594,8 +607,11 @@ public class CcidTokenDriver {
             // 5. TERTIARY STRATEGY: SKF Protocol (mToken / CryptoID & Chinese PKI tokens)
             if (results.isEmpty()) {
                 try {
-                    // SKF_ENUM_APP: 80 22 00 00 00
+                    // SKF_ENUM_APP: 80 22 00 00 00 or 80 36 00 00 00
                     byte[] enumAppResp = execCcidApdu(conn, outEp, inEp, new byte[]{(byte) 0x80, 0x22, 0x00, 0x00, 0x00}, seq++);
+                    if (enumAppResp == null || enumAppResp.length <= 2) {
+                        enumAppResp = execCcidApdu(conn, outEp, inEp, new byte[]{(byte) 0x80, 0x36, 0x00, 0x00, 0x00}, seq++);
+                    }
                     List<String> appNames = new ArrayList<>();
                     if (enumAppResp != null && enumAppResp.length > 2) {
                         int start = 0;

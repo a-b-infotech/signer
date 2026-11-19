@@ -207,23 +207,25 @@ public class UsbTokenManager {
                 sBulkInEndpoint = bulkIn;
                 sBulkOutEndpoint = bulkOut;
 
-                // Wire endpoints into PKCS#11 SDK (libOTGPass2003_India.so) for all connected USB tokens
-                try {
-                    com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
-                    if (myApp != null) {
-                        myApp.setUsbDeviceConnection(conn);
-                        myApp.setInUsbEndpoint(bulkIn);
-                        myApp.setOutUsbEndpoint(bulkOut);
-                        Log.d(TAG, "MyApplication endpoints successfully wired for token: VID=0x" + Integer.toHexString(device.getVendorId()));
+                // Wire endpoints into PKCS#11 SDK (libOTGPass2003_India.so) strictly for Feitian / HyperPKI tokens (VID 0x096e)
+                if (device.getVendorId() == CcidTokenDriver.VID_FEITIAN) {
+                    try {
+                        com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
+                        if (myApp != null) {
+                            myApp.setUsbDeviceConnection(conn);
+                            myApp.setInUsbEndpoint(bulkIn);
+                            myApp.setOutUsbEndpoint(bulkOut);
+                            Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token: VID=0x" + Integer.toHexString(device.getVendorId()));
+                        }
+                        com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
+                        if (cb != null) {
+                            cb.setidVendor(device.getVendorId());
+                            cb.setidProduct(device.getProductId());
+                            Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "JniCallBack setup notice: " + t.getMessage());
                     }
-                    com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
-                    if (cb != null) {
-                        cb.setidVendor(device.getVendorId());
-                        cb.setidProduct(device.getProductId());
-                        Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
-                    }
-                } catch (Throwable t) {
-                    Log.w(TAG, "JniCallBack setup notice: " + t.getMessage());
                 }
 
                 return true;

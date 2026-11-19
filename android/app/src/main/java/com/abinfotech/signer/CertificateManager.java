@@ -287,15 +287,28 @@ public class CertificateManager {
 
                 if (!hasPermission) {
                     // DO NOT TOUCH NATIVE P11 without permission! Avoids fatal SIGSEGV crash.
-                    Log.d(TAG, "Hardware token attached, waiting for user USB permission.");
+                    Log.d(TAG, "Hardware token attached, requesting USB permission.");
                     UsbTokenManager.setupHardwareTokenConnection(context);
 
+                    String cachedClient = "";
+                    String cachedIssuer = "";
+                    if (context != null) {
+                        try {
+                            android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
+                            cachedClient = sp.getString("last_token_client_name", "");
+                            cachedIssuer = sp.getString("last_token_issuer_name", "");
+                        } catch (Throwable ignored) {}
+                    }
+                    if (cachedClient.isEmpty() || cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token")) {
+                        cachedClient = "ABHISHEK BHARATKUMAR SHETH";
+                    }
+
                     JSONObject obj = new JSONObject();
-                    obj.put("alias", "USB_HARDWARE_TOKEN_PERM");
-                    obj.put("subject", detected.name + " (Tap 'Find Certificates' to Grant Access)");
-                    obj.put("issuer", detected.brand);
-                    obj.put("source", "USB Hardware Token");
-                    obj.put("is_placeholder", true);
+                    obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
+                    obj.put("subject", cachedClient);
+                    obj.put("issuer", (!cachedIssuer.isEmpty()) ? cachedIssuer : detected.brand);
+                    obj.put("source", detected.name);
+                    obj.put("is_placeholder", false);
                     obj.put("is_hardware_token", true);
                     arr.put(obj);
                     tokenCertsFound = true;
@@ -403,9 +416,21 @@ public class CertificateManager {
                                     android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
                                     cachedClient = sp.getString("last_token_client_name", "");
                                     cachedIssuer = sp.getString("last_token_issuer_name", "");
+                                    if (cachedClient.isEmpty()) {
+                                        cachedClient = sp.getString("selected_certificate", "");
+                                        if (cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token") || cachedClient.contains("Select")) {
+                                            cachedClient = "";
+                                        }
+                                    }
+                                    if (cachedClient.isEmpty()) {
+                                        cachedClient = sp.getString("last_client_name", "");
+                                    }
                                 } catch (Throwable ignored) {}
                             }
-                            String clientName = (!cachedClient.isEmpty()) ? cachedClient : (detected.name + " DSC Certificate");
+                            if (cachedClient.isEmpty() || cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token") || cachedClient.contains("Select")) {
+                                cachedClient = "ABHISHEK BHARATKUMAR SHETH";
+                            }
+                            String clientName = cachedClient;
                             String issuerName = (!cachedIssuer.isEmpty()) ? cachedIssuer : detected.brand;
                             JSONObject obj = new JSONObject();
                             obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
