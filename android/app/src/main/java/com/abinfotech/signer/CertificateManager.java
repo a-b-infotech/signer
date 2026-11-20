@@ -210,14 +210,13 @@ public class CertificateManager {
                 }
             }
 
-            // 4. Common Name (CN) and Subject CA string heuristics (Filter Root CA and Sub-CA strictly)
+            // 4. Common Name (CN) heuristics to filter Root CA and Sub-CA strictly
             String sub = cert.getSubjectDN() != null ? cert.getSubjectDN().getName().toLowerCase() : "";
             String cn = extractCommonName(sub).toLowerCase();
-            if (cn.contains("sub ca") || cn.contains("sub-ca") || cn.contains("subca") || cn.contains("root ca")
+            if (cn.equals("root ca") || cn.contains("sub ca") || cn.contains("sub-ca") || cn.contains("subca")
                     || cn.contains("certifying authority") || cn.contains("certification authority")
                     || cn.contains("cca india") || cn.contains("intermediate ca") || cn.contains("issuing ca")
-                    || cn.endsWith(" ca") || cn.startsWith("ca ") || cn.equals("ca")
-                    || sub.contains("ou=certifying authority") || sub.contains("ou=sub-ca") || sub.contains("ou=root ca") || sub.contains("ou=issuing ca")) {
+                    || cn.equals("ca")) {
                 return false;
             }
 
@@ -238,13 +237,12 @@ public class CertificateManager {
                 return false;
             }
 
-            // 2. CA naming heuristics - rigorously filter ANY CA certificate
+            // 2. CA naming heuristics - filter Root CA and Sub CA certificates
             String cn = extractCommonName(sub).toLowerCase();
-            if (cn.contains("sub ca") || cn.contains("sub-ca") || cn.contains("subca") || cn.contains("root ca")
+            if (cn.equals("root ca") || cn.contains("sub ca") || cn.contains("sub-ca") || cn.contains("subca")
                     || cn.contains("certifying authority") || cn.contains("certification authority")
                     || cn.contains("cca india") || cn.contains("intermediate ca") || cn.contains("issuing ca")
-                    || cn.endsWith(" ca") || cn.startsWith("ca ") || cn.equals("ca")
-                    || sub.contains("ou=certifying authority") || sub.contains("ou=sub-ca") || sub.contains("ou=root ca") || sub.contains("ou=issuing ca")) {
+                    || cn.equals("ca")) {
                 return false;
             }
             return true;
@@ -286,41 +284,15 @@ public class CertificateManager {
                 boolean hasPermission = UsbTokenManager.isPermissionGranted(context);
 
                 if (!hasPermission) {
-                    // DO NOT TOUCH NATIVE P11 without permission! Avoids fatal SIGSEGV crash.
+                    // Request permission safely
                     Log.d(TAG, "Hardware token attached, requesting USB permission.");
                     UsbTokenManager.setupHardwareTokenConnection(context);
-
-                    String cachedClient = "";
-                    String cachedIssuer = "";
-                    if (context != null) {
-                        try {
-                            android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
-                            cachedClient = sp.getString("last_token_client_name", "");
-                            cachedIssuer = sp.getString("last_token_issuer_name", "");
-                        } catch (Throwable ignored) {}
-                    }
-                    if (cachedClient.isEmpty() || cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token")) {
-                        cachedClient = "ABHISHEK BHARATKUMAR SHETH";
-                    }
-                    if (cachedClient.contains("(")) {
-                        cachedClient = cachedClient.substring(0, cachedClient.indexOf("(")).trim();
-                    }
-
-                    JSONObject obj = new JSONObject();
-                    obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
-                    obj.put("subject", cachedClient);
-                    obj.put("issuer", (!cachedIssuer.isEmpty()) ? cachedIssuer : detected.brand);
-                    obj.put("source", detected.name);
-                    obj.put("is_placeholder", false);
-                    obj.put("is_hardware_token", true);
-                    arr.put(obj);
-                    tokenCertsFound = true;
                 } else {
                     // Permission is granted! Safely connect
                     boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
                     if (connOk) {
-                        // Method A: Native PKCS#11 driver (for Feitian, mToken/CryptoID, Watchdata ProxKey, InnaIT)
-                        if (detected != null) {
+                        // Strategy 1: Feitian Tokens (VID 0x096e) -> Use Feitian Native PKCS#11 Driver FIRST
+                        if (detected.vendorId == CcidTokenDriver.VID_FEITIAN) {
                             try {
                                 P11Operation.resetSession();
                                 boolean initOk = P11Operation.p11initialize(context.getApplicationContext(), detected.vendorId);
@@ -355,26 +327,16 @@ public class CertificateManager {
                                                 obj.put("is_placeholder", false);
                                                 arr.put(obj);
                                                 tokenCertsFound = true;
-
-                                                if (context != null) {
-                                                    try {
-                                                        context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
-                                                                .edit()
-                                                                .putString("last_token_client_name", clientName)
-                                                                .putString("last_token_issuer_name", issuerName)
-                                                                .apply();
-                                                    } catch (Throwable ignored) {}
-                                                }
                                             }
                                         }
                                     }
                                 }
                             } catch (Throwable t) {
-                                Log.w(TAG, "PKCS11 scan notice: " + t.getMessage());
+                                Log.w(TAG, "Feitian PKCS11 notice: " + t.getMessage());
                             }
                         }
 
-                        // Method B: Direct USB CCID APDU reader (Universal for mToken, ProxKey, InnaIT, SafeNet)
+                        // Strategy 2: Universal CCID APDU reader (Primary for mToken / CryptoID, Watchdata ProxKey, SafeNet, and secondary for Feitian)
                         if (!tokenCertsFound) {
                             try {
                                 List<CcidTokenDriver.CcidCertInfo> ccidCerts = CcidTokenDriver.readCertificatesViaCcid(context, activePin);
@@ -392,16 +354,6 @@ public class CertificateManager {
                                             obj.put("is_placeholder", false);
                                             arr.put(obj);
                                             tokenCertsFound = true;
-
-                                            if (context != null) {
-                                                try {
-                                                    context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
-                                                            .edit()
-                                                            .putString("last_token_client_name", ci.clientName.trim())
-                                                            .putString("last_token_issuer_name", ci.issuerName != null ? ci.issuerName.trim() : detected.brand)
-                                                            .apply();
-                                                } catch (Throwable ignored) {}
-                                            }
                                         }
                                     }
                                 }
@@ -410,44 +362,37 @@ public class CertificateManager {
                             }
                         }
 
-                        // Method C: Hardware Token Connected - Display real client name or genuine DSC certificate
-                        if (!tokenCertsFound) {
-                            String cachedClient = "";
-                            String cachedIssuer = "";
-                            if (context != null) {
-                                try {
-                                    android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
-                                    cachedClient = sp.getString("last_token_client_name", "");
-                                    cachedIssuer = sp.getString("last_token_issuer_name", "");
-                                    if (cachedClient.isEmpty()) {
-                                        cachedClient = sp.getString("selected_certificate", "");
-                                        if (cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token") || cachedClient.contains("Select")) {
-                                            cachedClient = "";
+                        // Strategy 3: InnaIT Precision Native PKCS#11 driver
+                        if (!tokenCertsFound && (detected.vendorId == CcidTokenDriver.VID_INNAIT_1 || detected.vendorId == CcidTokenDriver.VID_INNAIT_4)) {
+                            try {
+                                P11Operation.resetSession();
+                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext(), detected.vendorId);
+                                if (initOk && 0 == P11Operation.getSlotInfo()) {
+                                    P11Operation.openSession();
+                                    javax.security.cert.X509Certificate[] inCerts = P11Operation.getAllX509Certificate();
+                                    if (inCerts != null && inCerts.length > 0) {
+                                        for (int i = 0; i < inCerts.length; i++) {
+                                            javax.security.cert.X509Certificate tc = inCerts[i];
+                                            if (!isClientCert(tc)) continue;
+                                            String subjectDn = tc.getSubjectDN().getName();
+                                            String clientName = extractCommonName(subjectDn);
+                                            String issuerName = extractCommonName(tc.getIssuerDN().getName());
+                                            JSONObject obj = new JSONObject();
+                                            obj.put("alias", "INNAIT_Token_Cert_" + i);
+                                            obj.put("subject", clientName);
+                                            obj.put("issuer", issuerName);
+                                            obj.put("source", detected.name);
+                                            obj.put("file_path", "PKCS11://innait/cert/" + i);
+                                            obj.put("is_hardware_token", true);
+                                            obj.put("is_placeholder", false);
+                                            arr.put(obj);
+                                            tokenCertsFound = true;
                                         }
                                     }
-                                    if (cachedClient.isEmpty()) {
-                                        cachedClient = sp.getString("last_client_name", "");
-                                    }
-                                } catch (Throwable ignored) {}
+                                }
+                            } catch (Throwable t) {
+                                Log.w(TAG, "InnaIT PKCS11 notice: " + t.getMessage());
                             }
-                            if (cachedClient.isEmpty() || cachedClient.contains("Enter PIN") || cachedClient.contains("USB Token") || cachedClient.contains("Select")) {
-                                cachedClient = "ABHISHEK BHARATKUMAR SHETH";
-                            }
-                            if (cachedClient.contains("(")) {
-                                cachedClient = cachedClient.substring(0, cachedClient.indexOf("(")).trim();
-                            }
-                            String clientName = cachedClient;
-                            String issuerName = (!cachedIssuer.isEmpty()) ? cachedIssuer : detected.brand;
-                            JSONObject obj = new JSONObject();
-                            obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
-                            obj.put("subject", clientName);
-                            obj.put("issuer", issuerName);
-                            obj.put("source", detected.name);
-                            obj.put("file_path", "USB://token/cert/0");
-                            obj.put("is_hardware_token", true);
-                            obj.put("is_placeholder", false);
-                            arr.put(obj);
-                            tokenCertsFound = true;
                         }
                     }
                 }

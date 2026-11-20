@@ -125,40 +125,30 @@ public class P11Operation {
 		}
 
 		List<String> candidateList = new ArrayList<>();
-		if (vendorId == 0x24dc) { // Watchdata ProxKey
-			candidateList.add("libWatchdataPKCS11.so");
-			candidateList.add("libproxkey.so");
-			candidateList.add("libWDAssist.so");
-		} else if (vendorId == 0x055c || vendorId == 0x338c) { // Longmai mToken / CryptoID
-			candidateList.add("libcryptoid_pkcs11.so");
-			candidateList.add("libmtoken.so");
-			candidateList.add("libmTokenGM.so");
-		} else if (vendorId == 0x2617) { // InnaIT
-			candidateList.add("libInnaITPKCS11.so");
-			candidateList.add("libinnait_pkcs11.so");
-			candidateList.add("libinneit.so");
-		} else if (vendorId == 0x096e) { // Feitian / HYP2003
+		if (vendorId == 0x096e) { // Feitian / HYP2003 / ePass2003
 			candidateList.add("libOTGPass2003_India.so");
 			candidateList.add("libhyp2003.so");
 			candidateList.add("libcastle.so");
 			candidateList.add("libep2003.so");
-		}
-
-		// Fallback candidates
-		String[] allCandidates = new String[]{
-			"libOTGPass2003_India.so",
-			"libWatchdataPKCS11.so",
-			"libcryptoid_pkcs11.so",
-			"libmtoken.so",
-			"libproxkey.so",
-			"libhyp2003.so",
-			"libcastle.so",
-			"libInnaITPKCS11.so"
-		};
-		for (String c : allCandidates) {
-			if (!candidateList.contains(c)) {
-				candidateList.add(c);
-			}
+		} else if (vendorId == 0x2617 || vendorId == 0x2ccf || vendorId == 0x2007 || vendorId == 0x2ce3) { // InnaIT Precision
+			candidateList.add("libInnaITPKCS11.so");
+			candidateList.add("libinnait_pkcs11.so");
+			candidateList.add("libinneit.so");
+		} else if (vendorId == 0x24dc || vendorId == 0x163c) { // Watchdata ProxKey
+			candidateList.add("libWatchdataPKCS11.so");
+			candidateList.add("libproxkey.so");
+			candidateList.add("libWDAssist.so");
+		} else if (vendorId == 0x055c || vendorId == 0x338c || vendorId == 0x4c4d || vendorId == 0x0925 || vendorId == 0x24a4) { // Longmai mToken / CryptoID
+			candidateList.add("libcryptoid_pkcs11.so");
+			candidateList.add("libmtoken.so");
+			candidateList.add("libmTokenGM.so");
+		} else if (vendorId == 0) {
+			// Unknown vendor, try standard Feitian and InnaIT
+			candidateList.add("libOTGPass2003_India.so");
+			candidateList.add("libInnaITPKCS11.so");
+		} else {
+			// Other tokens (SafeNet, etc.) handled directly via CCID
+			return false;
 		}
 
 		for (String mod : candidateList) {

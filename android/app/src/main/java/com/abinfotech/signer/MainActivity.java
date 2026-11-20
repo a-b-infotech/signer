@@ -439,22 +439,15 @@ public class MainActivity extends Activity {
             if (action == null) return;
 
             if (UsbManager.ACTION_USB_DEVICE_ATTACHED.equals(action)) {
-                Toast.makeText(context, "USB Device Attached: Connecting...", Toast.LENGTH_SHORT).show();
-                String clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", "");
-                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token")) {
-                    clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_SELECTED_CERT, "");
-                }
-                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
-                    clientName = "ABHISHEK BHARATKUMAR SHETH";
-                }
                 CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(context);
-                String tokenBrand = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
-                mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
-                mSelectedCertDisplayName = clientName + " (" + tokenBrand + ")";
+                String tokenBrand = (dt != null && dt.name != null) ? dt.name : "USB Token";
+                updateTokenDriverSpinner(dt);
+                Toast.makeText(context, "USB Token Attached: " + tokenBrand, Toast.LENGTH_SHORT).show();
+                mSelectedCertDisplayName = "";
+                mSelectedCertAlias = "";
                 if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                    tvSignSelectedCert.setText("Hardware Token: " + tokenBrand + " (Reading...)");
                 }
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(PREF_SELECTED_CERT, mSelectedCertDisplayName).apply();
 
                 new Thread(new Runnable() {
                     @Override
@@ -559,6 +552,20 @@ public class MainActivity extends Activity {
         setupPdfTouchInteractions();
         setupActionListeners();
 
+        // Clear any old hardcoded or dummy selected certificate from previous app sessions
+        try {
+            SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String sc = sp.getString(PREF_SELECTED_CERT, "");
+            if (sc.contains("ABHISHEK") || sc.contains("Enter PIN") || sc.contains("Hardware Token")
+                    || sc.contains("mToken") || sc.contains("HYP") || sc.contains("ProxKey") || sc.contains("CryptoID")) {
+                sp.edit()
+                        .remove(PREF_SELECTED_CERT)
+                        .remove("last_token_client_name")
+                        .remove("last_token_issuer_name")
+                        .apply();
+            }
+        } catch (Throwable ignored) {}
+
         restorePreferences();
 
         // Register internal USB permission receiver (NOT_EXPORTED on API 33+)
@@ -603,25 +610,17 @@ public class MainActivity extends Activity {
                             mIsUsbTokenConnected = connected;
                             if (connected) {
                                 UsbTokenManager.setupHardwareTokenConnection(MainActivity.this);
-                                String clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", "");
-                                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token")) {
-                                    clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_SELECTED_CERT, "");
-                                }
-                                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
-                                    clientName = "ABHISHEK BHARATKUMAR SHETH";
-                                }
-                                CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(MainActivity.this);
-                                String tokenBrand = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
-                                mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
-                                mSelectedCertDisplayName = clientName + " (" + tokenBrand + ")";
+                                final CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(MainActivity.this);
+                                final String tokenBrand = (dt != null && dt.name != null) ? dt.name : "USB Token";
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
-                                        if (tvSignSelectedCert != null) {
-                                            tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
-                                        }
+                                        updateTokenDriverSpinner(dt);
+                                        updateTokenStatus();
+                                        updateServerStatusUi();
                                     }
                                 });
+                                autoDetectCertificatesAsync();
                             } else {
                                 UsbTokenManager.disconnectToken();
                                 P11Operation.disconnect();
@@ -633,6 +632,8 @@ public class MainActivity extends Activity {
                                         if (tvSignSelectedCert != null) {
                                             tvSignSelectedCert.setText("Connect USB Token or Load PFX / P12");
                                         }
+                                        updateTokenStatus();
+                                        updateServerStatusUi();
                                     }
                                 });
                             }
@@ -676,25 +677,15 @@ public class MainActivity extends Activity {
         updateTokenStatus();
         updateServerStatusUi();
         if (UsbTokenManager.isHardwareTokenConnected(this)) {
+            CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
+            updateTokenDriverSpinner(dt);
             String currentText = (tvSignSelectedCert != null) ? tvSignSelectedCert.getText().toString() : "";
-            if (currentText.isEmpty() || currentText.contains("Enter PIN") || currentText.contains("No Certificate") || currentText.contains("Tap 'Find")) {
-                String clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", "");
-                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token")) {
-                    clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_SELECTED_CERT, "");
-                }
-                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
-                    clientName = "ABHISHEK BHARATKUMAR SHETH";
-                }
-                if (clientName.contains("(")) {
-                    clientName = clientName.substring(0, clientName.indexOf("(")).trim();
-                }
-                CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
-                String tokenSrc = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
-                mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
-                mSelectedCertDisplayName = clientName + " (" + tokenSrc + ")";
+            if (currentText.isEmpty() || currentText.contains("No Certificate") || currentText.contains("Connect USB")) {
+                String tokenSrc = (dt != null && dt.name != null) ? dt.name : "USB Token";
                 if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                    tvSignSelectedCert.setText("Hardware Token: " + tokenSrc + " (Tap 'Find Certificates')");
                 }
+                autoDetectCertificatesAsync();
             }
         }
         uiHandler.removeCallbacks(statusPoller);
@@ -902,6 +893,51 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void updateTokenDriverSpinner(final CcidTokenDriver.DetectedToken token) {
+        if (spTokenDriver == null || token == null) return;
+        int selectedIndex = -1;
+        String name = token.name != null ? token.name.toLowerCase() : "";
+        int vid = token.vendorId;
+
+        // 0: HYP2003 / ePass2003 (Feitian / HyperPKI)
+        if (name.contains("hyp") || name.contains("epass") || name.contains("feitian") || vid == CcidTokenDriver.VID_FEITIAN) {
+            selectedIndex = 0; // "HYP2003 / ePass2003 (USB OTG)"
+        }
+        // 1: InnaIT Precision
+        else if (name.contains("innait") || name.contains("precision") || vid == CcidTokenDriver.VID_INNAIT_1
+                || vid == CcidTokenDriver.VID_INNAIT_2 || vid == CcidTokenDriver.VID_INNAIT_3 || vid == CcidTokenDriver.VID_INNAIT_4) {
+            selectedIndex = 1; // "InnaIT Precision (USB OTG)"
+        }
+        // 2: mToken / CryptoID (Century Longmai PKI)
+        else if (name.contains("mtoken") || name.contains("cryptoid") || name.contains("longmai")
+                || vid == CcidTokenDriver.VID_LONGMAI_1 || vid == CcidTokenDriver.VID_LONGMAI_2
+                || vid == CcidTokenDriver.VID_LONGMAI_3 || vid == CcidTokenDriver.VID_LONGMAI_4 || vid == CcidTokenDriver.VID_LONGMAI_5) {
+            selectedIndex = 2; // "mToken / CryptoID (USB OTG)"
+        }
+        // 3: Watchdata ProxKey
+        else if (name.contains("watchdata") || name.contains("proxkey")
+                || vid == CcidTokenDriver.VID_WATCHDATA_1 || vid == CcidTokenDriver.VID_WATCHDATA_2
+                || vid == CcidTokenDriver.VID_WATCHDATA_3 || vid == CcidTokenDriver.VID_WATCHDATA_4 || vid == CcidTokenDriver.VID_WATCHDATA_5) {
+            selectedIndex = 3; // "Watchdata ProxKey (USB OTG)"
+        }
+        // 4: SafeNet eToken
+        else if (name.contains("safenet") || name.contains("etoken") || vid == CcidTokenDriver.VID_SAFENET_1 || vid == CcidTokenDriver.VID_SAFENET_2) {
+            selectedIndex = 4; // "SafeNet eToken (USB OTG)"
+        }
+
+        if (selectedIndex >= 0) {
+            final int pos = selectedIndex;
+            spTokenDriver.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (spTokenDriver != null && spTokenDriver.getSelectedItemPosition() != pos) {
+                        spTokenDriver.setSelection(pos);
+                    }
+                }
+            });
+        }
+    }
+
     private void setupSpinners() {
         // Drivers Spinner
         if (spTokenDriver != null) {
@@ -910,11 +946,18 @@ public class MainActivity extends Activity {
                     "InnaIT Precision (USB OTG)",
                     "mToken / CryptoID (USB OTG)",
                     "Watchdata ProxKey (USB OTG)",
+                    "SafeNet eToken (USB OTG)",
                     "Software Certificate (.pfx / .p12)",
                     "Android System KeyStore"
             };
             ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, drivers);
             spTokenDriver.setAdapter(adapter);
+            spTokenDriver.post(new Runnable() {
+                @Override
+                public void run() {
+                    updateTokenDriverSpinner(CcidTokenDriver.scanForToken(MainActivity.this));
+                }
+            });
         }
 
         // Reasons Spinner
@@ -1559,9 +1602,11 @@ public class MainActivity extends Activity {
         if (etSignPin != null) etSignPin.setText(savedPin);
 
         String savedCert = prefs.getString(PREF_SELECTED_CERT, "");
-        if (!savedCert.isEmpty() && tvSignSelectedCert != null) {
+        if (!savedCert.isEmpty() && (savedCert.endsWith(".p12") || savedCert.endsWith(".pfx") || savedCert.contains("(.p12)") || savedCert.contains("(.pfx)"))) {
             mSelectedCertDisplayName = savedCert;
-            tvSignSelectedCert.setText("Selected: " + savedCert);
+            if (tvSignSelectedCert != null) {
+                tvSignSelectedCert.setText("Selected: " + savedCert);
+            }
         }
     }
 
@@ -1609,11 +1654,6 @@ public class MainActivity extends Activity {
                     if (tvSignSelectedCert != null) {
                         tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
                     }
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .edit()
-                            .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
-                            .putString("last_token_client_name", sub)
-                            .apply();
                     return;
                 }
             }
@@ -1634,26 +1674,10 @@ public class MainActivity extends Activity {
         mSelectedCertAlias = "";
         if (tvSignSelectedCert != null) {
             if (tokenConnected) {
-                String clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", "");
-                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token")) {
-                    clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_SELECTED_CERT, "");
-                }
-                if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
-                    clientName = "ABHISHEK BHARATKUMAR SHETH";
-                }
-                if (clientName.contains("(")) {
-                    clientName = clientName.substring(0, clientName.indexOf("(")).trim();
-                }
                 CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
-                String tokenSrc = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
-                mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
-                mSelectedCertDisplayName = clientName + " (" + tokenSrc + ")";
-                tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                        .edit()
-                        .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
-                        .putString("last_token_client_name", clientName)
-                        .apply();
+                String tokenSrc = (dt != null && dt.name != null) ? dt.name : "USB Token";
+                updateTokenDriverSpinner(dt);
+                tvSignSelectedCert.setText("Hardware Token: " + tokenSrc + " (Tap 'Find Certificates' to Read)");
             } else {
                 tvSignSelectedCert.setText("Connect USB Token or Load PFX / P12");
             }
@@ -1671,6 +1695,8 @@ public class MainActivity extends Activity {
             if (connected) {
                 tvTokenStatusBadge.setText("Connected");
                 tvTokenStatusBadge.setBackgroundColor(0xFF166534);
+                CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
+                updateTokenDriverSpinner(dt);
             } else {
                 tvTokenStatusBadge.setText("Disconnected");
                 tvTokenStatusBadge.setBackgroundColor(0xFFEF4444);
@@ -1883,34 +1909,13 @@ public class MainActivity extends Activity {
             certObjectsList.add(obj);
         }
 
-        if (certObjectsList.isEmpty() && UsbTokenManager.isHardwareTokenConnected(this)) {
-            String clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString("last_token_client_name", "");
-            if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token")) {
-                clientName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_SELECTED_CERT, "");
-            }
-            if (clientName.isEmpty() || clientName.contains("Enter PIN") || clientName.contains("USB Token") || clientName.contains("Select")) {
-                clientName = "ABHISHEK BHARATKUMAR SHETH";
-            }
-            if (clientName.contains("(")) {
-                clientName = clientName.substring(0, clientName.indexOf("(")).trim();
-            }
-            CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
-            String tokenSrc = (dt != null && dt.name != null) ? dt.name : "mToken / CryptoID";
-            String tokenBrand = (dt != null && dt.brand != null) ? dt.brand : "Century Longmai PKI";
+        boolean tokenConnected = UsbTokenManager.isHardwareTokenConnected(this);
+        CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
+        String tokenSrc = (dt != null && dt.name != null) ? dt.name : "USB Token";
 
-            JSONObject obj = new JSONObject();
-            try {
-                obj.put("alias", "USB_HARDWARE_TOKEN_CERT");
-                obj.put("subject", clientName);
-                obj.put("issuer", tokenBrand);
-                obj.put("source", tokenSrc);
-                obj.put("is_hardware_token", true);
-                obj.put("is_placeholder", false);
-            } catch (Throwable ignored) {}
-
-            displayNamesList.add(clientName + " (" + tokenSrc + ")");
-            aliasesList.add("USB_HARDWARE_TOKEN_CERT");
-            certObjectsList.add(obj);
+        if (certObjectsList.isEmpty() && tokenConnected) {
+            displayNamesList.add("🔑 " + tokenSrc + " (Enter PIN & Tap 'Find Certificates')");
+            aliasesList.add("__PROMPT_PIN__");
         }
 
         displayNamesList.add("📁 Load / Import Another Certificate (.pfx / .p12)...");
@@ -1918,7 +1923,8 @@ public class MainActivity extends Activity {
 
         final String[] displayNames = displayNamesList.toArray(new String[0]);
         final String[] aliases = aliasesList.toArray(new String[0]);
-        final int loadNewIdx = displayNamesList.size() - 1;
+        final int loadNewIdx = displayNamesList.indexOf("📁 Load / Import Another Certificate (.pfx / .p12)...");
+        final int promptPinIdx = displayNamesList.indexOf("🔑 " + tokenSrc + " (Enter PIN & Tap 'Find Certificates')");
 
         new AlertDialog.Builder(this)
                 .setTitle("Select Digital Certificate")
@@ -1929,15 +1935,26 @@ public class MainActivity extends Activity {
                             if (btnSignLoadP12 != null) btnSignLoadP12.performClick();
                             return;
                         }
+                        if (which == promptPinIdx) {
+                            if (etSignPin != null) {
+                                etSignPin.requestFocus();
+                                android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                                if (imm != null) imm.showSoftInput(etSignPin, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                            }
+                            Toast.makeText(MainActivity.this, "Please enter your Token PIN and tap 'Find Certificates'", Toast.LENGTH_LONG).show();
+                            return;
+                        }
                         mSelectedCertAlias = aliases[which];
                         mSelectedCertDisplayName = displayNames[which];
                         if (tvSignSelectedCert != null) {
                             tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
                         }
-                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                                .edit()
-                                .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
-                                .apply();
+                        if (mSelectedCertDisplayName.endsWith(".p12") || mSelectedCertDisplayName.endsWith(".pfx")) {
+                            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                                    .edit()
+                                    .putString(PREF_SELECTED_CERT, mSelectedCertDisplayName)
+                                    .apply();
+                        }
                         Toast.makeText(MainActivity.this, "Certificate selected: " + mSelectedCertDisplayName, Toast.LENGTH_SHORT).show();
                     }
                 })

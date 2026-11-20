@@ -111,9 +111,19 @@ public class UsbTokenManager {
 
         UsbDevice device = detected.device;
         if (sConnectedDevice != null && (!sConnectedDevice.getDeviceName().equals(device.getDeviceName()) || sConnectedDevice.getDeviceId() != device.getDeviceId())) {
-            Log.d(TAG, "Different USB Token detected! Resetting previous token connection.");
+            Log.d(TAG, "Different USB Token detected! Resetting previous token connection and cache.");
             disconnectToken(context);
             P11Operation.disconnect();
+            if (context != null) {
+                try {
+                    context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .remove("last_token_client_name")
+                            .remove("last_token_issuer_name")
+                            .remove("selected_certificate")
+                            .apply();
+                } catch (Throwable ignored) {}
+            }
         }
         sConnectedDevice = device;
 
@@ -207,7 +217,8 @@ public class UsbTokenManager {
                 sBulkInEndpoint = bulkIn;
                 sBulkOutEndpoint = bulkOut;
 
-                // Wire endpoints into PKCS#11 SDK (libOTGPass2003_India.so) strictly for Feitian / HyperPKI tokens (VID 0x096e)
+                // Wire endpoints into Feitian PKCS#11 SDK (libOTGPass2003_India.so) ONLY for Feitian tokens!
+                // For other tokens (mToken / CryptoID, ProxKey, InnaIT), do NOT wire to avoid background command conflicts.
                 if (device.getVendorId() == CcidTokenDriver.VID_FEITIAN) {
                     try {
                         com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
@@ -215,7 +226,7 @@ public class UsbTokenManager {
                             myApp.setUsbDeviceConnection(conn);
                             myApp.setInUsbEndpoint(bulkIn);
                             myApp.setOutUsbEndpoint(bulkOut);
-                            Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token: VID=0x" + Integer.toHexString(device.getVendorId()));
+                            Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token");
                         }
                         com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
                         if (cb != null) {

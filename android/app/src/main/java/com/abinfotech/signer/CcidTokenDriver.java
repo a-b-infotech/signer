@@ -70,11 +70,13 @@ public class CcidTokenDriver {
     public static final int VID_WATCHDATA_2 = 0x04b5;
     public static final int VID_WATCHDATA_3 = 0x1059;
     public static final int VID_WATCHDATA_4 = 0x04b4;
+    public static final int VID_WATCHDATA_5 = 0x24dc;
 
     // 4. InnaIT Precision (Precision / eMudhra)
     public static final int VID_INNAIT_1 = 0x2ccf;
     public static final int VID_INNAIT_2 = 0x2007;
     public static final int VID_INNAIT_3 = 0x2ce3;
+    public static final int VID_INNAIT_4 = 0x2617;
 
     // 5. SafeNet eToken (Gemalto / Thales)
     public static final int VID_SAFENET_1 = 0x0529;
@@ -112,12 +114,12 @@ public class CcidTokenDriver {
             if (vid == VID_FEITIAN) {
                 return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
             }
-            // 3. Watchdata ProxKey (0x163C, 0x04B5, 0x1059, 0x04B4)
-            if (vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2 || vid == VID_WATCHDATA_3 || vid == VID_WATCHDATA_4) {
+            // 3. Watchdata ProxKey (0x163C, 0x04B5, 0x1059, 0x04B4, 0x24DC)
+            if (vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2 || vid == VID_WATCHDATA_3 || vid == VID_WATCHDATA_4 || vid == VID_WATCHDATA_5) {
                 return new DetectedToken("Watchdata ProxKey", "Watchdata WDS", vid, pid, dev, hasCcid);
             }
-            // 4. InnaIT Precision (0x2CCF, 0x2007, 0x2CE3)
-            if (vid == VID_INNAIT_1 || vid == VID_INNAIT_2 || vid == VID_INNAIT_3) {
+            // 4. InnaIT Precision (0x2CCF, 0x2007, 0x2CE3, 0x2617)
+            if (vid == VID_INNAIT_1 || vid == VID_INNAIT_2 || vid == VID_INNAIT_3 || vid == VID_INNAIT_4) {
                 return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
             }
             // 5. SafeNet eToken (0x0529, 0x08E6)
@@ -300,8 +302,46 @@ public class CcidTokenDriver {
 
     public static List<CcidCertInfo> parseAllX509Der(byte[] rawData) {
         List<CcidCertInfo> results = new ArrayList<>();
-        if (rawData == null || rawData.length < 100) return results;
+        List<CcidCertInfo> fallbackList = new ArrayList<>();
+        if (rawData == null || rawData.length < 50) return results;
 
+        // 1. Try Java's standard CertificateFactory.generateCertificates (handles concatenated & PKCS#7 certs natively)
+        try {
+            CertificateFactory cf = CertificateFactory.getInstance("X.509");
+            java.util.Collection<? extends java.security.cert.Certificate> certs = cf.generateCertificates(new ByteArrayInputStream(rawData));
+            if (certs != null && !certs.isEmpty()) {
+                for (java.security.cert.Certificate c : certs) {
+                    if (c instanceof X509Certificate) {
+                        X509Certificate x509 = (X509Certificate) c;
+                        String sub = x509.getSubjectDN() != null ? x509.getSubjectDN().getName() : "";
+                        String iss = x509.getIssuerDN() != null ? x509.getIssuerDN().getName() : "";
+                        String clientName = CertificateManager.extractCommonName(sub);
+                        String issuerName = CertificateManager.extractCommonName(iss);
+
+                        if (CertificateManager.isClientCertificate(x509)) {
+                            CcidCertInfo ci = new CcidCertInfo();
+                            ci.clientName = clientName;
+                            ci.issuerName = issuerName;
+                            ci.rawCertBytes = x509.getEncoded();
+                            ci.x509Cert = x509;
+                            results.add(ci);
+                            Log.d(TAG, "✅ CertificateFactory parsed client certificate: CN=" + clientName);
+                        } else if (!sub.equalsIgnoreCase(iss)) {
+                            CcidCertInfo fallback = new CcidCertInfo();
+                            fallback.clientName = clientName;
+                            fallback.issuerName = issuerName;
+                            fallback.rawCertBytes = x509.getEncoded();
+                            fallback.x509Cert = x509;
+                            fallbackList.add(fallback);
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        if (!results.isEmpty()) return results;
+
+        // 2. Scan byte-by-byte for ASN.1 DER sequence: 30 82 <len_hi> <len_lo>
         int cursor = 0;
         while (cursor < rawData.length - 4) {
             int start = -1;
@@ -321,36 +361,50 @@ public class CcidTokenDriver {
                 }
             }
             if (start < 0 || certLen <= 50 || certLen > rawData.length - start) {
-                if (start >= 0) cursor = start + 2;
+                if (start >= 0) cursor = start + 1;
                 else break;
                 continue;
             }
 
+            boolean parsedOk = false;
             byte[] certBytes = new byte[certLen];
             System.arraycopy(rawData, start, certBytes, 0, certLen);
             try {
                 CertificateFactory cf = CertificateFactory.getInstance("X.509");
                 X509Certificate x509 = (X509Certificate) cf.generateCertificate(new ByteArrayInputStream(certBytes));
                 if (x509 != null) {
-                    // Rigorous client certificate filter: strictly skips Root CA and Sub-CAs!
+                    parsedOk = true;
+                    String sub = x509.getSubjectDN() != null ? x509.getSubjectDN().getName() : "";
+                    String iss = x509.getIssuerDN() != null ? x509.getIssuerDN().getName() : "";
+                    String clientName = CertificateManager.extractCommonName(sub);
+                    String issuerName = CertificateManager.extractCommonName(iss);
+
                     if (CertificateManager.isClientCertificate(x509)) {
                         CcidCertInfo ci = new CcidCertInfo();
-                        String sub = x509.getSubjectDN() != null ? x509.getSubjectDN().getName() : "";
-                        String iss = x509.getIssuerDN() != null ? x509.getIssuerDN().getName() : "";
-                        ci.clientName = CertificateManager.extractCommonName(sub);
-                        ci.issuerName = CertificateManager.extractCommonName(iss);
+                        ci.clientName = clientName;
+                        ci.issuerName = issuerName;
                         ci.rawCertBytes = certBytes;
                         ci.x509Cert = x509;
                         results.add(ci);
                         Log.d(TAG, "✅ Client Certificate Found CN=" + ci.clientName + " Issuer=" + ci.issuerName);
-                    } else {
-                        Log.d(TAG, "Skipping CA/chain certificate: " + x509.getSubjectDN());
+                    } else if (!sub.equalsIgnoreCase(iss)) {
+                        CcidCertInfo fallback = new CcidCertInfo();
+                        fallback.clientName = clientName;
+                        fallback.issuerName = issuerName;
+                        fallback.rawCertBytes = certBytes;
+                        fallback.x509Cert = x509;
+                        fallbackList.add(fallback);
                     }
                 }
             } catch (Throwable t) {
-                Log.w(TAG, "parseAllX509Der cert parse notice: " + t.getMessage());
+                // If this sequence wasn't a valid standalone X509 certificate (e.g. outer container),
+                // advance cursor by 1 so inner sequences are not skipped!
             }
-            cursor = start + certLen;
+            cursor = parsedOk ? (start + certLen) : (start + 1);
+        }
+
+        if (results.isEmpty() && !fallbackList.isEmpty()) {
+            results.addAll(fallbackList);
         }
         return results;
     }
@@ -358,6 +412,54 @@ public class CcidTokenDriver {
     public static CcidCertInfo parseX509Der(byte[] rawData) {
         List<CcidCertInfo> list = parseAllX509Der(rawData);
         return (!list.isEmpty()) ? list.get(0) : null;
+    }
+
+    public static byte[] readEntireBinaryFile(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, int[] seqHolder) {
+        ByteArrayOutputStream stream = new ByteArrayOutputStream();
+        int offset = 0;
+        int preferredChunk = 0x00; // 0x00 = ask for 256 bytes
+
+        while (offset < 8192) {
+            byte offHi = (byte) ((offset >> 8) & 0xFF);
+            byte offLo = (byte) (offset & 0xFF);
+            byte[] cmd = new byte[]{0x00, (byte) 0xB0, offHi, offLo, (byte) preferredChunk};
+            byte[] resp = execCcidApdu(conn, outEp, inEp, cmd, seqHolder[0]++);
+
+            if (resp == null || resp.length < 2) break;
+
+            int sw1 = resp[resp.length - 2] & 0xFF;
+            int sw2 = resp[resp.length - 1] & 0xFF;
+            int dataLen = resp.length - 2;
+
+            if (sw1 == 0x90 && sw2 == 0x00) {
+                if (dataLen <= 0) break;
+                stream.write(resp, 0, dataLen);
+                offset += dataLen;
+                if (preferredChunk != 0x00 && dataLen < (preferredChunk & 0xFF)) {
+                    break;
+                }
+            } else if (sw1 == 0x62 && (sw2 == 0x82 || sw2 == 0x00)) {
+                if (dataLen > 0) {
+                    stream.write(resp, 0, dataLen);
+                    offset += dataLen;
+                }
+                break;
+            } else if (sw1 == 0x6C) {
+                // Exact Le requested by token (e.g. 128 bytes = 0x80) - update chunk and continue reading entire file!
+                preferredChunk = sw2;
+                continue;
+            } else if (sw1 == 0x67) {
+                if (preferredChunk != 0x80) {
+                    preferredChunk = 0x80;
+                    continue;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        return stream.toByteArray();
     }
 
     public static List<CcidCertInfo> readCertificatesViaCcid(Context context, String pin) {
@@ -417,6 +519,50 @@ public class CcidTokenDriver {
                 } catch (Throwable ignored) {}
             }
 
+            // 2b. Direct GET DATA for mToken / CryptoID & FIPS smartcard tokens (requires no PIN)
+            try {
+                byte[][] getDataCmds = new byte[][]{
+                    new byte[]{0x00, (byte) 0xCA, 0x01, 0x01, 0x00},
+                    new byte[]{(byte) 0x80, (byte) 0xCA, 0x01, 0x01, 0x00},
+                    new byte[]{0x00, (byte) 0xCA, 0x01, 0x02, 0x00},
+                    new byte[]{0x00, (byte) 0xCA, 0x00, 0x01, 0x00}
+                };
+                for (byte[] gd : getDataCmds) {
+                    byte[] gresp = execCcidApdu(conn, outEp, inEp, gd, seq++);
+                    if (gresp != null && gresp.length > 50) {
+                        List<CcidCertInfo> gcinfos = parseAllX509Der(gresp);
+                        if (!gcinfos.isEmpty()) {
+                            results.addAll(gcinfos);
+                            Log.d(TAG, "✅ GET_DATA APDU retrieved client cert CN=" + gcinfos.get(0).clientName);
+                            break;
+                        }
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "GET_DATA probe notice: " + t.getMessage());
+            }
+
+            // 2c. Direct 3F18 Selection for Watchdata ProxKey TimeCOS
+            try {
+                execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x18}, seq++);
+                for (int wdef : new int[]{0x0040, 0x0001, 0x0002, 0x7001}) {
+                    byte hi = (byte) ((wdef >> 8) & 0xFF);
+                    byte lo = (byte) (wdef & 0xFF);
+                    execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, hi, lo}, seq++);
+                    int[] seqHolder = new int[]{seq};
+                    byte[] wdData = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                    seq = seqHolder[0];
+                    if (wdData != null && wdData.length > 50) {
+                        List<CcidCertInfo> wdInfos = parseAllX509Der(wdData);
+                        if (!wdInfos.isEmpty()) {
+                            results.addAll(wdInfos);
+                            Log.d(TAG, "✅ Watchdata ProxKey 3F18 retrieved client cert CN=" + wdInfos.get(0).clientName);
+                            break;
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+
             // 3. PRIMARY STRATEGY: ISO 7816-4 EF & DF File Scanning (Directly reads certificate without PIN across Indian tokens!)
             try {
                 // Select Master File 3F00
@@ -427,6 +573,7 @@ public class CcidTokenDriver {
                     0x7001, 0x7002, 0x7003, // Indian DSC Sign, Encrypt, CA
                     0xC001, 0xC002, 0xC003, // Longmai mToken Container Certs
                     0x4545,                 // Longmai mToken DSC EF
+                    0x0040,                 // Watchdata ProxKey Cert EF
                     0x3401, 0x3402, 0x3403, 0x3411, // Feitian / EnterSafe
                     0x0001, 0x0002, 0x0003, 0x0004,
                     0x5015, 0x5031, 0x5032, 0x5034, // PKCS#15
@@ -445,55 +592,10 @@ public class CcidTokenDriver {
                         selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x04, 0x02, hi, lo}, seq++);
                     }
 
-                    ByteArrayOutputStream fileStream = new ByteArrayOutputStream();
-                    int fileOffset = 0;
-                    while (fileStream.size() < 4096) {
-                        byte offHi = (byte) ((fileOffset >> 8) & 0xFF);
-                        byte offLo = (byte) (fileOffset & 0xFF);
-                        byte[] chunkCmd = new byte[]{0x00, (byte) 0xB0, offHi, offLo, 0x00};
-                        byte[] chunkResp = execCcidApdu(conn, outEp, inEp, chunkCmd, seq++);
-                        if (chunkResp == null || chunkResp.length <= 2) break;
+                    int[] seqHolder = new int[]{seq};
+                    byte[] fullFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                    seq = seqHolder[0];
 
-                        int sw1 = chunkResp[chunkResp.length - 2] & 0xFF;
-                        int sw2 = chunkResp[chunkResp.length - 1] & 0xFF;
-                        int dataLen = chunkResp.length - 2;
-
-                        if (sw1 == 0x90 && sw2 == 0x00) {
-                            if (dataLen <= 0) break;
-                            fileStream.write(chunkResp, 0, dataLen);
-                            fileOffset += dataLen;
-                            if (dataLen < 256) break;
-                        } else if (sw1 == 0x6C) {
-                            chunkCmd[4] = (byte) sw2;
-                            byte[] retryChunk = execCcidApdu(conn, outEp, inEp, chunkCmd, seq++);
-                            if (retryChunk != null && retryChunk.length > 2) {
-                                int rlen = retryChunk.length - 2;
-                                int rsw1 = retryChunk[retryChunk.length - 2] & 0xFF;
-                                if (rsw1 == 0x90 && rlen > 0) {
-                                    fileStream.write(retryChunk, 0, rlen);
-                                    fileOffset += rlen;
-                                }
-                            }
-                            break;
-                        } else if (sw1 == 0x67) {
-                            // Wrong length: retry with standard 128-byte chunk
-                            chunkCmd[4] = (byte) 0x80;
-                            byte[] retryChunk = execCcidApdu(conn, outEp, inEp, chunkCmd, seq++);
-                            if (retryChunk != null && retryChunk.length > 2) {
-                                int rlen = retryChunk.length - 2;
-                                int rsw1 = retryChunk[retryChunk.length - 2] & 0xFF;
-                                if (rsw1 == 0x90 && rlen > 0) {
-                                    fileStream.write(retryChunk, 0, rlen);
-                                    fileOffset += rlen;
-                                }
-                            }
-                            break;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    byte[] fullFile = fileStream.toByteArray();
                     if (fullFile.length > 100) {
                         List<CcidCertInfo> cinfos = parseAllX509Der(fullFile);
                         if (!cinfos.isEmpty()) {
@@ -515,23 +617,10 @@ public class CcidTokenDriver {
                             byte slo = (byte) (subEf & 0xFF);
                             execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, shi, slo}, seq++);
 
-                            ByteArrayOutputStream dfStream = new ByteArrayOutputStream();
-                            int dfOffset = 0;
-                            while (dfStream.size() < 4096) {
-                                byte offHi = (byte) ((dfOffset >> 8) & 0xFF);
-                                byte offLo = (byte) (dfOffset & 0xFF);
-                                byte[] dCmd = new byte[]{0x00, (byte) 0xB0, offHi, offLo, 0x00};
-                                byte[] dResp = execCcidApdu(conn, outEp, inEp, dCmd, seq++);
-                                if (dResp == null || dResp.length <= 2) break;
-                                int ds1 = dResp[dResp.length - 2] & 0xFF;
-                                int dlen = dResp.length - 2;
-                                if (ds1 == 0x90 && dlen > 0) {
-                                    dfStream.write(dResp, 0, dlen);
-                                    dfOffset += dlen;
-                                    if (dlen < 256) break;
-                                } else break;
-                            }
-                            byte[] dfFile = dfStream.toByteArray();
+                            int[] seqHolder = new int[]{seq};
+                            byte[] dfFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                            seq = seqHolder[0];
+
                             if (dfFile.length > 100) {
                                 List<CcidCertInfo> dInfos = parseAllX509Der(dfFile);
                                 if (!dInfos.isEmpty()) {
@@ -570,23 +659,10 @@ public class CcidTokenDriver {
                                     byte phi = (byte) ((pef >> 8) & 0xFF);
                                     byte plo = (byte) (pef & 0xFF);
                                     execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, phi, plo}, seq++);
-                                    ByteArrayOutputStream p15Stream = new ByteArrayOutputStream();
-                                    int p15Off = 0;
-                                    while (p15Stream.size() < 3072) {
-                                        byte offHi = (byte) ((p15Off >> 8) & 0xFF);
-                                        byte offLo = (byte) (p15Off & 0xFF);
-                                        byte[] cCmd = new byte[]{0x00, (byte) 0xB0, offHi, offLo, 0x00};
-                                        byte[] cResp = execCcidApdu(conn, outEp, inEp, cCmd, seq++);
-                                        if (cResp == null || cResp.length <= 2) break;
-                                        int cs1 = cResp[cResp.length - 2] & 0xFF;
-                                        int dlen = cResp.length - 2;
-                                        if (cs1 == 0x90 && dlen > 0) {
-                                            p15Stream.write(cResp, 0, dlen);
-                                            p15Off += dlen;
-                                            if (dlen < 256) break;
-                                        } else break;
-                                    }
-                                    byte[] p15Data = p15Stream.toByteArray();
+                                    int[] seqHolder = new int[]{seq};
+                                    byte[] p15Data = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                                    seq = seqHolder[0];
+
                                     if (p15Data.length > 50) {
                                         List<CcidCertInfo> p15Certs = parseAllX509Der(p15Data);
                                         if (!p15Certs.isEmpty()) {
