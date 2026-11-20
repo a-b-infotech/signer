@@ -1,6 +1,7 @@
 package com.abinfotech.signer;
 
 import android.graphics.RectF;
+import com.itextpdf.text.Rectangle;
 
 public class SignatureArea {
     public int pageNum;   // 1-based page number
@@ -19,6 +20,10 @@ public class SignatureArea {
 
     public RectF toRectF() {
         return new RectF(x, y, x + width, y + height);
+    }
+
+    public Rectangle toRectangle() {
+        return new Rectangle(x, y, x + width, y + height);
     }
 
     @Override

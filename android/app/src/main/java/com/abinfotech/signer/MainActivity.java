@@ -416,6 +416,7 @@ public class MainActivity extends Activity {
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        updateTokenDriverSpinner(CcidTokenDriver.scanForToken(context));
                                         updateServerStatusUi();
                                         updateTokenStatus();
                                     }
@@ -446,7 +447,7 @@ public class MainActivity extends Activity {
                 mSelectedCertDisplayName = "";
                 mSelectedCertAlias = "";
                 if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Hardware Token: " + tokenBrand + " (Reading...)");
+                    tvSignSelectedCert.setText("Select Certificate");
                 }
 
                 new Thread(new Runnable() {
@@ -457,6 +458,7 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                updateTokenDriverSpinner(CcidTokenDriver.scanForToken(context));
                                 updateServerStatusUi();
                                 updateTokenStatus();
                             }
@@ -470,7 +472,7 @@ public class MainActivity extends Activity {
                 mSelectedCertDisplayName = "";
                 mSelectedCertAlias = "";
                 if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Connect USB Token or Load PFX / P12");
+                    tvSignSelectedCert.setText("Select Certificate");
                 }
                 updateServerStatusUi();
                 updateTokenStatus();
@@ -680,10 +682,9 @@ public class MainActivity extends Activity {
             CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
             updateTokenDriverSpinner(dt);
             String currentText = (tvSignSelectedCert != null) ? tvSignSelectedCert.getText().toString() : "";
-            if (currentText.isEmpty() || currentText.contains("No Certificate") || currentText.contains("Connect USB")) {
-                String tokenSrc = (dt != null && dt.name != null) ? dt.name : "USB Token";
+            if (currentText.isEmpty() || currentText.contains("No Certificate") || currentText.contains("Connect USB") || currentText.contains("Hardware Token") || currentText.contains("Reading")) {
                 if (tvSignSelectedCert != null) {
-                    tvSignSelectedCert.setText("Hardware Token: " + tokenSrc + " (Tap 'Find Certificates')");
+                    tvSignSelectedCert.setText("Select Certificate");
                 }
                 autoDetectCertificatesAsync();
             }
@@ -893,59 +894,69 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void updateTokenDriverSpinner(final CcidTokenDriver.DetectedToken token) {
-        if (spTokenDriver == null || token == null) return;
-        int selectedIndex = -1;
-        String name = token.name != null ? token.name.toLowerCase() : "";
-        int vid = token.vendorId;
-
-        // 0: HYP2003 / ePass2003 (Feitian / HyperPKI)
-        if (name.contains("hyp") || name.contains("epass") || name.contains("feitian") || vid == CcidTokenDriver.VID_FEITIAN) {
-            selectedIndex = 0; // "HYP2003 / ePass2003 (USB OTG)"
-        }
-        // 1: InnaIT Precision
-        else if (name.contains("innait") || name.contains("precision") || vid == CcidTokenDriver.VID_INNAIT_1
-                || vid == CcidTokenDriver.VID_INNAIT_2 || vid == CcidTokenDriver.VID_INNAIT_3 || vid == CcidTokenDriver.VID_INNAIT_4) {
-            selectedIndex = 1; // "InnaIT Precision (USB OTG)"
-        }
-        // 2: mToken / CryptoID (Century Longmai PKI)
-        else if (name.contains("mtoken") || name.contains("cryptoid") || name.contains("longmai")
-                || vid == CcidTokenDriver.VID_LONGMAI_1 || vid == CcidTokenDriver.VID_LONGMAI_2
-                || vid == CcidTokenDriver.VID_LONGMAI_3 || vid == CcidTokenDriver.VID_LONGMAI_4 || vid == CcidTokenDriver.VID_LONGMAI_5) {
-            selectedIndex = 2; // "mToken / CryptoID (USB OTG)"
-        }
-        // 3: Watchdata ProxKey
-        else if (name.contains("watchdata") || name.contains("proxkey")
-                || vid == CcidTokenDriver.VID_WATCHDATA_1 || vid == CcidTokenDriver.VID_WATCHDATA_2
-                || vid == CcidTokenDriver.VID_WATCHDATA_3 || vid == CcidTokenDriver.VID_WATCHDATA_4 || vid == CcidTokenDriver.VID_WATCHDATA_5) {
-            selectedIndex = 3; // "Watchdata ProxKey (USB OTG)"
-        }
-        // 4: SafeNet eToken
-        else if (name.contains("safenet") || name.contains("etoken") || vid == CcidTokenDriver.VID_SAFENET_1 || vid == CcidTokenDriver.VID_SAFENET_2) {
-            selectedIndex = 4; // "SafeNet eToken (USB OTG)"
+    private void updateTokenDriverSpinner(CcidTokenDriver.DetectedToken token) {
+        if (spTokenDriver == null) return;
+        if (token == null) {
+            token = CcidTokenDriver.scanForToken(this);
         }
 
-        if (selectedIndex >= 0) {
-            final int pos = selectedIndex;
-            spTokenDriver.post(new Runnable() {
-                @Override
-                public void run() {
-                    if (spTokenDriver != null && spTokenDriver.getSelectedItemPosition() != pos) {
-                        spTokenDriver.setSelection(pos);
-                    }
+        int selectedIndex = 0; // "Auto-Detect USB Token (Plug & Play)"
+
+        if (token != null) {
+            String name = token.name != null ? token.name.toLowerCase() : "";
+            int vid = token.vendorId;
+
+            // 1: mToken / CryptoID (Century Longmai PKI)
+            if (name.contains("mtoken") || name.contains("cryptoid") || name.contains("longmai")
+                    || vid == CcidTokenDriver.VID_LONGMAI_1 || vid == CcidTokenDriver.VID_LONGMAI_2
+                    || vid == CcidTokenDriver.VID_LONGMAI_3 || vid == CcidTokenDriver.VID_LONGMAI_4 || vid == CcidTokenDriver.VID_LONGMAI_5) {
+                selectedIndex = 1;
+            }
+            // 2: Watchdata ProxKey
+            else if (name.contains("watchdata") || name.contains("proxkey")
+                    || vid == CcidTokenDriver.VID_WATCHDATA_1 || vid == CcidTokenDriver.VID_WATCHDATA_2
+                    || vid == CcidTokenDriver.VID_WATCHDATA_3 || vid == CcidTokenDriver.VID_WATCHDATA_4 || vid == CcidTokenDriver.VID_WATCHDATA_5) {
+                selectedIndex = 2;
+            }
+            // 3: HYP2003 / ePass2003 (Feitian / HyperPKI)
+            else if (name.contains("hyp") || name.contains("epass") || name.contains("feitian") || vid == CcidTokenDriver.VID_FEITIAN) {
+                selectedIndex = 3;
+            }
+            // 4: InnaIT Precision
+            else if (name.contains("innait") || name.contains("precision") || vid == CcidTokenDriver.VID_INNAIT_1
+                    || vid == CcidTokenDriver.VID_INNAIT_2 || vid == CcidTokenDriver.VID_INNAIT_3 || vid == CcidTokenDriver.VID_INNAIT_4) {
+                selectedIndex = 4;
+            }
+            // 5: SafeNet eToken
+            else if (name.contains("safenet") || name.contains("etoken") || vid == CcidTokenDriver.VID_SAFENET_1 || vid == CcidTokenDriver.VID_SAFENET_2) {
+                selectedIndex = 5;
+            }
+        }
+
+        updateTokenDriverSpinnerByPos(selectedIndex);
+    }
+
+    private void updateTokenDriverSpinnerByPos(final int pos) {
+        if (spTokenDriver == null) return;
+        spTokenDriver.post(new Runnable() {
+            @Override
+            public void run() {
+                if (spTokenDriver != null && spTokenDriver.getSelectedItemPosition() != pos) {
+                    spTokenDriver.setSelection(pos);
                 }
-            });
-        }
+            }
+        });
     }
 
     private void setupSpinners() {
         // Drivers Spinner
         if (spTokenDriver != null) {
             String[] drivers = new String[]{
-                    "HYP2003 / ePass2003 (USB OTG)",
-                    "InnaIT Precision (USB OTG)",
+                    "Auto-Detect USB Token (Plug & Play)",
                     "mToken / CryptoID (USB OTG)",
                     "Watchdata ProxKey (USB OTG)",
+                    "HYP2003 / ePass2003 (USB OTG)",
+                    "InnaIT Precision (USB OTG)",
                     "SafeNet eToken (USB OTG)",
                     "Software Certificate (.pfx / .p12)",
                     "Android System KeyStore"
@@ -1605,7 +1616,7 @@ public class MainActivity extends Activity {
         if (!savedCert.isEmpty() && (savedCert.endsWith(".p12") || savedCert.endsWith(".pfx") || savedCert.contains("(.p12)") || savedCert.contains("(.pfx)"))) {
             mSelectedCertDisplayName = savedCert;
             if (tvSignSelectedCert != null) {
-                tvSignSelectedCert.setText("Selected: " + savedCert);
+                tvSignSelectedCert.setText(savedCert);
             }
         }
     }
@@ -1638,21 +1649,41 @@ public class MainActivity extends Activity {
         if (certs == null) return;
         boolean tokenConnected = UsbTokenManager.isHardwareTokenConnected(MainActivity.this);
 
+        // Always update token driver spinner
+        CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
+        updateTokenDriverSpinner(dt);
+
         // First try to find a genuine real client certificate (not placeholder, not containing 'Enter PIN')
         for (int i = 0; i < certs.length(); i++) {
             JSONObject c = certs.optJSONObject(i);
             if (c != null && !c.optBoolean("is_placeholder", false)) {
                 String sub = c.optString("subject", "");
-                if (!sub.isEmpty() && !sub.contains("Enter PIN")) {
-                    mSelectedCertAlias = c.optString("alias", "");
-                    String src = c.optString("source", "");
-                    if (src != null && !src.isEmpty() && !sub.contains("(")) {
-                        mSelectedCertDisplayName = sub + " (" + src + ")";
-                    } else {
-                        mSelectedCertDisplayName = sub;
+                if (!sub.isEmpty() && !sub.contains("Enter PIN") && !sub.contains("Hardware Token")) {
+                    String cleanCn = CertificateManager.extractCommonName(sub);
+                    if (cleanCn.contains("(")) {
+                        cleanCn = cleanCn.substring(0, cleanCn.indexOf("(")).trim();
                     }
+                    mSelectedCertAlias = c.optString("alias", "");
+                    mSelectedCertDisplayName = cleanCn;
+
+                    String src = c.optString("source", "");
+                    if (src != null && !src.isEmpty()) {
+                        String lowerSrc = src.toLowerCase();
+                        if (lowerSrc.contains("mtoken") || lowerSrc.contains("cryptoid") || lowerSrc.contains("longmai")) {
+                            updateTokenDriverSpinnerByPos(1);
+                        } else if (lowerSrc.contains("watchdata") || lowerSrc.contains("proxkey")) {
+                            updateTokenDriverSpinnerByPos(2);
+                        } else if (lowerSrc.contains("hyp") || lowerSrc.contains("epass") || lowerSrc.contains("feitian")) {
+                            updateTokenDriverSpinnerByPos(3);
+                        } else if (lowerSrc.contains("innait") || lowerSrc.contains("precision")) {
+                            updateTokenDriverSpinnerByPos(4);
+                        } else if (lowerSrc.contains("safenet") || lowerSrc.contains("etoken")) {
+                            updateTokenDriverSpinnerByPos(5);
+                        }
+                    }
+
                     if (tvSignSelectedCert != null) {
-                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                        tvSignSelectedCert.setText(cleanCn);
                     }
                     return;
                 }
@@ -1664,8 +1695,9 @@ public class MainActivity extends Activity {
         if (lastCert != null && !lastCert.getName().equals("default_abinfo_dsc.p12")) {
             mSelectedCertAlias = lastCert.getName();
             mSelectedCertDisplayName = lastCert.getName();
+            updateTokenDriverSpinnerByPos(6);
             if (tvSignSelectedCert != null) {
-                tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                tvSignSelectedCert.setText(lastCert.getName());
             }
             return;
         }
@@ -1673,14 +1705,7 @@ public class MainActivity extends Activity {
         mSelectedCertDisplayName = "";
         mSelectedCertAlias = "";
         if (tvSignSelectedCert != null) {
-            if (tokenConnected) {
-                CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(this);
-                String tokenSrc = (dt != null && dt.name != null) ? dt.name : "USB Token";
-                updateTokenDriverSpinner(dt);
-                tvSignSelectedCert.setText("Hardware Token: " + tokenSrc + " (Tap 'Find Certificates' to Read)");
-            } else {
-                tvSignSelectedCert.setText("Connect USB Token or Load PFX / P12");
-            }
+            tvSignSelectedCert.setText("Select Certificate");
         }
     }
 
@@ -1894,17 +1919,16 @@ public class MainActivity extends Activity {
             if (obj == null) continue;
             boolean isPlaceholder = obj.optBoolean("is_placeholder", false);
             String sub = obj.optString("subject", "Certificate " + (i + 1));
-            if (isPlaceholder || sub.contains("Enter PIN")) {
+            if (isPlaceholder || sub.contains("Enter PIN") || sub.contains("Hardware Token")) {
                 // Strictly skip all token/driver placeholders - only show real client certificates!
                 continue;
             }
-            String source = obj.optString("source", "");
             String alias = obj.optString("alias", "");
-            String dispName = sub;
-            if (source != null && !source.isEmpty() && !sub.contains("(")) {
-                dispName = sub + " (" + source + ")";
+            String cleanCn = CertificateManager.extractCommonName(sub);
+            if (cleanCn.contains("(")) {
+                cleanCn = cleanCn.substring(0, cleanCn.indexOf("(")).trim();
             }
-            displayNamesList.add(dispName);
+            displayNamesList.add(cleanCn);
             aliasesList.add(alias);
             certObjectsList.add(obj);
         }
@@ -1914,7 +1938,7 @@ public class MainActivity extends Activity {
         String tokenSrc = (dt != null && dt.name != null) ? dt.name : "USB Token";
 
         if (certObjectsList.isEmpty() && tokenConnected) {
-            displayNamesList.add("🔑 " + tokenSrc + " (Enter PIN & Tap 'Find Certificates')");
+            displayNamesList.add("🔑 " + tokenSrc + " (Tap to Read Token)");
             aliasesList.add("__PROMPT_PIN__");
         }
 
@@ -1924,7 +1948,7 @@ public class MainActivity extends Activity {
         final String[] displayNames = displayNamesList.toArray(new String[0]);
         final String[] aliases = aliasesList.toArray(new String[0]);
         final int loadNewIdx = displayNamesList.indexOf("📁 Load / Import Another Certificate (.pfx / .p12)...");
-        final int promptPinIdx = displayNamesList.indexOf("🔑 " + tokenSrc + " (Enter PIN & Tap 'Find Certificates')");
+        final int promptPinIdx = displayNamesList.indexOf("🔑 " + tokenSrc + " (Tap to Read Token)");
 
         new AlertDialog.Builder(this)
                 .setTitle("Select Digital Certificate")
@@ -1941,13 +1965,14 @@ public class MainActivity extends Activity {
                                 android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
                                 if (imm != null) imm.showSoftInput(etSignPin, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
                             }
-                            Toast.makeText(MainActivity.this, "Please enter your Token PIN and tap 'Find Certificates'", Toast.LENGTH_LONG).show();
+                            Toast.makeText(MainActivity.this, "Reading certificates from token...", Toast.LENGTH_SHORT).show();
+                            autoDetectCertificatesAsync();
                             return;
                         }
                         mSelectedCertAlias = aliases[which];
                         mSelectedCertDisplayName = displayNames[which];
                         if (tvSignSelectedCert != null) {
-                            tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                            tvSignSelectedCert.setText(mSelectedCertDisplayName);
                         }
                         if (mSelectedCertDisplayName.endsWith(".p12") || mSelectedCertDisplayName.endsWith(".pfx")) {
                             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -2275,6 +2300,38 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private List<Integer> calculatePagesToSign() {
+        List<Integer> pages = new ArrayList<>();
+        if (mTotalPages <= 0) {
+            pages.add(1);
+            return pages;
+        }
+
+        if (rbSignCurrentPage != null && rbSignCurrentPage.isChecked()) {
+            pages.add(mCurrentPageIndex + 1);
+        } else if (rbSignAllPages != null && rbSignAllPages.isChecked()) {
+            for (int i = 1; i <= mTotalPages; i++) {
+                pages.add(i);
+            }
+        } else if (rbSignCustomPages != null && rbSignCustomPages.isChecked() && etSignCustomPages != null) {
+            String customStr = etSignCustomPages.getText().toString();
+            String[] parts = customStr.split(",");
+            for (String p : parts) {
+                try {
+                    int pNum = Integer.parseInt(p.trim());
+                    if (pNum >= 1 && pNum <= mTotalPages && !pages.contains(pNum)) {
+                        pages.add(pNum);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        if (pages.isEmpty()) {
+            pages.add(mCurrentPageIndex + 1);
+        }
+        return pages;
+    }
+
     private void performPdfSigning() {
         if (mActivePdfFile == null || !mActivePdfFile.exists()) {
             Toast.makeText(this, "Please choose a PDF document first", Toast.LENGTH_SHORT).show();
@@ -2293,6 +2350,35 @@ public class MainActivity extends Activity {
         final String reason = spSignReason != null ? spSignReason.getSelectedItem().toString() : "I approve this document";
         final String location = etSignLocation != null ? etSignLocation.getText().toString().trim() : "Gujarat, India";
 
+        final List<SignatureArea> areasToSign = new ArrayList<>();
+        if (rbSignDragBox != null && rbSignDragBox.isChecked() && !mCustomSignatureAreas.isEmpty()) {
+            areasToSign.addAll(mCustomSignatureAreas);
+        } else {
+            List<Integer> pagesToSign = calculatePagesToSign();
+            int posIndex = spSignPresetPosition != null ? spSignPresetPosition.getSelectedItemPosition() : 0;
+            PdfSignerEngine.Position pos = PdfSignerEngine.Position.BOTTOM_RIGHT;
+            if (posIndex == 1) pos = PdfSignerEngine.Position.BOTTOM_LEFT;
+            else if (posIndex == 2) pos = PdfSignerEngine.Position.TOP_RIGHT;
+            else if (posIndex == 3) pos = PdfSignerEngine.Position.TOP_LEFT;
+            else if (posIndex == 4) pos = PdfSignerEngine.Position.CENTER;
+
+            float boxW = mDefaultBoxWidth > 0 ? mDefaultBoxWidth : 150f;
+            float boxH = mDefaultBoxHeight > 0 ? mDefaultBoxHeight : 50f;
+
+            try {
+                com.itextpdf.text.pdf.PdfReader pdfReader = new com.itextpdf.text.pdf.PdfReader(mActivePdfFile.getAbsolutePath());
+                for (int pNum : pagesToSign) {
+                    com.itextpdf.text.Rectangle rect = PdfSignerEngine.calculateRectangle(pdfReader, pNum, pos, boxW, boxH);
+                    areasToSign.add(new SignatureArea(pNum, rect.getLeft(), rect.getBottom(), rect.getWidth(), rect.getHeight()));
+                }
+                pdfReader.close();
+            } catch (Exception e) {
+                for (int pNum : pagesToSign) {
+                    areasToSign.add(new SignatureArea(pNum, 400, 50, boxW, boxH));
+                }
+            }
+        }
+
         showProgress("Digitally signing PDF document...");
 
         new Thread(new Runnable() {
@@ -2300,7 +2386,7 @@ public class MainActivity extends Activity {
             public void run() {
                 try {
                     File tempOut = File.createTempFile("signed_", ".pdf", getCacheDir());
-                    PdfSignerEngine.signPdfFile(MainActivity.this, mActivePdfFile, tempOut, mSelectedCertAlias, pin, reason, location);
+                    PdfSignerEngine.signPdfFile(MainActivity.this, mActivePdfFile, tempOut, mSelectedCertAlias, pin, reason, location, areasToSign);
 
                     final File savedPdf = savePdfToDownloadsFolder(tempOut, "Signed_" + mActivePdfFile.getName());
 

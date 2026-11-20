@@ -810,4 +810,99 @@ public class CcidTokenDriver {
         }
         return results;
     }
+
+    public static byte[] signViaCcid(Context context, String pin, byte[] digestInfo) throws Exception {
+        if (digestInfo == null || digestInfo.length == 0) {
+            throw new Exception("Digest info to sign is empty");
+        }
+        DetectedToken token = scanForToken(context);
+        if (token == null || token.device == null) {
+            throw new Exception("No hardware USB token detected");
+        }
+
+        boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
+        if (!connOk) {
+            throw new Exception("Could not open USB connection to token");
+        }
+
+        UsbDeviceConnection conn = UsbTokenManager.getActiveConnection();
+        UsbEndpoint inEp = UsbTokenManager.getBulkInEndpoint();
+        UsbEndpoint outEp = UsbTokenManager.getBulkOutEndpoint();
+        if (conn == null || inEp == null || outEp == null) {
+            throw new Exception("USB endpoints not available");
+        }
+
+        int seq = 1;
+
+        // 1. Verify PIN if provided
+        if (pin != null && !pin.trim().isEmpty()) {
+            byte[] pinBytes = pin.trim().getBytes("UTF-8");
+            byte[][] verifyApdus = new byte[][]{
+                    buildApdu((byte) 0x00, (byte) 0x20, (byte) 0x00, (byte) 0x80, pinBytes),
+                    buildApdu((byte) 0x00, (byte) 0x20, (byte) 0x00, (byte) 0x01, pinBytes),
+                    buildApdu((byte) 0x80, (byte) 0x22, (byte) 0x00, (byte) 0x00, pinBytes)
+            };
+            for (byte[] vapdu : verifyApdus) {
+                try {
+                    execCcidApdu(conn, outEp, inEp, vapdu, seq++);
+                } catch (Throwable ignored) {}
+            }
+        }
+
+        // 2. Perform RSA Signing via PSO or SKF
+        byte[][] signApdus = new byte[][]{
+                buildApduWithLe((byte) 0x00, (byte) 0x2A, (byte) 0x9E, (byte) 0x9A, digestInfo, (byte) 0x00),
+                buildApdu((byte) 0x00, (byte) 0x2A, (byte) 0x9E, (byte) 0x9A, digestInfo),
+                buildApduWithLe((byte) 0x80, (byte) 0x4C, (byte) 0x00, (byte) 0x00, digestInfo, (byte) 0x00),
+                buildApdu((byte) 0x80, (byte) 0x4C, (byte) 0x00, (byte) 0x00, digestInfo)
+        };
+
+        for (byte[] sapdu : signApdus) {
+            try {
+                byte[] resp = execCcidApdu(conn, outEp, inEp, sapdu, seq++);
+                if (resp != null && resp.length >= 128) {
+                    int sw1 = resp[resp.length - 2] & 0xFF;
+                    int sw2 = resp[resp.length - 1] & 0xFF;
+                    if (sw1 == 0x90 && sw2 == 0x00) {
+                        byte[] sig = new byte[resp.length - 2];
+                        System.arraycopy(resp, 0, sig, 0, sig.length);
+                        return sig;
+                    } else if (resp.length == 128 || resp.length == 256 || resp.length == 384 || resp.length == 512) {
+                        return resp;
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        throw new Exception("USB Token did not return RSA signature via CCID APDU.");
+    }
+
+    private static byte[] buildApdu(byte cla, byte ins, byte p1, byte p2, byte[] data) {
+        int dlen = (data != null) ? data.length : 0;
+        byte[] apdu = new byte[5 + dlen];
+        apdu[0] = cla;
+        apdu[1] = ins;
+        apdu[2] = p1;
+        apdu[3] = p2;
+        apdu[4] = (byte) dlen;
+        if (dlen > 0) {
+            System.arraycopy(data, 0, apdu, 5, dlen);
+        }
+        return apdu;
+    }
+
+    private static byte[] buildApduWithLe(byte cla, byte ins, byte p1, byte p2, byte[] data, byte le) {
+        int dlen = (data != null) ? data.length : 0;
+        byte[] apdu = new byte[6 + dlen];
+        apdu[0] = cla;
+        apdu[1] = ins;
+        apdu[2] = p1;
+        apdu[3] = p2;
+        apdu[4] = (byte) dlen;
+        if (dlen > 0) {
+            System.arraycopy(data, 0, apdu, 5, dlen);
+        }
+        apdu[apdu.length - 1] = le;
+        return apdu;
+    }
 }
