@@ -51,8 +51,10 @@ public class CcidTokenDriver {
     }
 
     // Supported USB Token Hardware Signatures (India & Global PKI)
-    // 1. HYP2003 / ePass2003 (Feitian / EnterSafe / HyperPKI)
-    public static final int VID_FEITIAN = 0x096e;
+    // 1. HYP2003 / ePass2003 (Feitian / HyperPKI Hypersecu)
+    public static final int VID_FEITIAN = 0x096e;      // Feitian Technologies (Old ePass2003)
+    public static final int VID_HYPERSECU_1 = 0x2ccf;  // Hypersecu Information Systems (NEW HYP2003)
+    public static final int VID_HYPERSECU_2 = 0x2ce3;  // Hypersecu secondary (HYP2003)
     public static final int PID_EPASS2003 = 0x0405;
     public static final int PID_HYP2003_1 = 0x0807;
     public static final int PID_HYP2003_2 = 0x2003;
@@ -60,27 +62,42 @@ public class CcidTokenDriver {
     // 2. mToken / CryptoID (Century Longmai PKI)
     // 0x055c is Beijing Century Longmai Technology Co., Ltd.
     public static final int VID_LONGMAI_1 = 0x055c;
-    public static final int VID_LONGMAI_2 = 0x338c;
-    public static final int VID_LONGMAI_3 = 0x4c4d; // 'LM'
-    public static final int VID_LONGMAI_4 = 0x0925; // Lakeview / Longmai
-    public static final int VID_LONGMAI_5 = 0x24a4; // Longmai USB Key
+    public static final int VID_LONGMAI_2 = 0x4c4d; // 'LM'
+    public static final int VID_LONGMAI_3 = 0x0925; // Lakeview / Longmai
+    public static final int VID_LONGMAI_4 = 0x24a4; // Longmai USB Key
 
     // 3. Watchdata ProxKey (Watchdata WDS)
     public static final int VID_WATCHDATA_1 = 0x163c;
-    public static final int VID_WATCHDATA_2 = 0x04b5;
-    public static final int VID_WATCHDATA_3 = 0x1059;
-    public static final int VID_WATCHDATA_4 = 0x04b4;
-    public static final int VID_WATCHDATA_5 = 0x24dc;
+    public static final int VID_WATCHDATA_2 = 0x24dc;
+    public static final int VID_WATCHDATA_3 = 0x04b5;
+    public static final int VID_WATCHDATA_4 = 0x1059;
+    public static final int VID_WATCHDATA_5 = 0x04b4;
 
-    // 4. InnaIT Precision (Precision / eMudhra)
-    public static final int VID_INNAIT_1 = 0x2ccf;
-    public static final int VID_INNAIT_2 = 0x2007;
-    public static final int VID_INNAIT_3 = 0x2ce3;
-    public static final int VID_INNAIT_4 = 0x2617;
+    // 4. InnaIT Precision (Precision Biometric India / eMudhra)
+    public static final int VID_INNAIT_1 = 0x338c; // Precision Biometric India Pvt. Ltd. (InnaIT Key)
+    public static final int VID_INNAIT_2 = 0x2617; // Precision Biometrics
+    public static final int VID_INNAIT_3 = 0x2007; // eMudhra / InnaIT
+    public static final int VID_INNAIT_4 = 0x08c3; // Precise Biometrics / Precision
 
     // 5. SafeNet eToken (Gemalto / Thales)
     public static final int VID_SAFENET_1 = 0x0529;
     public static final int VID_SAFENET_2 = 0x08e6;
+
+    public static boolean isHyp2003(int vid) {
+        return vid == VID_FEITIAN || vid == VID_HYPERSECU_1 || vid == VID_HYPERSECU_2;
+    }
+
+    public static boolean isMToken(int vid) {
+        return vid == VID_LONGMAI_1 || vid == VID_LONGMAI_2 || vid == VID_LONGMAI_3 || vid == VID_LONGMAI_4;
+    }
+
+    public static boolean isProxKey(int vid) {
+        return vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2 || vid == VID_WATCHDATA_3 || vid == VID_WATCHDATA_4 || vid == VID_WATCHDATA_5;
+    }
+
+    public static boolean isInnait(int vid) {
+        return vid == VID_INNAIT_1 || vid == VID_INNAIT_2 || vid == VID_INNAIT_3 || vid == VID_INNAIT_4;
+    }
 
     public static DetectedToken scanForToken(Context context) {
         if (context == null) return null;
@@ -105,21 +122,20 @@ public class CcidTokenDriver {
             }
 
             // CRITICAL: Hardware USB Vendor IDs have HIGHEST PRIORITY!
-            // This prevents mToken / CryptoID (0x055c) from being misidentified as SafeNet eToken.
-            // 1. mToken / CryptoID (Century Longmai - 0x055C, 0x338C, 0x4C4D, 0x0925, 0x24A4)
-            if (vid == VID_LONGMAI_1 || vid == VID_LONGMAI_2 || vid == VID_LONGMAI_3 || vid == VID_LONGMAI_4 || vid == VID_LONGMAI_5) {
-                return new DetectedToken("mToken / CryptoID", "Century Longmai PKI", vid, pid, dev, hasCcid);
-            }
-            // 2. HYP2003 / ePass2003 (Feitian / EnterSafe - 0x096E)
-            if (vid == VID_FEITIAN) {
+            // 1. HYP2003 / ePass2003 (Feitian / Hypersecu - 0x096E, 0x2CCF, 0x2CE3)
+            if (isHyp2003(vid)) {
                 return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
             }
-            // 3. Watchdata ProxKey (0x163C, 0x04B5, 0x1059, 0x04B4, 0x24DC)
-            if (vid == VID_WATCHDATA_1 || vid == VID_WATCHDATA_2 || vid == VID_WATCHDATA_3 || vid == VID_WATCHDATA_4 || vid == VID_WATCHDATA_5) {
+            // 2. mToken / CryptoID (Century Longmai - 0x055C, 0x4C4D, 0x0925, 0x24A4)
+            if (isMToken(vid)) {
+                return new DetectedToken("mToken / CryptoID", "Century Longmai PKI", vid, pid, dev, hasCcid);
+            }
+            // 3. Watchdata ProxKey (0x163C, 0x24DC, 0x04B5, 0x1059, 0x04B4)
+            if (isProxKey(vid)) {
                 return new DetectedToken("Watchdata ProxKey", "Watchdata WDS", vid, pid, dev, hasCcid);
             }
-            // 4. InnaIT Precision (0x2CCF, 0x2007, 0x2CE3, 0x2617)
-            if (vid == VID_INNAIT_1 || vid == VID_INNAIT_2 || vid == VID_INNAIT_3 || vid == VID_INNAIT_4) {
+            // 4. InnaIT Precision (0x338C, 0x2617, 0x2007, 0x08C3)
+            if (isInnait(vid)) {
                 return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
             }
             // 5. SafeNet eToken (0x0529, 0x08E6)
@@ -504,6 +520,31 @@ public class CcidTokenDriver {
         return (!list.isEmpty()) ? list.get(0) : null;
     }
 
+    public static boolean selectIsoFile(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, int p1, int p2, int fid, int[] seqHolder) {
+        byte hi = (byte) ((fid >> 8) & 0xFF);
+        byte lo = (byte) (fid & 0xFF);
+        byte[] cmd = new byte[]{0x00, (byte) 0xA4, (byte) p1, (byte) p2, 0x02, hi, lo};
+        byte[] resp = execCcidApdu(conn, outEp, inEp, cmd, seqHolder[0]++);
+        if (resp != null && resp.length >= 2) {
+            int sw1 = resp[resp.length - 2] & 0xFF;
+            return (sw1 == 0x90 || sw1 == 0x61 || sw1 == 0x62);
+        }
+        return false;
+    }
+
+    public static boolean selectFileFlexible(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, int fid, int[] seqHolder) {
+        int[] p2Options = new int[]{0x00, 0x0C, 0x04};
+        int[] p1Options = new int[]{0x00, 0x02, 0x01};
+        for (int p1 : p1Options) {
+            for (int p2 : p2Options) {
+                if (selectIsoFile(conn, outEp, inEp, p1, p2, fid, seqHolder)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public static byte[] readEntireBinaryFile(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, int[] seqHolder) {
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         int offset = 0;
@@ -535,16 +576,23 @@ public class CcidTokenDriver {
                 }
                 break;
             } else if (sw1 == 0x6C) {
-                // Exact Le requested by token (e.g. 128 bytes = 0x80) - update chunk and continue reading entire file!
+                // Exact Le requested by token (e.g. 128 bytes = 0x80)
                 preferredChunk = sw2;
                 continue;
             } else if (sw1 == 0x67) {
-                if (preferredChunk != 0x80) {
+                // Wrong length - fallback to smaller chunks
+                if (preferredChunk == 0x00) {
                     preferredChunk = 0x80;
+                    continue;
+                } else if (preferredChunk == 0x80) {
+                    preferredChunk = 0x40;
                     continue;
                 } else {
                     break;
                 }
+            } else if (sw1 == 0x6B) {
+                // Offset outside EF - end of file reached gracefully
+                break;
             } else {
                 break;
             }
@@ -581,159 +629,139 @@ public class CcidTokenDriver {
             }
 
             int seq = 1;
+            int[] seqHolder = new int[]{seq};
 
-            // 2. PIN verification if provided
-            if (pin != null && !pin.trim().isEmpty()) {
-                try {
-                    byte[] pinBytes = pin.trim().getBytes("UTF-8");
-                    // Standard ISO 7816 VERIFY
-                    byte[] v1 = new byte[5 + pinBytes.length];
-                    v1[0] = 0x00; v1[1] = 0x20; v1[2] = 0x00; v1[3] = 0x00; v1[4] = (byte) pinBytes.length;
-                    System.arraycopy(pinBytes, 0, v1, 5, pinBytes.length);
-                    execCcidApdu(conn, outEp, inEp, v1, seq++);
-
-                    v1[3] = 0x01; // P2 = 0x01
-                    execCcidApdu(conn, outEp, inEp, v1, seq++);
-
-                    v1[3] = (byte) 0x80; // P2 = 0x80
-                    execCcidApdu(conn, outEp, inEp, v1, seq++);
-
-                    // SKF VERIFY PIN (80 38 00 00 len PIN and 80 38 01 00 len PIN)
-                    byte[] v2 = new byte[5 + pinBytes.length];
-                    v2[0] = (byte) 0x80; v2[1] = 0x38; v2[2] = 0x00; v2[3] = 0x00; v2[4] = (byte) pinBytes.length;
-                    System.arraycopy(pinBytes, 0, v2, 5, pinBytes.length);
-                    execCcidApdu(conn, outEp, inEp, v2, seq++);
-
-                    v2[2] = 0x01;
-                    execCcidApdu(conn, outEp, inEp, v2, seq++);
-                } catch (Throwable ignored) {}
-            }
-
-            // 2b. Direct GET DATA for mToken / CryptoID & FIPS smartcard tokens (requires no PIN)
+            // 2. WATCHDATA PROXKEY SPECIALIZED SCAN (3F00 -> 3F18 -> 0040 / 7001 / 0001)
             try {
-                byte[][] getDataCmds = new byte[][]{
-                    new byte[]{0x00, (byte) 0xCA, 0x01, 0x01, 0x00},
-                    new byte[]{(byte) 0x80, (byte) 0xCA, 0x01, 0x01, 0x00},
-                    new byte[]{0x00, (byte) 0xCA, 0x01, 0x02, 0x00},
-                    new byte[]{0x00, (byte) 0xCA, 0x00, 0x01, 0x00}
-                };
-                for (byte[] gd : getDataCmds) {
-                    byte[] gresp = execCcidApdu(conn, outEp, inEp, gd, seq++);
-                    if (gresp != null && gresp.length > 50) {
-                        List<CcidCertInfo> gcinfos = parseAllX509Der(gresp);
-                        if (!gcinfos.isEmpty()) {
-                            results.addAll(gcinfos);
-                            Log.d(TAG, "✅ GET_DATA APDU retrieved client cert CN=" + gcinfos.get(0).clientName);
-                            break;
+                selectFileFlexible(conn, outEp, inEp, 0x3F00, seqHolder);
+                if (selectFileFlexible(conn, outEp, inEp, 0x3F18, seqHolder)) {
+                    for (int wdef : new int[]{0x0040, 0x7001, 0x0001, 0x0002}) {
+                        if (selectFileFlexible(conn, outEp, inEp, wdef, seqHolder)) {
+                            byte[] wdData = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                            if (wdData != null && wdData.length > 50) {
+                                List<CcidCertInfo> wdInfos = parseAllX509Der(wdData);
+                                if (!wdInfos.isEmpty()) {
+                                    results.addAll(wdInfos);
+                                    Log.d(TAG, "✅ Watchdata ProxKey 3F18/0040 retrieved cert CN=" + wdInfos.get(0).clientName);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
             } catch (Throwable t) {
-                Log.w(TAG, "GET_DATA probe notice: " + t.getMessage());
+                Log.w(TAG, "Watchdata 3F18 scan notice: " + t.getMessage());
             }
 
-            // 2c. Direct 3F18 Selection for Watchdata ProxKey TimeCOS
-            try {
-                execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x18}, seq++);
-                for (int wdef : new int[]{0x0040, 0x0001, 0x0002, 0x7001}) {
-                    byte hi = (byte) ((wdef >> 8) & 0xFF);
-                    byte lo = (byte) (wdef & 0xFF);
-                    execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, hi, lo}, seq++);
-                    int[] seqHolder = new int[]{seq};
-                    byte[] wdData = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
-                    seq = seqHolder[0];
-                    if (wdData != null && wdData.length > 50) {
-                        List<CcidCertInfo> wdInfos = parseAllX509Der(wdData);
-                        if (!wdInfos.isEmpty()) {
-                            results.addAll(wdInfos);
-                            Log.d(TAG, "✅ Watchdata ProxKey 3F18 retrieved client cert CN=" + wdInfos.get(0).clientName);
-                            break;
+            // 3. MTOKEN / LONGMAI SPECIALIZED SCAN (3F00 -> 1100 -> C001 / C002 / 7001 / 4545)
+            if (results.isEmpty()) {
+                try {
+                    selectFileFlexible(conn, outEp, inEp, 0x3F00, seqHolder);
+                    if (selectFileFlexible(conn, outEp, inEp, 0x1100, seqHolder)) {
+                        for (int mef : new int[]{0xC001, 0xC002, 0x7001, 0x4545}) {
+                            if (selectFileFlexible(conn, outEp, inEp, mef, seqHolder)) {
+                                byte[] mData = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                                if (mData != null && mData.length > 50) {
+                                    List<CcidCertInfo> mInfos = parseAllX509Der(mData);
+                                    if (!mInfos.isEmpty()) {
+                                        results.addAll(mInfos);
+                                        Log.d(TAG, "✅ mToken 1100/C001 retrieved cert CN=" + mInfos.get(0).clientName);
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
+                } catch (Throwable t) {
+                    Log.w(TAG, "mToken 1100 scan notice: " + t.getMessage());
                 }
-            } catch (Throwable ignored) {}
+            }
 
-            // 3. PRIMARY STRATEGY: ISO 7816-4 EF & DF File Scanning (Directly reads certificate without PIN across Indian tokens!)
-            try {
-                // Select Master File 3F00
-                execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x00}, seq++);
-
-                // Candidate EFs for Indian & Global PKI USB tokens (mToken / CryptoID, ePass2003, ProxKey, InnaIT)
-                int[] candidateEfs = new int[]{
-                    0x7001, 0x7002, 0x7003, // Indian DSC Sign, Encrypt, CA
-                    0xC001, 0xC002, 0xC003, // Longmai mToken Container Certs
-                    0x4545,                 // Longmai mToken DSC EF
-                    0x0040,                 // Watchdata ProxKey Cert EF
-                    0x3401, 0x3402, 0x3403, 0x3411, // Feitian / EnterSafe
-                    0x0001, 0x0002, 0x0003, 0x0004,
-                    0x5015, 0x5031, 0x5032, 0x5034, // PKCS#15
-                    0x2F02, 0x3F01
-                };
-
-                for (int ef : candidateEfs) {
-                    byte hi = (byte) ((ef >> 8) & 0xFF);
-                    byte lo = (byte) (ef & 0xFF);
-
-                    byte[] selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, hi, lo}, seq++);
-                    boolean selOk = (selResp != null && selResp.length >= 2 && 
-                            (selResp[selResp.length - 2] == (byte) 0x90 || selResp[selResp.length - 2] == (byte) 0x61 || selResp[selResp.length - 2] == (byte) 0x62));
-                    if (!selOk) {
-                        selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x04, 0x02, hi, lo}, seq++);
-                        selOk = (selResp != null && selResp.length >= 2 && 
-                                (selResp[selResp.length - 2] == (byte) 0x90 || selResp[selResp.length - 2] == (byte) 0x61 || selResp[selResp.length - 2] == (byte) 0x62));
-                    }
-                    if (!selOk) {
-                        selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x02, 0x04, 0x02, hi, lo}, seq++);
-                        selOk = (selResp != null && selResp.length >= 2 && 
-                                (selResp[selResp.length - 2] == (byte) 0x90 || selResp[selResp.length - 2] == (byte) 0x61 || selResp[selResp.length - 2] == (byte) 0x62));
-                    }
-                    if (!selOk) {
-                        continue;
-                    }
-
-                    int[] seqHolder = new int[]{seq};
-                    byte[] fullFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
-                    seq = seqHolder[0];
-
-                    if (fullFile != null && fullFile.length > 50) {
-                        List<CcidCertInfo> cinfos = parseAllX509Der(fullFile);
-                        if (!cinfos.isEmpty()) {
-                            results.addAll(cinfos);
+            // 4. DIRECT GET DATA FOR MTOKEN & SMARTCARD TOKENS
+            if (results.isEmpty()) {
+                try {
+                    byte[][] getDataCmds = new byte[][]{
+                        new byte[]{0x00, (byte) 0xCA, 0x01, 0x01, 0x00},
+                        new byte[]{(byte) 0x80, (byte) 0xCA, 0x01, 0x01, 0x00},
+                        new byte[]{0x00, (byte) 0xCA, 0x01, 0x02, 0x00},
+                        new byte[]{0x00, (byte) 0xCA, 0x00, 0x01, 0x00}
+                    };
+                    for (byte[] gd : getDataCmds) {
+                        byte[] gresp = execCcidApdu(conn, outEp, inEp, gd, seqHolder[0]++);
+                        if (gresp != null && gresp.length > 50) {
+                            List<CcidCertInfo> gcinfos = parseAllX509Der(gresp);
+                            if (!gcinfos.isEmpty()) {
+                                results.addAll(gcinfos);
+                                Log.d(TAG, "✅ GET_DATA APDU retrieved client cert CN=" + gcinfos.get(0).clientName);
+                                break;
+                            }
                         }
                     }
+                } catch (Throwable t) {
+                    Log.w(TAG, "GET_DATA probe notice: " + t.getMessage());
                 }
+            }
 
-                // If direct EF didn't return, try under Dedicated Files (DF)
-                if (results.isEmpty()) {
+            // 5. UNIVERSAL ISO 7816-4 EF SCANNING UNDER 3F00 (Indian DSC & Global PKI)
+            if (results.isEmpty()) {
+                try {
+                    selectFileFlexible(conn, outEp, inEp, 0x3F00, seqHolder);
+                    int[] candidateEfs = new int[]{
+                        0x7001, 0x7002, 0x7003, // Indian DSC Sign, Encrypt, CA
+                        0xC001, 0xC002, 0xC003, // Longmai mToken Container Certs
+                        0x4545,                 // Longmai mToken DSC EF
+                        0x0040,                 // Watchdata ProxKey Cert EF
+                        0x3401, 0x3402, 0x3403, 0x3411, // Feitian / EnterSafe
+                        0x0001, 0x0002, 0x0003, 0x0004,
+                        0x5015, 0x5031, 0x5032, 0x5034, // PKCS#15
+                        0x2F02, 0x3F01
+                    };
+
+                    for (int ef : candidateEfs) {
+                        if (selectFileFlexible(conn, outEp, inEp, ef, seqHolder)) {
+                            byte[] fullFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                            if (fullFile != null && fullFile.length > 50) {
+                                List<CcidCertInfo> cinfos = parseAllX509Der(fullFile);
+                                if (!cinfos.isEmpty()) {
+                                    results.addAll(cinfos);
+                                    Log.d(TAG, "✅ EF 0x" + Integer.toHexString(ef) + " retrieved cert CN=" + cinfos.get(0).clientName);
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "Universal EF scan notice: " + t.getMessage());
+                }
+            }
+
+            // 6. INNAIT & DEDICATED FILES (1100, DF01, 5015, DF02)
+            if (results.isEmpty()) {
+                try {
                     int[] candidateDfs = new int[]{0x1100, 0xDF01, 0xDF02, 0xDF03, 0x5015};
                     for (int df : candidateDfs) {
-                        byte dhi = (byte) ((df >> 8) & 0xFF);
-                        byte dlo = (byte) (df & 0xFF);
-                        execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, dhi, dlo}, seq++);
-
-                        for (int subEf : new int[]{0x0001, 0x0002, 0x7001, 0xC001, 0x4545}) {
-                            byte shi = (byte) ((subEf >> 8) & 0xFF);
-                            byte slo = (byte) (subEf & 0xFF);
-                            execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, shi, slo}, seq++);
-
-                            int[] seqHolder = new int[]{seq};
-                            byte[] dfFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
-                            seq = seqHolder[0];
-
-                            if (dfFile.length > 100) {
-                                List<CcidCertInfo> dInfos = parseAllX509Der(dfFile);
-                                if (!dInfos.isEmpty()) {
-                                    results.addAll(dInfos);
-                                    break;
+                        selectFileFlexible(conn, outEp, inEp, 0x3F00, seqHolder);
+                        if (selectFileFlexible(conn, outEp, inEp, df, seqHolder)) {
+                            for (int subEf : new int[]{0x7001, 0x7002, 0x0001, 0x0002, 0x5031, 0x5032, 0xC001}) {
+                                if (selectFileFlexible(conn, outEp, inEp, subEf, seqHolder)) {
+                                    byte[] dfFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                                    if (dfFile != null && dfFile.length > 50) {
+                                        List<CcidCertInfo> dInfos = parseAllX509Der(dfFile);
+                                        if (!dInfos.isEmpty()) {
+                                            results.addAll(dInfos);
+                                            Log.d(TAG, "✅ DF 0x" + Integer.toHexString(df) + " retrieved cert CN=" + dInfos.get(0).clientName);
+                                            break;
+                                        }
+                                    }
                                 }
                             }
                         }
                         if (!results.isEmpty()) break;
                     }
+                } catch (Throwable t) {
+                    Log.w(TAG, "DF scan notice: " + t.getMessage());
                 }
-            } catch (Throwable t) {
-                Log.w(TAG, "EF scan notice: " + t.getMessage());
             }
+            seq = seqHolder[0];
 
             // 4. SECONDARY STRATEGY: PKCS#15 and Longmai Application AID Selection
             if (results.isEmpty()) {
@@ -758,7 +786,7 @@ public class CcidTokenDriver {
                                     byte phi = (byte) ((pef >> 8) & 0xFF);
                                     byte plo = (byte) (pef & 0xFF);
                                     execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, phi, plo}, seq++);
-                                    int[] seqHolder = new int[]{seq};
+                                    seqHolder[0] = seq;
                                     byte[] p15Data = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
                                     seq = seqHolder[0];
 

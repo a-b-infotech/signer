@@ -17,7 +17,7 @@ import android.widget.Toast;
 
 public class WebStudioActivity extends Activity {
     public static final String URL_CLOUD = "https://sign.a-b-infotech.in/Token.php";
-    public static final String URL_LOCAL = "http://127.0.0.1:5000/studio";
+    public static final String URL_LOCAL = "https://127.0.0.1:5000/studio";
     public static final String URL_INBUILT_ASSET = "file:///android_asset/webstudio/index.html";
 
     private WebView webView;

@@ -100,27 +100,26 @@ public class P11Operation {
 		} catch (Throwable ignored) {}
 
 		List<String> candidateList = new ArrayList<>();
-		if (vendorId == 0x096e) { // Feitian / HYP2003 / ePass2003
+		if (vendorId == 0x096e || vendorId == 0x2ccf || vendorId == 0x2ce3) { // Feitian / NEW HYP2003 / ePass2003
 			candidateList.add("libOTGPass2003_India.so");
 			candidateList.add("libhyp2003.so");
 			candidateList.add("libcastle.so");
 			candidateList.add("libep2003.so");
-		} else if (vendorId == 0x2617 || vendorId == 0x2ccf || vendorId == 0x2007 || vendorId == 0x2ce3) { // InnaIT Precision
+		} else if (vendorId == 0x338c || vendorId == 0x2617 || vendorId == 0x2007 || vendorId == 0x08c3) { // InnaIT Precision
 			candidateList.add("libInnaITPKCS11.so");
 			candidateList.add("libinnait_pkcs11.so");
 			candidateList.add("libinneit.so");
-		} else if (vendorId == 0x24dc || vendorId == 0x163c) { // Watchdata ProxKey
+		} else if (vendorId == 0x163c || vendorId == 0x24dc || vendorId == 0x04b5 || vendorId == 0x1059 || vendorId == 0x04b4) { // Watchdata ProxKey
 			candidateList.add("libWatchdataPKCS11.so");
 			candidateList.add("libproxkey.so");
 			candidateList.add("libWDAssist.so");
-		} else if (vendorId == 0x055c || vendorId == 0x338c || vendorId == 0x4c4d || vendorId == 0x0925 || vendorId == 0x24a4) { // Longmai mToken / CryptoID
+		} else if (vendorId == 0x055c || vendorId == 0x4c4d || vendorId == 0x0925 || vendorId == 0x24a4) { // Longmai mToken / CryptoID
 			candidateList.add("libcryptoid_pkcs11.so");
 			candidateList.add("libmtoken.so");
 			candidateList.add("libmTokenGM.so");
 		} else if (vendorId == 0) {
-			// Unknown vendor, try standard Feitian and InnaIT
+			// Unknown vendor, try standard Feitian / HYP2003
 			candidateList.add("libOTGPass2003_India.so");
-			candidateList.add("libInnaITPKCS11.so");
 		} else {
 			// Other tokens (SafeNet, etc.) handled directly via CCID
 			return false;

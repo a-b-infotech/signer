@@ -14,6 +14,11 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import javax.net.ssl.*;
+import java.security.*;
+import java.security.cert.*;
+import java.math.BigInteger;
+import java.util.Date;
 
 public class LocalSignerServer {
     private static final String TAG = "LocalSignerServer";
@@ -76,11 +81,58 @@ public class LocalSignerServer {
         }
     }
 
+    private static SSLContext sSslContext;
+    public static synchronized SSLContext getOrCreateSslContext(Context context) {
+        if (sSslContext != null) return sSslContext;
+        if (context == null) return null;
+        try {
+            KeyStore ks = KeyStore.getInstance("PKCS12");
+            try (InputStream is = context.getAssets().open("abinfo_server.p12")) {
+                ks.load(is, "abinfotech".toCharArray());
+            }
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            kmf.init(ks, "abinfotech".toCharArray());
+
+            SSLContext sc = SSLContext.getInstance("TLS");
+            sc.init(kmf.getKeyManagers(), null, new SecureRandom());
+            sSslContext = sc;
+            return sSslContext;
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to load SSLContext: " + t.getMessage(), t);
+            return null;
+        }
+    }
+
     private void handleClient(Socket client) {
+        Socket commSocket = client;
         try {
             client.setSoTimeout(30000);
-            InputStream in = client.getInputStream();
+            PushbackInputStream pbis = new PushbackInputStream(client.getInputStream(), 1);
+            int firstByte = pbis.read();
+            if (firstByte == -1) {
+                try { client.close(); } catch (Exception ignored) {}
+                return;
+            }
+            pbis.unread(firstByte);
+
+            InputStream in = pbis;
             OutputStream out = client.getOutputStream();
+
+            if (firstByte == 0x16) { // TLS ClientHello (HTTPS request)
+                SSLContext sslCtx = getOrCreateSslContext(context);
+                if (sslCtx != null) {
+                    SSLSocket sslSocket = (SSLSocket) sslCtx.getSocketFactory().createSocket(
+                            client,
+                            pbis,
+                            true
+                    );
+                    sslSocket.setUseClientMode(false);
+                    sslSocket.startHandshake();
+                    commSocket = sslSocket;
+                    in = sslSocket.getInputStream();
+                    out = sslSocket.getOutputStream();
+                }
+            }
 
             // Read request header lines
             ByteArrayOutputStream headerBuf = new ByteArrayOutputStream();
@@ -287,8 +339,10 @@ public class LocalSignerServer {
             }
 
             out.flush();
-            client.close();
         } catch (Exception e) {
+            Log.w(TAG, "Client handle notice: " + e.getMessage());
+        } finally {
+            try { commSocket.close(); } catch (Exception ignored) {}
             try { client.close(); } catch (Exception ignored) {}
         }
     }

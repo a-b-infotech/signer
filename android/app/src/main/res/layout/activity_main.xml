@@ -1460,7 +1460,7 @@
                                 android:id="@+id/tvServerIpDetails"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="http://127.0.0.1:5000"
+                                android:text="https://127.0.0.1:5000"
                                 android:textColor="#38BDF8"
                                 android:textSize="12sp" />
                         </LinearLayout>

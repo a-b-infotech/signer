@@ -171,9 +171,10 @@ public class UsbTokenManager {
 
             int intfCount = device.getInterfaceCount();
 
-            // Pass 0: Strictly find CCID Smartcard interface (Class 11 / 0x0B) or Smartcard Vendor (Class 255)
-            // Pass 1: Fallback to any non-MassStorage interface
-            for (int pass = 0; pass < 2; pass++) {
+            // Pass 0: Strictly find CCID Smartcard interface (Class 11 / 0x0B)
+            // Pass 1: Vendor-specific smartcard interface (Class 255)
+            // Pass 2: Fallback to any non-MassStorage interface
+            for (int pass = 0; pass < 3; pass++) {
                 for (int i = 0; i < intfCount; i++) {
                     UsbInterface intf = device.getInterface(i);
                     int intfClass = intf.getInterfaceClass();
@@ -184,8 +185,13 @@ public class UsbTokenManager {
                     }
 
                     if (pass == 0) {
-                        // Must be CCID (11 / USB_CLASS_CSCID) or Vendor-specific smartcard (255)
-                        if (intfClass != 11 && intfClass != UsbConstants.USB_CLASS_CSCID && intfClass != 255) {
+                        // Pass 0: Must be CCID (Class 11 / USB_CLASS_CSCID)
+                        if (intfClass != 11 && intfClass != UsbConstants.USB_CLASS_CSCID) {
+                            continue;
+                        }
+                    } else if (pass == 1) {
+                        // Pass 1: Vendor-specific smartcard (Class 255)
+                        if (intfClass != 255) {
                             continue;
                         }
                     }
@@ -231,16 +237,16 @@ public class UsbTokenManager {
 
     private static void wireEndpointsToSdk(UsbDevice device, UsbDeviceConnection conn, UsbEndpoint bulkIn, UsbEndpoint bulkOut) {
         if (device == null || conn == null) return;
-        // Wire endpoints into Feitian PKCS#11 SDK (libOTGPass2003_India.so) for Feitian/ePass/HYP tokens
+        // Wire endpoints into Feitian PKCS#11 SDK (libOTGPass2003_India.so) for Feitian/ePass/HYP tokens (0x096e, 0x2ccf, 0x2ce3)
         int vid = device.getVendorId();
-        if (vid == CcidTokenDriver.VID_FEITIAN || vid == 0x096e) {
+        if (CcidTokenDriver.isHyp2003(vid) || vid == CcidTokenDriver.VID_FEITIAN || vid == 0x096e || vid == 0x2ccf || vid == 0x2ce3) {
             try {
                 com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
                 if (myApp != null) {
                     myApp.setUsbDeviceConnection(conn);
                     myApp.setInUsbEndpoint(bulkIn);
                     myApp.setOutUsbEndpoint(bulkOut);
-                    Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token");
+                    Log.d(TAG, "MyApplication endpoints successfully wired for HYP2003 / ePass2003 token");
                 }
                 com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
                 if (cb != null) {
