@@ -130,7 +130,7 @@ public class SignerServerService extends Service {
 
         builder
             .setContentTitle("A B INFOTECH Local Signer")
-            .setContentText("🟢 Online on Port 5000 (http://127.0.0.1:5000)")
+            .setContentText("🟢 Online on Port 5000 (https://127.0.0.1:5000)")
             .setContentIntent(pi)
             .setOngoing(true);
 

@@ -31,9 +31,9 @@ function format_local_api_base($raw_ip) {
     }
     $clean = rtrim($raw_ip, '/');
     if (strpos($clean, ':') !== false) {
-        return "http://{$clean}";
+        return "https://{$clean}";
     }
-    return "http://{$clean}:5000";
+    return "https://{$clean}:5000";
 }
 
 $LOCAL_API_BASE = format_local_api_base($server_raw);
@@ -78,6 +78,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         curl_setopt($ch, CURLOPT_POST, true);
@@ -103,9 +105,38 @@ if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
     curl_close($ch);
 
     if ($response === false || $httpCode === 0) {
+        if (strpos($targetUrl, 'https://') === 0) {
+            $fallbackUrl = 'http://' . substr($targetUrl, 8);
+            $chFallback = curl_init($fallbackUrl);
+            curl_setopt($chFallback, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($chFallback, CURLOPT_TIMEOUT, 15);
+            curl_setopt($chFallback, CURLOPT_CONNECTTIMEOUT, 5);
+            curl_setopt($chFallback, CURLOPT_FOLLOWLOCATION, true);
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+                curl_setopt($chFallback, CURLOPT_POST, true);
+                if (!empty($body)) {
+                    curl_setopt($chFallback, CURLOPT_POSTFIELDS, $body);
+                } elseif (!empty($_POST)) {
+                    curl_setopt($chFallback, CURLOPT_POSTFIELDS, http_build_query($_POST));
+                }
+            }
+            if (!empty($headers)) {
+                curl_setopt($chFallback, CURLOPT_HTTPHEADER, $headers);
+            }
+            $fallbackResp = curl_exec($chFallback);
+            $fallbackCode = curl_getinfo($chFallback, CURLINFO_HTTP_CODE);
+            $fallbackType = curl_getinfo($chFallback, CURLINFO_CONTENT_TYPE);
+            curl_close($chFallback);
+            if ($fallbackResp !== false && $fallbackCode > 0) {
+                http_response_code($fallbackCode);
+                if ($fallbackType) header('Content-Type: ' . $fallbackType);
+                echo $fallbackResp;
+                exit;
+            }
+        }
         http_response_code(502);
         header('Content-Type: application/json');
-        echo json_encode(['status' => 'error', 'message' => "Could not reach Signing Server at {$LOCAL_API_BASE} via Global IP. Please check port forwarding or network."]);
+        echo json_encode(['status' => 'error', 'message' => "Could not reach Signing Server at {$LOCAL_API_BASE}. Please check server is running and port 5000 is open."]);
         exit;
     }
 
@@ -1713,9 +1744,9 @@ function getLocalServerUrl() {
         return raw.replace(/\/+$/, '');
     }
     if (raw.includes(':')) {
-        return ('http://' + raw).replace(/\/+$/, '');
+        return ('https://' + raw).replace(/\/+$/, '');
     }
-    return `http://${raw}:5000`;
+    return `https://${raw}:5000`;
 }
 
 // Resilient API caller supporting Localhost, Local Wi-Fi & WAN Global IP (Transparent Proxy Fallback)

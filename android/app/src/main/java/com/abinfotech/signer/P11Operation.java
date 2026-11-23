@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.security.cert.CertificateFactory;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -121,9 +122,8 @@ public class P11Operation {
 			candidateList.add("libmtoken.so");
 			candidateList.add("libmTokenGM.so");
 		} else if (vendorId == 0) {
-			// Unknown vendor, try standard Feitian / HYP2003 then generic
+			// Unknown vendor, try standard Feitian / HYP2003
 			candidateList.add("libOTGPass2003_India.so");
-			candidateList.add("lib_atick.so");
 		} else {
 			// Other tokens (SafeNet, etc.) handled directly via CCID
 			return false;
@@ -252,14 +252,13 @@ public class P11Operation {
 
 	public static void loginUser(String password) throws PKCS11Exception {
 		try {
-			if (null == password || password.trim().isEmpty())
+			if (null == password)
 				return;
 
 			myPKCS11Module_.C_Login(session_, PKCS11Constants.CKU_USER,
-					password.trim().toCharArray());
+					password.toCharArray());
 		} catch (PKCS11Exception e) {
 			if (e.getErrorCode() == PKCS11Constants.CKR_USER_ALREADY_LOGGED_IN) {
-				// User is ALREADY logged in on the hardware token! Do NOT log out and reset session!
 				Log.d("P11Operation", "User is already logged in on hardware token, preserving active session.");
 				return;
 			} else if (e.getErrorCode() == PKCS11Constants.CKR_PIN_INCORRECT) {
@@ -419,12 +418,21 @@ public class P11Operation {
 		//myTextView.append("FINISHED\n");
 	}
 
+	public static boolean isSessionOpen() {
+		return myPKCS11Module_ != null && session_ != -1;
+	}
+
 	public static byte[] signData(byte[] signData, long privateKeyHandle_, long mechanism) throws PKCS11Exception {
 		//myTextView.append("\n\n\nSIGNING DATA...\n");
 		if (null == signData)
 			return null;
 		if(signData.length==0)
 			return null;
+
+		if (myPKCS11Module_ == null || session_ == -1 || privateKeyHandle_ <= 0) {
+			Log.w("P11Operation", "Cannot sign: invalid module=" + myPKCS11Module_ + ", session=" + session_ + ", key=" + privateKeyHandle_);
+			throw new PKCS11Exception(PKCS11Constants.CKR_SESSION_HANDLE_INVALID);
+		}
 
 		//########################
 		//signData = "110000000284210000000200<?xml version=\"1.0\" encoding=\"GBK\" ?><TradeData><field name=\"支锟斤拷锟斤拷锟斤拷锟剿ｏ拷锟斤拷\" value=\"9558880200005531792\" DisplayOnScreen=\"TRUE\"/><field name=\"转锟剿斤拷锟絓" value=\"100\" DisplayOnScreen=\"TRUE\"/></TradeData>220000000048支锟斤拷锟斤拷锟斤拷锟剿ｏ拷锟斤拷:9558880200005531792转锟剿斤拷锟�:100230000000000";
@@ -449,23 +457,19 @@ public class P11Operation {
 		//byte[] data = signData.getBytes();
 
 
-		if (myPKCS11Module_ == null || session_ <= 0 || privateKeyHandle_ <= 0) {
-			Log.w("P11Operation", "Cannot sign: invalid module=" + myPKCS11Module_ + ", session=" + session_ + ", key=" + privateKeyHandle_);
-			throw new PKCS11Exception(PKCS11Constants.CKR_SESSION_HANDLE_INVALID);
-		}
-
 		CK_MECHANISM signatureMechanism_ = new CK_MECHANISM();
 		signatureMechanism_.mechanism = mechanism;
 		signatureMechanism_.pParameter = null;
 
-		try {
-			myPKCS11Module_.C_SignInit(session_, signatureMechanism_,
-					privateKeyHandle_);
-			return myPKCS11Module_.C_Sign(session_, signData);
-		} catch (PKCS11Exception e) {
-			Log.e("P11Operation", "Native PKCS11 C_Sign failed: " + e.getMessage());
-			throw e;
-		}
+		myPKCS11Module_.C_SignInit(session_, signatureMechanism_,
+				privateKeyHandle_);
+
+		byte[] signature_ = myPKCS11Module_.C_Sign(session_, signData);
+
+		//myTextView.append("signature: \n" + byteArrayToString(signature_)
+		//		+ "\nlen:" + Integer.toString(signature_.length) + "\n");
+		//myTextView.append("FINISHED\n");
+		return signature_;
 	}
 
 	public static void verifySignature(byte[] signData, byte[] signature_, long publicKeyHandle_, long mechanism) throws PKCS11Exception {
@@ -877,9 +881,11 @@ public class P11Operation {
 		}
 
 		certHandle[0] = certHandleBuff[0];
+		boolean matched = false;
+		long fallbackClientCertHandle = -1;
 
 		// get the matching cert if possible
-		for(int i=0;i<certHandleBuff.length;i++)
+		for (int i = 0; i < certHandleBuff.length; i++)
 		{
 			CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
 			getValue[0] = new CK_ATTRIBUTE();
@@ -910,14 +916,43 @@ public class P11Operation {
 				bCert = trimToExactDer(bCert);
 				try{
 					X509Certificate oneCert = X509Certificate.getInstance(bCert);
-					if(x509Cert == null || x509Cert.equals(oneCert))
-					{
-						certHandle[0] = certHandleBuff[i];
-						break;
+					if (CertificateManager.isClientCert(oneCert) && fallbackClientCertHandle == -1) {
+						fallbackClientCertHandle = certHandleBuff[i];
+					}
+
+					if (x509Cert == null) {
+						if (CertificateManager.isClientCert(oneCert)) {
+							certHandle[0] = certHandleBuff[i];
+							matched = true;
+							break;
+						}
+					} else {
+						boolean isSame = x509Cert.equals(oneCert);
+						if (!isSame && x509Cert.getSubjectDN() != null && oneCert.getSubjectDN() != null) {
+							isSame = x509Cert.getSubjectDN().getName().equalsIgnoreCase(oneCert.getSubjectDN().getName());
+						}
+						if (!isSame && x509Cert.getSerialNumber() != null && oneCert.getSerialNumber() != null) {
+							isSame = x509Cert.getSerialNumber().equals(oneCert.getSerialNumber());
+						}
+						if (!isSame) {
+							try {
+								isSame = Arrays.equals(x509Cert.getEncoded(), bCert);
+							} catch (Throwable ignored) {}
+						}
+
+						if (isSame) {
+							certHandle[0] = certHandleBuff[i];
+							matched = true;
+							break;
+						}
 					}
 				}
 				catch(Throwable ignored){}
 			}
+		}
+
+		if (!matched && fallbackClientCertHandle != -1) {
+			certHandle[0] = fallbackClientCertHandle;
 		}
 
 		// get CKA_ID by certHandle

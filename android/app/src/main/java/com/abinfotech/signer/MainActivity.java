@@ -1050,9 +1050,7 @@ public class MainActivity extends Activity {
                                                         @Override
                                                         public void run() {
                                                             String cleanCn = CertificateManager.extractCommonName(sub);
-                                                            if (cleanCn.contains("(") && (cleanCn.contains("(mToken") || cleanCn.contains("(ProxKey") || cleanCn.contains("(HYP") || cleanCn.contains("(ePass") || cleanCn.contains("(USB") || cleanCn.contains("(CryptoID"))) {
-                                                                cleanCn = cleanCn.substring(0, cleanCn.indexOf("(")).trim();
-                                                            }
+                                                            cleanCn = CertificateManager.cleanClientName(cleanCn);
                                                             mSelectedCertAlias = alias;
                                                             mSelectedCertDisplayName = cleanCn;
                                                             if (tvSignSelectedCert != null) {
@@ -1285,7 +1283,7 @@ public class MainActivity extends Activity {
                         Intent intent = new Intent(MainActivity.this, WebStudioActivity.class);
                         startActivity(intent);
                     } catch (Throwable t) {
-                        Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("http://127.0.0.1:5000"));
+                        Intent browserIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://127.0.0.1:5000"));
                         startActivity(browserIntent);
                     }
                 }
@@ -1669,6 +1667,22 @@ public class MainActivity extends Activity {
                     mSelectedCertAlias = c.optString("alias", "");
                     mSelectedCertDisplayName = cleanCn;
 
+                    String src = c.optString("source", "");
+                    if (src != null && !src.isEmpty()) {
+                        String lowerSrc = src.toLowerCase();
+                        if (lowerSrc.contains("mtoken") || lowerSrc.contains("cryptoid") || lowerSrc.contains("longmai")) {
+                            updateTokenDriverSpinnerByPos(1);
+                        } else if (lowerSrc.contains("watchdata") || lowerSrc.contains("proxkey")) {
+                            updateTokenDriverSpinnerByPos(2);
+                        } else if (lowerSrc.contains("hyp") || lowerSrc.contains("epass") || lowerSrc.contains("feitian")) {
+                            updateTokenDriverSpinnerByPos(3);
+                        } else if (lowerSrc.contains("innait") || lowerSrc.contains("precision")) {
+                            updateTokenDriverSpinnerByPos(4);
+                        } else if (lowerSrc.contains("safenet") || lowerSrc.contains("etoken")) {
+                            updateTokenDriverSpinnerByPos(5);
+                        }
+                    }
+
                     if (tvSignSelectedCert != null) {
                         tvSignSelectedCert.setText(cleanCn);
                     }
@@ -1742,13 +1756,13 @@ public class MainActivity extends Activity {
         if (tvServerIpDetails != null) {
             String wifiIp = getLocalIpAddress();
             StringBuilder sb = new StringBuilder();
-            sb.append("Local: http://127.0.0.1:5000\n");
-            sb.append("Wi-Fi LAN: http://").append(wifiIp).append(":5000\n");
+            sb.append("Local: https://127.0.0.1:5000\n");
+            sb.append("Wi-Fi LAN: https://").append(wifiIp).append(":5000\n");
             if (mGlobalWanIp != null && !mGlobalWanIp.isEmpty()) {
                 if (mUpnpPortForwarded) {
-                    sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (✅ UPnP Forwarded)\n");
+                    sb.append("Global WAN: https://").append(mGlobalWanIp).append(":5000 (✅ UPnP Forwarded)\n");
                 } else {
-                    sb.append("Global WAN: http://").append(mGlobalWanIp).append(":5000 (Tap for Remote Guide)\n");
+                    sb.append("Global WAN: https://").append(mGlobalWanIp).append(":5000 (Tap for Remote Guide)\n");
                 }
             } else {
                 sb.append("Global WAN: Resolving Public IP... (Tap to Refresh)\n");
@@ -1763,13 +1777,13 @@ public class MainActivity extends Activity {
 
                     List<String> options = new ArrayList<>();
                     if (!wanIp.isEmpty()) {
-                        options.add("🌐 Copy Global WAN: http://" + wanIp + ":5000" + (mUpnpPortForwarded ? " (UPnP Active)" : ""));
+                        options.add("🌐 Copy Global WAN: https://" + wanIp + ":5000" + (mUpnpPortForwarded ? " (UPnP Active)" : ""));
                     } else {
                         options.add("🔄 Refresh Global WAN IP & Router UPnP");
                     }
-                    options.add("📶 Copy Wi-Fi LAN: http://" + wifiIp + ":5000");
-                    options.add("🔥 Copy Hotspot URL: http://192.168.43.1:5000 (100% Remote)");
-                    options.add("💻 Copy Localhost: http://127.0.0.1:5000");
+                    options.add("📶 Copy Wi-Fi LAN: https://" + wifiIp + ":5000");
+                    options.add("🔥 Copy Hotspot URL: https://192.168.43.1:5000 (100% Remote)");
+                    options.add("💻 Copy Localhost: https://127.0.0.1:5000");
                     options.add("💡 How to connect if on different network / location? (Remote Guide)");
 
                     final String[] items = options.toArray(new String[0]);
@@ -1788,22 +1802,22 @@ public class MainActivity extends Activity {
                                         new AlertDialog.Builder(MainActivity.this)
                                                 .setTitle("Connecting from Different Network / Location")
                                                 .setMessage("📶 1. Wi-Fi LAN (Same Network):\n"
-                                                        + "When phone and PC/browser are on the same Wi-Fi, use http://" + wifiIp + ":5000 in Token.php.\n\n"
+                                                        + "When phone and PC/browser are on the same Wi-Fi, use https://" + wifiIp + ":5000 in Token.php.\n\n"
                                                         + "🌐 2. Automatic UPnP Global WAN:\n"
-                                                        + "When on Wi-Fi, this app automatically requests port 5000 forwarding on your router. If UPnP is enabled on your router, http://" + wanIp + ":5000 is accessible from anywhere on the internet!\n\n"
+                                                        + "When on Wi-Fi, this app automatically requests port 5000 forwarding on your router. If UPnP is enabled on your router, https://" + wanIp + ":5000 is accessible from anywhere on the internet!\n\n"
                                                         + "🔥 3. Cellular Data / Remote Location (100% Works):\n"
                                                         + "Mobile cellular operators (Jio, Airtel, Vi) use CGNAT and block inbound ports. For 100% reliable connection anywhere:\n"
-                                                        + "• Turn ON Phone Hotspot, connect PC to it, and use http://192.168.43.1:5000 in Token.php.\n"
+                                                        + "• Turn ON Phone Hotspot, connect PC to it, and use https://192.168.43.1:5000 in Token.php.\n"
                                                         + "• Or use a free tunnel (Localtunnel / Ngrok: https://...): in Token.php Settings, paste the tunnel URL directly!")
                                                 .setPositiveButton("OK", null)
                                                 .show();
                                         return;
                                     }
                                     String urlToCopy = "";
-                                    if (chosen.contains("Global WAN")) urlToCopy = "http://" + wanIp + ":5000";
-                                    else if (chosen.contains("Wi-Fi LAN")) urlToCopy = "http://" + wifiIp + ":5000";
-                                    else if (chosen.contains("Hotspot")) urlToCopy = "http://192.168.43.1:5000";
-                                    else if (chosen.contains("Localhost")) urlToCopy = "http://127.0.0.1:5000";
+                                    if (chosen.contains("Global WAN")) urlToCopy = "https://" + wanIp + ":5000";
+                                    else if (chosen.contains("Wi-Fi LAN")) urlToCopy = "https://" + wifiIp + ":5000";
+                                    else if (chosen.contains("Hotspot")) urlToCopy = "https://192.168.43.1:5000";
+                                    else if (chosen.contains("Localhost")) urlToCopy = "https://127.0.0.1:5000";
 
                                     if (!urlToCopy.isEmpty()) {
                                         android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
@@ -2399,19 +2413,23 @@ public class MainActivity extends Activity {
                                 tvSignResultPath.setText("Saved to Downloads:\n" + mSignedPdfFile.getAbsolutePath());
                             }
 
-                            loadPdf(mSignedPdfFile);
+                            try {
+                                loadPdf(mSignedPdfFile);
+                            } catch (Throwable ignored) {}
                             Toast.makeText(MainActivity.this, "✓ PDF Signed Successfully!", Toast.LENGTH_LONG).show();
                         }
                     });
 
-                } catch (final Exception e) {
+                } catch (final Throwable t) {
+                    Log.e(TAG, "PDF signing failure", t);
                     uiHandler.post(new Runnable() {
                         @Override
                         public void run() {
                             hideProgress();
+                            String msg = t.getMessage() != null ? t.getMessage() : t.toString();
                             new AlertDialog.Builder(MainActivity.this)
-                                     .setTitle("Signing Notice")
-                                    .setMessage("Signing error: " + e.getMessage() + "\n\nPlease ensure your certificate PIN / password is correct.")
+                                    .setTitle("Signing Notice")
+                                    .setMessage(msg)
                                     .setPositiveButton("OK", null)
                                     .show();
                         }

@@ -127,9 +127,6 @@ public class PdfSignerEngine {
 
         @Override
         public byte[] sign(byte[] message) throws GeneralSecurityException {
-            if (privateKeyHandle <= 0) {
-                throw new GeneralSecurityException("Invalid PKCS11 private key handle");
-            }
             try {
                 byte[] prefix;
                 if (DigestAlgorithms.SHA1.equalsIgnoreCase(hashAlg)) {
@@ -473,15 +470,17 @@ public class PdfSignerEngine {
             int vid = (dt != null) ? dt.vendorId : 0;
             String tokenName = (dt != null && dt.name != null) ? dt.name : "USB Token";
 
-            // 1a. Try PKCS#11 (Feitian / HYP2003 / InnaIT / ProxKey / mToken)
+            // 1a. Try PKCS#11 (Feitian / NEW HYP2003 / InnaIT / ProxKey / mToken)
             try {
                 boolean initOk = P11Operation.p11initialize(context, vid);
                 if (initOk) {
-                    try {
-                        if (0 == P11Operation.getSlotInfo()) {
-                            P11Operation.openSession();
-                        }
-                    } catch (Throwable ignored) {}
+                    if (!P11Operation.isSessionOpen()) {
+                        try {
+                            if (0 == P11Operation.getSlotInfo()) {
+                                P11Operation.openSession();
+                            }
+                        } catch (Throwable ignored) {}
+                    }
                     if (pin != null && !pin.isEmpty()) {
                         try {
                             P11Operation.loginUser(pin);
@@ -507,7 +506,9 @@ public class PdfSignerEngine {
                     }
                     long[] keyHandle = (targetCert != null) ? P11Operation.getCertificateKeyHandle(targetCert) : null;
                     if (keyHandle == null || keyHandle.length < 2 || keyHandle[1] <= 0) {
-                        keyHandle = P11Operation.getCertificateKeyHandle();
+                        try {
+                            keyHandle = P11Operation.getCertificateKeyHandle();
+                        } catch (Throwable ignored) {}
                     }
                     if (keyHandle != null && keyHandle.length >= 2 && keyHandle[1] > 0) {
                         if (targetCert == null && p11Certs != null && p11Certs.length > 0) {

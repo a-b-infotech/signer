@@ -260,7 +260,6 @@ public class CertificateManager {
         while (s.toLowerCase().startsWith("selected:")) {
             s = s.substring("selected:".length()).trim();
         }
-        // Aggressively strip any trailing parenthetical token / driver notes like (mToken...), (USB...), (.p12), etc.
         if (s.contains("(")) {
             s = s.substring(0, s.indexOf("(")).trim();
         }
@@ -313,9 +312,8 @@ public class CertificateManager {
         }
 
         // 1. Hardware USB Token Certificates (if connected)
-        CcidTokenDriver.DetectedToken detected = null;
         try {
-            detected = CcidTokenDriver.scanForToken(context);
+            CcidTokenDriver.DetectedToken detected = CcidTokenDriver.scanForToken(context);
             if (detected != null && detected.device != null) {
                 boolean hasPermission = UsbTokenManager.isPermissionGranted(context);
 
@@ -436,8 +434,8 @@ public class CertificateManager {
             String fname = f.getName().toLowerCase();
             boolean isDummyDefault = fname.equals("default_abinfo_dsc.p12") || fname.equals("last_cert.p12");
             
-            // Skip dummy/cached certificates if hardware token is connected or user has imported certificates
-            if (isDummyDefault && (detected != null || tokenCertsFound || hasUserCertFile)) {
+            // Skip dummy certificates if hardware token is connected or user has imported certificates
+            if (isDummyDefault && (tokenCertsFound || hasUserCertFile)) {
                 continue;
             }
 
