@@ -120,6 +120,7 @@ public class UsbTokenManager {
                             .edit()
                             .remove("last_token_client_name")
                             .remove("last_token_issuer_name")
+                            .remove("selected_cert_name")
                             .remove("selected_certificate")
                             .apply();
                 } catch (Throwable ignored) {}
@@ -147,6 +148,7 @@ public class UsbTokenManager {
         // If connection is already open and valid for the same device, reuse it!
         if (sActiveConnection != null && sConnectedDevice != null && sConnectedDevice.getDeviceId() == device.getDeviceId()
                 && sBulkInEndpoint != null && sBulkOutEndpoint != null) {
+            wireEndpointsToSdk(sConnectedDevice, sActiveConnection, sBulkInEndpoint, sBulkOutEndpoint);
             return true;
         }
 
@@ -217,28 +219,7 @@ public class UsbTokenManager {
                 sBulkInEndpoint = bulkIn;
                 sBulkOutEndpoint = bulkOut;
 
-                // Wire endpoints into Feitian PKCS#11 SDK (libOTGPass2003_India.so) ONLY for Feitian tokens!
-                // For other tokens (mToken / CryptoID, ProxKey, InnaIT), do NOT wire to avoid background command conflicts.
-                if (device.getVendorId() == CcidTokenDriver.VID_FEITIAN) {
-                    try {
-                        com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
-                        if (myApp != null) {
-                            myApp.setUsbDeviceConnection(conn);
-                            myApp.setInUsbEndpoint(bulkIn);
-                            myApp.setOutUsbEndpoint(bulkOut);
-                            Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token");
-                        }
-                        com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
-                        if (cb != null) {
-                            cb.setidVendor(device.getVendorId());
-                            cb.setidProduct(device.getProductId());
-                            Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
-                        }
-                    } catch (Throwable t) {
-                        Log.w(TAG, "JniCallBack setup notice: " + t.getMessage());
-                    }
-                }
-
+                wireEndpointsToSdk(device, conn, bulkIn, bulkOut);
                 return true;
             }
         } catch (Throwable t) {
@@ -246,6 +227,31 @@ public class UsbTokenManager {
         }
 
         return false;
+    }
+
+    private static void wireEndpointsToSdk(UsbDevice device, UsbDeviceConnection conn, UsbEndpoint bulkIn, UsbEndpoint bulkOut) {
+        if (device == null || conn == null) return;
+        // Wire endpoints into Feitian PKCS#11 SDK (libOTGPass2003_India.so) for Feitian/ePass/HYP tokens
+        int vid = device.getVendorId();
+        if (vid == CcidTokenDriver.VID_FEITIAN || vid == 0x096e) {
+            try {
+                com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
+                if (myApp != null) {
+                    myApp.setUsbDeviceConnection(conn);
+                    myApp.setInUsbEndpoint(bulkIn);
+                    myApp.setOutUsbEndpoint(bulkOut);
+                    Log.d(TAG, "MyApplication endpoints successfully wired for Feitian token");
+                }
+                com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
+                if (cb != null) {
+                    cb.setidVendor(device.getVendorId());
+                    cb.setidProduct(device.getProductId());
+                    Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "JniCallBack setup notice: " + t.getMessage());
+            }
+        }
     }
 
     public static synchronized void disconnectToken(Context context) {

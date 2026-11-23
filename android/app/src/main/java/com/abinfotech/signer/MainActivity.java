@@ -559,7 +559,8 @@ public class MainActivity extends Activity {
             SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             String sc = sp.getString(PREF_SELECTED_CERT, "");
             if (sc.contains("ABHISHEK") || sc.contains("Enter PIN") || sc.contains("Hardware Token")
-                    || sc.contains("mToken") || sc.contains("HYP") || sc.contains("ProxKey") || sc.contains("CryptoID")) {
+                    || sc.contains("mToken") || sc.contains("HYP") || sc.contains("ProxKey") || sc.contains("CryptoID")
+                    || sc.startsWith("Selected:") || sc.equals("Select Certificate") || sc.contains("(") || sc.contains(")")) {
                 sp.edit()
                         .remove(PREF_SELECTED_CERT)
                         .remove("last_token_client_name")
@@ -1048,10 +1049,14 @@ public class MainActivity extends Activity {
                                                     uiHandler.post(new Runnable() {
                                                         @Override
                                                         public void run() {
+                                                            String cleanCn = CertificateManager.extractCommonName(sub);
+                                                            if (cleanCn.contains("(") && (cleanCn.contains("(mToken") || cleanCn.contains("(ProxKey") || cleanCn.contains("(HYP") || cleanCn.contains("(ePass") || cleanCn.contains("(USB") || cleanCn.contains("(CryptoID"))) {
+                                                                cleanCn = cleanCn.substring(0, cleanCn.indexOf("(")).trim();
+                                                            }
                                                             mSelectedCertAlias = alias;
-                                                            mSelectedCertDisplayName = sub;
+                                                            mSelectedCertDisplayName = cleanCn;
                                                             if (tvSignSelectedCert != null) {
-                                                                tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                                                                tvSignSelectedCert.setText(mSelectedCertDisplayName);
                                                             }
                                                         }
                                                     });
@@ -1660,9 +1665,7 @@ public class MainActivity extends Activity {
                 String sub = c.optString("subject", "");
                 if (!sub.isEmpty() && !sub.contains("Enter PIN") && !sub.contains("Hardware Token")) {
                     String cleanCn = CertificateManager.extractCommonName(sub);
-                    if (cleanCn.contains("(")) {
-                        cleanCn = cleanCn.substring(0, cleanCn.indexOf("(")).trim();
-                    }
+                    cleanCn = CertificateManager.cleanClientName(cleanCn);
                     mSelectedCertAlias = c.optString("alias", "");
                     mSelectedCertDisplayName = cleanCn;
 
@@ -1688,6 +1691,17 @@ public class MainActivity extends Activity {
                     return;
                 }
             }
+        }
+
+        if (tokenConnected) {
+            CcidTokenDriver.DetectedToken dtNow = CcidTokenDriver.scanForToken(this);
+            String tokenName = (dtNow != null && dtNow.name != null) ? dtNow.name : "USB Token";
+            mSelectedCertDisplayName = "";
+            mSelectedCertAlias = "USB_HARDWARE_TOKEN_CERT";
+            if (tvSignSelectedCert != null) {
+                tvSignSelectedCert.setText(tokenName + " (Tap 'Find Certificates' to Read)");
+            }
+            return;
         }
 
         // Check if user has an imported software certificate (.p12)
@@ -1925,9 +1939,7 @@ public class MainActivity extends Activity {
             }
             String alias = obj.optString("alias", "");
             String cleanCn = CertificateManager.extractCommonName(sub);
-            if (cleanCn.contains("(")) {
-                cleanCn = cleanCn.substring(0, cleanCn.indexOf("(")).trim();
-            }
+            cleanCn = CertificateManager.cleanClientName(cleanCn);
             displayNamesList.add(cleanCn);
             aliasesList.add(alias);
             certObjectsList.add(obj);
@@ -2655,9 +2667,9 @@ public class MainActivity extends Activity {
                     String savedPath = CertificateManager.importCertificate(this, is, fileName);
 
                     mSelectedCertAlias = fileName;
-                    mSelectedCertDisplayName = "P12/PFX: " + fileName;
+                    mSelectedCertDisplayName = fileName;
                     if (tvSignSelectedCert != null) {
-                        tvSignSelectedCert.setText("Selected: " + mSelectedCertDisplayName);
+                        tvSignSelectedCert.setText(mSelectedCertDisplayName);
                     }
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                             .edit()

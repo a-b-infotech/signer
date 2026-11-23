@@ -55,7 +55,7 @@ public class P11Operation {
 	public static String resolvePkcs11ModulePath(Context context, String moduleName) {
 		String defaultName = (moduleName != null && !moduleName.isEmpty()) ? moduleName : "libOTGPass2003_India.so";
 		try {
-			// 1. Check system nativeLibraryDir
+			// 1. Check system nativeLibraryDir first (official Android location for JNI .so libraries)
 			if (context != null && context.getApplicationInfo() != null && context.getApplicationInfo().nativeLibraryDir != null) {
 				File nativeLib = new File(context.getApplicationInfo().nativeLibraryDir, defaultName);
 				if (nativeLib.exists() && nativeLib.canRead()) {
@@ -63,42 +63,12 @@ public class P11Operation {
 				}
 			}
 
-			// 2. Check internal files directory
+			// 2. Remove any obsolete stale copy in filesDir to prevent W^X security violation
 			if (context != null) {
-				File internalLib = new File(context.getFilesDir(), defaultName);
-				if (internalLib.exists() && internalLib.length() > 0) {
-					return internalLib.getAbsolutePath();
-				}
-
-				// 3. Extract directly from APK zip file
-				String pkgCodePath = context.getPackageCodePath();
-				if (pkgCodePath != null) {
-					ZipFile zf = new ZipFile(pkgCodePath);
-					String[] candidatePaths = new String[]{
-						"lib/arm64-v8a/" + defaultName,
-						"lib/armeabi-v7a/" + defaultName,
-						"lib/armeabi/" + defaultName
-					};
-					for (String candidate : candidatePaths) {
-						ZipEntry ze = zf.getEntry(candidate);
-						if (ze != null) {
-							try (InputStream is = zf.getInputStream(ze);
-								 FileOutputStream fos = new FileOutputStream(internalLib)) {
-								byte[] buf = new byte[8192];
-								int r;
-								while ((r = is.read(buf)) != -1) {
-									fos.write(buf, 0, r);
-								}
-								fos.flush();
-							}
-							internalLib.setReadable(true, false);
-							internalLib.setExecutable(true, false);
-							zf.close();
-							return internalLib.getAbsolutePath();
-						}
-					}
-					zf.close();
-				}
+				try {
+					File stale = new File(context.getFilesDir(), defaultName);
+					if (stale.exists()) stale.delete();
+				} catch (Throwable ignored) {}
 			}
 		} catch (Throwable t) {
 			Log.w("P11Operation", "Could not resolve PKCS11 native lib path for " + defaultName + ": " + t.getMessage());
@@ -123,6 +93,11 @@ public class P11Operation {
 		if(null == _context) {
 			return false;
 		}
+
+		// Ensure USB connection endpoints are properly wired to MyApplication before native initialization
+		try {
+			UsbTokenManager.setupHardwareTokenConnection(_context);
+		} catch (Throwable ignored) {}
 
 		List<String> candidateList = new ArrayList<>();
 		if (vendorId == 0x096e) { // Feitian / HYP2003 / ePass2003
@@ -258,12 +233,17 @@ public class P11Operation {
 
 	public static void openSession() throws PKCS11Exception {
 		try{
-		session_ = myPKCS11Module_.C_OpenSession(token_,
-				PKCS11Constants.CKF_SERIAL_SESSION
-						| PKCS11Constants.CKF_RW_SESSION, null, null);
+			session_ = myPKCS11Module_.C_OpenSession(token_,
+					PKCS11Constants.CKF_SERIAL_SESSION
+							| PKCS11Constants.CKF_RW_SESSION, null, null);
 		}catch(PKCS11Exception e){
-			session_ = -1;
-			throw e;
+			try {
+				session_ = myPKCS11Module_.C_OpenSession(token_,
+						PKCS11Constants.CKF_SERIAL_SESSION, null, null);
+			} catch (PKCS11Exception e2) {
+				session_ = -1;
+				throw e2;
+			}
 		}
 	}
 
@@ -832,150 +812,174 @@ public class P11Operation {
 
 
 
+	public static byte[] trimToExactDer(byte[] raw) {
+		if (raw == null || raw.length < 4) return raw;
+		int start = -1;
+		for (int i = 0; i < Math.min(raw.length - 4, 64); i++) {
+			if ((raw[i] & 0xFF) == 0x30) {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0) start = 0;
+		int len = raw.length - start;
+		if ((raw[start] & 0xFF) == 0x30 && start + 2 < raw.length) {
+			int tag2 = raw[start + 1] & 0xFF;
+			if (tag2 == 0x82 && start + 4 <= raw.length) {
+				len = (((raw[start + 2] & 0xFF) << 8) | (raw[start + 3] & 0xFF)) + 4;
+			} else if (tag2 == 0x81 && start + 3 <= raw.length) {
+				len = (raw[start + 2] & 0xFF) + 3;
+			} else if (tag2 < 0x80) {
+				len = tag2 + 2;
+			}
+		}
+		if (len > 30 && start + len <= raw.length) {
+			byte[] exact = new byte[len];
+			System.arraycopy(raw, start, exact, 0, len);
+			return exact;
+		}
+		return raw;
+	}
+
 	public static long[] getCertificateKeyHandle(X509Certificate x509Cert) throws PKCS11Exception
 	{
-		CK_ATTRIBUTE[] findCertAttrList = new CK_ATTRIBUTE[3];
+		CK_ATTRIBUTE[] findCertAttrList = new CK_ATTRIBUTE[2];
 		findCertAttrList[0] = new CK_ATTRIBUTE();
 		findCertAttrList[0].type = PKCS11Constants.CKA_CLASS;
 		findCertAttrList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
 		findCertAttrList[1] = new CK_ATTRIBUTE();
 		findCertAttrList[1].type = PKCS11Constants.CKA_TOKEN;
 		findCertAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
-		findCertAttrList[2] = new CK_ATTRIBUTE();
-		findCertAttrList[2].type = PKCS11Constants.CKA_PRIVATE;
-		findCertAttrList[2].pValue = new Boolean(PKCS11Constants.FALSE);
+
 		long certHandleBuff[] = null;
 		long certHandle[] = new long[1];
 
 		try{
 			myPKCS11Module_.C_FindObjectsInit(session_, findCertAttrList);
-			certHandleBuff = myPKCS11Module_.C_FindObjects(session_, 10);
+			certHandleBuff = myPKCS11Module_.C_FindObjects(session_, 16);
 			myPKCS11Module_.C_FindObjectsFinal(session_);
 		}
 		catch(PKCS11Exception e){
 			throw e;
 		}
 
-		if(certHandleBuff == null)
+		if(certHandleBuff == null || certHandleBuff.length == 0)
 		{
 			return null;
 		}
-		//get the same cert in key
+
+		certHandle[0] = certHandleBuff[0];
+
+		// get the matching cert if possible
 		for(int i=0;i<certHandleBuff.length;i++)
 		{
 			CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
 			getValue[0] = new CK_ATTRIBUTE();
 			getValue[0].type = PKCS11Constants.CKA_VALUE;
-			getValue[0].pValue = null;/*new byte[8192];*/
+			getValue[0].pValue = null;
+			byte[] bCert = null;
 			try{
 				myPKCS11Module_.C_GetAttributeValue(session_, certHandleBuff[i], getValue);
-			}
-			catch(PKCS11Exception e)
-			{
-				throw e;
+				if (getValue[0].pValue instanceof byte[]) {
+					bCert = (byte[]) getValue[0].pValue;
+				}
+			} catch(Throwable ignored) {}
+
+			if (bCert == null || bCert.length == 0) {
+				try {
+					getValue[0] = new CK_ATTRIBUTE();
+					getValue[0].type = PKCS11Constants.CKA_VALUE;
+					getValue[0].pValue = new byte[8192];
+					myPKCS11Module_.C_GetAttributeValue(session_, certHandleBuff[i], getValue);
+					if (getValue[0].pValue instanceof byte[]) {
+						bCert = (byte[]) getValue[0].pValue;
+					}
+				} catch (Throwable ignored) {}
 			}
 
-			if( getValue[0].pValue!=null)
+			if( bCert != null && bCert.length > 0)
 			{
-				int l = ((byte[])getValue[0].pValue).length;
-				byte[] bCert = new byte[l];
-				for(int j=0;j<l;j++)
-					bCert[j] = ((byte[])getValue[0].pValue)[j];
-
+				bCert = trimToExactDer(bCert);
 				try{
-					X509Certificate oneCert=X509Certificate.getInstance(bCert);
-					if(x509Cert.equals(oneCert))
+					X509Certificate oneCert = X509Certificate.getInstance(bCert);
+					if(x509Cert == null || x509Cert.equals(oneCert))
 					{
 						certHandle[0] = certHandleBuff[i];
 						break;
 					}
 				}
-				catch(CertificateException e){
-					return null;
-				}
+				catch(Throwable ignored){}
 			}
 		}
 
-		//get CKA_ID by certhanle
-		CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
-		getValue[0] = new CK_ATTRIBUTE();
-		getValue[0].type = PKCS11Constants.CKA_ID;
-		getValue[0].pValue = null;/*new byte[8192];*/
+		// get CKA_ID by certHandle
+		byte[] id = null;
+		CK_ATTRIBUTE[] getIdAttr = new CK_ATTRIBUTE[1];
+		getIdAttr[0] = new CK_ATTRIBUTE();
+		getIdAttr[0].type = PKCS11Constants.CKA_ID;
+		getIdAttr[0].pValue = null;
 		try{
-			myPKCS11Module_.C_GetAttributeValue(session_, certHandle[0], getValue);
-		}
-		catch(PKCS11Exception e)
-		{
-			throw e;
-		}
+			myPKCS11Module_.C_GetAttributeValue(session_, certHandle[0], getIdAttr);
+			if (getIdAttr[0].pValue instanceof byte[]) {
+				id = (byte[]) getIdAttr[0].pValue;
+			}
+		} catch(Throwable ignored) {}
 
-		int l = ((byte[])getValue[0].pValue).length;
-		byte[] id = new  byte[l];
-		int i=0;
-		for(i=0;i<l;i++){
-			id[i] = ((byte[])getValue[0].pValue)[i];
-		}
-
-		//find pubkey by CKA_ID
-		CK_ATTRIBUTE[] findPublicKeyAttrList = new CK_ATTRIBUTE[4];
-		findPublicKeyAttrList[0] = new CK_ATTRIBUTE();
-		findPublicKeyAttrList[0].type = PKCS11Constants.CKA_CLASS;
-		findPublicKeyAttrList[0].pValue = new Long(PKCS11Constants.CKO_PUBLIC_KEY);
-		findPublicKeyAttrList[1] = new CK_ATTRIBUTE();
-		findPublicKeyAttrList[1].type = PKCS11Constants.CKA_TOKEN;
-		findPublicKeyAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
-		findPublicKeyAttrList[2] = new CK_ATTRIBUTE();
-		findPublicKeyAttrList[2].type = PKCS11Constants.CKA_PRIVATE;
-		findPublicKeyAttrList[2].pValue = new Boolean(PKCS11Constants.FALSE);
-		findPublicKeyAttrList[3] = new CK_ATTRIBUTE();
-		findPublicKeyAttrList[3].type = PKCS11Constants.CKA_ID;
-		findPublicKeyAttrList[3].pValue =id;
-
-		long[] pubKeyHandle = null;
-
-		try{
-			myPKCS11Module_.C_FindObjectsInit(session_, findPublicKeyAttrList);
-			pubKeyHandle = myPKCS11Module_.C_FindObjects(session_, 1);
-			myPKCS11Module_.C_FindObjectsFinal(session_);
-		}
-		catch(PKCS11Exception e){
-			throw e;
+		if (id == null || id.length == 0) {
+			try {
+				getIdAttr[0] = new CK_ATTRIBUTE();
+				getIdAttr[0].type = PKCS11Constants.CKA_ID;
+				getIdAttr[0].pValue = new byte[256];
+				myPKCS11Module_.C_GetAttributeValue(session_, certHandle[0], getIdAttr);
+				if (getIdAttr[0].pValue instanceof byte[]) {
+					id = (byte[]) getIdAttr[0].pValue;
+				}
+			} catch(Throwable ignored) {}
 		}
 
-		////find prikey by CKA_ID
-		CK_ATTRIBUTE[] findPrivateKeyAttrList = new CK_ATTRIBUTE[4];
-		findPrivateKeyAttrList[0] = new CK_ATTRIBUTE();
-		findPrivateKeyAttrList[0].type = PKCS11Constants.CKA_CLASS;
-		findPrivateKeyAttrList[0].pValue = new Long(PKCS11Constants.CKO_PRIVATE_KEY);
-		findPrivateKeyAttrList[1] = new CK_ATTRIBUTE();
-		findPrivateKeyAttrList[1].type = PKCS11Constants.CKA_TOKEN;
-		findPrivateKeyAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
-		findPrivateKeyAttrList[2] = new CK_ATTRIBUTE();
-		findPrivateKeyAttrList[2].type = PKCS11Constants.CKA_PRIVATE;
-		findPrivateKeyAttrList[2].pValue = new Boolean(PKCS11Constants.TRUE);
-		findPrivateKeyAttrList[3] = new CK_ATTRIBUTE();
-		findPrivateKeyAttrList[3].type = PKCS11Constants.CKA_ID;
-		findPrivateKeyAttrList[3].pValue =id;
-		long[] priKeyHandle=null;
+		long[] priKeyHandle = null;
+		if (id != null && id.length > 0) {
+			CK_ATTRIBUTE[] findPrivateKeyAttrList = new CK_ATTRIBUTE[3];
+			findPrivateKeyAttrList[0] = new CK_ATTRIBUTE();
+			findPrivateKeyAttrList[0].type = PKCS11Constants.CKA_CLASS;
+			findPrivateKeyAttrList[0].pValue = new Long(PKCS11Constants.CKO_PRIVATE_KEY);
+			findPrivateKeyAttrList[1] = new CK_ATTRIBUTE();
+			findPrivateKeyAttrList[1].type = PKCS11Constants.CKA_TOKEN;
+			findPrivateKeyAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
+			findPrivateKeyAttrList[2] = new CK_ATTRIBUTE();
+			findPrivateKeyAttrList[2].type = PKCS11Constants.CKA_ID;
+			findPrivateKeyAttrList[2].pValue = id;
 
-		try{
-			myPKCS11Module_.C_FindObjectsInit(session_, findPrivateKeyAttrList);
-			priKeyHandle = myPKCS11Module_.C_FindObjects(session_, 1);
-			myPKCS11Module_.C_FindObjectsFinal(session_);
-		}
-		catch(PKCS11Exception e){
-			throw e;
+			try{
+				myPKCS11Module_.C_FindObjectsInit(session_, findPrivateKeyAttrList);
+				priKeyHandle = myPKCS11Module_.C_FindObjects(session_, 1);
+				myPKCS11Module_.C_FindObjectsFinal(session_);
+			} catch(Throwable ignored) {}
 		}
 
-		if(0 == pubKeyHandle.length || 0 == priKeyHandle.length)
-		{
+		// Fallback: Find ANY private key on token if id search returned empty
+		if (priKeyHandle == null || priKeyHandle.length == 0) {
+			try {
+				CK_ATTRIBUTE[] anyPri = new CK_ATTRIBUTE[2];
+				anyPri[0] = new CK_ATTRIBUTE();
+				anyPri[0].type = PKCS11Constants.CKA_CLASS;
+				anyPri[0].pValue = new Long(PKCS11Constants.CKO_PRIVATE_KEY);
+				anyPri[1] = new CK_ATTRIBUTE();
+				anyPri[1].type = PKCS11Constants.CKA_TOKEN;
+				anyPri[1].pValue = new Boolean(PKCS11Constants.TRUE);
+				myPKCS11Module_.C_FindObjectsInit(session_, anyPri);
+				priKeyHandle = myPKCS11Module_.C_FindObjects(session_, 1);
+				myPKCS11Module_.C_FindObjectsFinal(session_);
+			} catch (Throwable ignored) {}
+		}
+
+		if (priKeyHandle == null || priKeyHandle.length == 0) {
 			return null;
 		}
 
 		long keyHandle[] = new long[2];
-		keyHandle[0] =  pubKeyHandle[0];
+		keyHandle[0] = certHandle[0];
 		keyHandle[1] = priKeyHandle[0];
-
 		return keyHandle;
 	}
 
@@ -1169,16 +1173,10 @@ public class P11Operation {
 		}
 		catch(Throwable t){
 			try {
-				CK_ATTRIBUTE[] fallbackList = new CK_ATTRIBUTE[3];
+				CK_ATTRIBUTE[] fallbackList = new CK_ATTRIBUTE[1];
 				fallbackList[0] = new CK_ATTRIBUTE();
 				fallbackList[0].type = PKCS11Constants.CKA_CLASS;
 				fallbackList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
-				fallbackList[1] = new CK_ATTRIBUTE();
-				fallbackList[1].type = PKCS11Constants.CKA_TOKEN;
-				fallbackList[1].pValue = new Boolean(PKCS11Constants.TRUE);
-				fallbackList[2] = new CK_ATTRIBUTE();
-				fallbackList[2].type = PKCS11Constants.CKA_PRIVATE;
-				fallbackList[2].pValue = new Boolean(PKCS11Constants.FALSE);
 
 				myPKCS11Module_.C_FindObjectsInit(session_, fallbackList);
 				certHandle = myPKCS11Module_.C_FindObjects(session_, MaxObjectCount);
@@ -1194,6 +1192,7 @@ public class P11Operation {
 		}
 
 		List<X509Certificate> clientCertList = new ArrayList<>();
+		List<X509Certificate> allFoundList = new ArrayList<>();
 		CertificateFactory cf = null;
 		try {
 			cf = CertificateFactory.getInstance("X.509");
@@ -1201,68 +1200,196 @@ public class P11Operation {
 
 		for(int i = 0; i < certHandle.length; i++)
 		{
+			byte[] bCert = null;
 			CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
 			getValue[0] = new CK_ATTRIBUTE();
 			getValue[0].type = PKCS11Constants.CKA_VALUE;
 			getValue[0].pValue = null;
 			try {
 				myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
+				if (getValue[0].pValue instanceof byte[]) {
+					bCert = (byte[]) getValue[0].pValue;
+				}
 			} catch(Throwable ignored) {}
 
-			if(getValue[0].pValue == null) {
+			if(bCert == null || bCert.length == 0) {
 				try {
+					getValue[0] = new CK_ATTRIBUTE();
+					getValue[0].type = PKCS11Constants.CKA_VALUE;
 					getValue[0].pValue = new byte[8192];
 					myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
+					if (getValue[0].pValue instanceof byte[]) {
+						bCert = (byte[]) getValue[0].pValue;
+					}
 				} catch(Throwable ignored) {}
 			}
 
-			if(getValue[0].pValue != null)
+			if(bCert != null && bCert.length > 0)
 			{
-				byte[] bCert = (byte[]) getValue[0].pValue;
+				bCert = trimToExactDer(bCert);
+				if (bCert == null || bCert.length < 30) continue;
+
 				try {
+					java.security.cert.X509Certificate javaCert = null;
 					if (cf != null) {
-						java.security.cert.X509Certificate javaCert = 
-							(java.security.cert.X509Certificate) cf.generateCertificate(new ByteArrayInputStream(bCert));
-						if (!CertificateManager.isClientCertificate(javaCert)) {
-							// Filter out Root CA and Sub CA! Only client certificates returned
+						try {
+							javaCert = (java.security.cert.X509Certificate) cf.generateCertificate(new ByteArrayInputStream(bCert));
+						} catch (Throwable ignored) {}
+					}
+					X509Certificate oneCert = null;
+					try {
+						oneCert = X509Certificate.getInstance(bCert);
+					} catch (Throwable ignored) {}
+
+					if (oneCert == null && javaCert != null) {
+						try {
+							oneCert = X509Certificate.getInstance(javaCert.getEncoded());
+						} catch (Throwable ignored) {}
+					}
+
+					if (oneCert != null) {
+						allFoundList.add(oneCert);
+						if (javaCert != null && !CertificateManager.isClientCertificate(javaCert)) {
 							continue;
 						}
+						if (!CertificateManager.isClientCert(oneCert)) {
+							continue;
+						}
+						clientCertList.add(oneCert);
 					}
-					X509Certificate oneCert = X509Certificate.getInstance(bCert);
-					String sub = oneCert.getSubjectDN().getName().toLowerCase();
-					String iss = oneCert.getIssuerDN().getName().toLowerCase();
-					if (sub.equalsIgnoreCase(iss) || sub.contains("root ca") || sub.contains("sub ca") || sub.contains("sub-ca")
-							|| sub.contains("certifying authority") || sub.contains("cca india")) {
-						continue;
-					}
-					clientCertList.add(oneCert);
 				} catch (Throwable ignored) {}
 			}
 		}
 
-		// Fallback: If strict client filter left list empty, only add non-CA certs
-		if (clientCertList.isEmpty() && certHandle.length > 0) {
-			for(int i = 0; i < certHandle.length; i++) {
-				CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
-				getValue[0] = new CK_ATTRIBUTE();
-				getValue[0].type = PKCS11Constants.CKA_VALUE;
-				getValue[0].pValue = null;
-				try {
-					myPKCS11Module_.C_GetAttributeValue(session_, certHandle[i], getValue);
-					if (getValue[0].pValue != null) {
-						byte[] bCert = (byte[]) getValue[0].pValue;
-						X509Certificate oneCert = X509Certificate.getInstance(bCert);
-						String sub = oneCert.getSubjectDN().getName().toLowerCase();
-						String iss = oneCert.getIssuerDN().getName().toLowerCase();
-						if (!sub.equalsIgnoreCase(iss) && !sub.contains("root ca") && !sub.contains("sub ca") && !sub.contains("sub-ca")
-								&& !sub.contains("certifying authority") && !sub.contains("cca india")) {
-							clientCertList.add(oneCert);
-						}
-					}
-				} catch (Throwable ignored) {}
-			}
+		if (clientCertList.isEmpty() && !allFoundList.isEmpty()) {
+			return allFoundList.toArray(new X509Certificate[0]);
 		}
 
 		return clientCertList.toArray(new X509Certificate[0]);
+	}
+
+	public static List<String[]> getCertificateInfoList() {
+		List<String[]> list = new ArrayList<>();
+		if (myPKCS11Module_ == null || session_ == -1) {
+			return list;
+		}
+
+		long[] certHandle = null;
+		try {
+			CK_ATTRIBUTE[] findCertAttrList = new CK_ATTRIBUTE[2];
+			findCertAttrList[0] = new CK_ATTRIBUTE();
+			findCertAttrList[0].type = PKCS11Constants.CKA_CLASS;
+			findCertAttrList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
+			findCertAttrList[1] = new CK_ATTRIBUTE();
+			findCertAttrList[1].type = PKCS11Constants.CKA_TOKEN;
+			findCertAttrList[1].pValue = new Boolean(PKCS11Constants.TRUE);
+
+			myPKCS11Module_.C_FindObjectsInit(session_, findCertAttrList);
+			certHandle = myPKCS11Module_.C_FindObjects(session_, 64);
+			myPKCS11Module_.C_FindObjectsFinal(session_);
+		} catch (Throwable t) {
+			try {
+				CK_ATTRIBUTE[] fallbackList = new CK_ATTRIBUTE[1];
+				fallbackList[0] = new CK_ATTRIBUTE();
+				fallbackList[0].type = PKCS11Constants.CKA_CLASS;
+				fallbackList[0].pValue = new Long(PKCS11Constants.CKO_CERTIFICATE);
+
+				myPKCS11Module_.C_FindObjectsInit(session_, fallbackList);
+				certHandle = myPKCS11Module_.C_FindObjects(session_, 64);
+				myPKCS11Module_.C_FindObjectsFinal(session_);
+			} catch (Throwable ignored) {}
+		}
+
+		if (certHandle == null || certHandle.length == 0) {
+			return list;
+		}
+
+		CertificateFactory cf = null;
+		try { cf = CertificateFactory.getInstance("X.509"); } catch (Throwable ignored) {}
+
+		for (int i = 0; i < certHandle.length; i++) {
+			long hCert = certHandle[i];
+			String clientCn = null;
+			String issuerCn = null;
+
+			// 1. Try reading CKA_VALUE
+			byte[] bCert = null;
+			try {
+				CK_ATTRIBUTE[] getValue = new CK_ATTRIBUTE[1];
+				getValue[0] = new CK_ATTRIBUTE();
+				getValue[0].type = PKCS11Constants.CKA_VALUE;
+				getValue[0].pValue = new byte[8192];
+				myPKCS11Module_.C_GetAttributeValue(session_, hCert, getValue);
+				if (getValue[0].pValue instanceof byte[]) {
+					bCert = (byte[]) getValue[0].pValue;
+				}
+			} catch (Throwable ignored) {}
+
+			if (bCert != null && bCert.length > 30) {
+				bCert = trimToExactDer(bCert);
+				if (cf != null) {
+					try {
+						java.security.cert.X509Certificate javaCert = (java.security.cert.X509Certificate) cf.generateCertificate(new java.io.ByteArrayInputStream(bCert));
+						if (javaCert != null) {
+							String sub = javaCert.getSubjectDN() != null ? javaCert.getSubjectDN().getName() : "";
+							String iss = javaCert.getIssuerDN() != null ? javaCert.getIssuerDN().getName() : "";
+							clientCn = CertificateManager.extractCommonName(sub);
+							issuerCn = CertificateManager.extractCommonName(iss);
+						}
+					} catch (Throwable ignored) {}
+				}
+				if (clientCn == null || clientCn.isEmpty() || clientCn.equals("Client Certificate")) {
+					clientCn = CcidTokenDriver.extractCnFromDer(bCert);
+				}
+			}
+
+			// 2. Try reading CKA_SUBJECT if CKA_VALUE didn't yield a client name
+			if (clientCn == null || clientCn.isEmpty() || clientCn.equals("Client Certificate")) {
+				try {
+					CK_ATTRIBUTE[] getSub = new CK_ATTRIBUTE[1];
+					getSub[0] = new CK_ATTRIBUTE();
+					getSub[0].type = PKCS11Constants.CKA_SUBJECT;
+					getSub[0].pValue = new byte[1024];
+					myPKCS11Module_.C_GetAttributeValue(session_, hCert, getSub);
+					if (getSub[0].pValue instanceof byte[]) {
+						byte[] subBytes = (byte[]) getSub[0].pValue;
+						String scn = CcidTokenDriver.extractCnFromDer(subBytes);
+						if (scn != null && !scn.isEmpty()) {
+							clientCn = scn;
+						}
+					}
+				} catch (Throwable ignored) {}
+			}
+
+			// 3. Try reading CKA_LABEL if still not found
+			if (clientCn == null || clientCn.isEmpty() || clientCn.equals("Client Certificate")) {
+				try {
+					CK_ATTRIBUTE[] getLabel = new CK_ATTRIBUTE[1];
+					getLabel[0] = new CK_ATTRIBUTE();
+					getLabel[0].type = PKCS11Constants.CKA_LABEL;
+					getLabel[0].pValue = new byte[256];
+					myPKCS11Module_.C_GetAttributeValue(session_, hCert, getLabel);
+					if (getLabel[0].pValue instanceof byte[]) {
+						byte[] lblBytes = (byte[]) getLabel[0].pValue;
+						int len = 0;
+						while (len < lblBytes.length && lblBytes[len] != 0) len++;
+						if (len > 0) {
+							String lbl = new String(lblBytes, 0, len, "UTF-8").trim();
+							if (!lbl.isEmpty() && !lbl.equalsIgnoreCase("Certificate") && !lbl.equalsIgnoreCase("X.509 Certificate")) {
+								clientCn = lbl;
+							}
+						}
+					}
+				} catch (Throwable ignored) {}
+			}
+
+			if (clientCn != null && !clientCn.trim().isEmpty()) {
+				String clean = CertificateManager.cleanClientName(clientCn);
+				String issClean = (issuerCn != null) ? CertificateManager.cleanClientName(issuerCn) : "";
+				list.add(new String[]{"USB_Token_Cert_" + i, clean, issClean});
+			}
+		}
+
+		return list;
 	}
 }

@@ -290,6 +290,10 @@ public class PdfSignerEngine {
         String dn = cert.getSubjectDN().getName();
         if (dn == null || dn.isEmpty()) return null;
 
+        if ("CN".equalsIgnoreCase(fieldName)) {
+            return CertificateManager.extractCommonName(dn);
+        }
+
         String fieldUpper = fieldName.toUpperCase();
         String prefix1 = fieldUpper + "=";
         String prefix2 = "";
@@ -467,6 +471,11 @@ public class PdfSignerEngine {
                 int vid = (dt != null) ? dt.vendorId : 0;
                 boolean initOk = P11Operation.p11initialize(context, vid);
                 if (initOk) {
+                    try {
+                        if (0 == P11Operation.getSlotInfo()) {
+                            P11Operation.openSession();
+                        }
+                    } catch (Throwable ignored) {}
                     if (pin != null && !pin.isEmpty()) {
                         try { P11Operation.loginUser(pin); } catch (Throwable ignored) {}
                     }

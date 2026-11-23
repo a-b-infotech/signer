@@ -251,15 +251,47 @@ public class CertificateManager {
         }
     }
 
+    public static String cleanClientName(String name) {
+        if (name == null) return "";
+        String s = name.trim();
+        if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
+            s = s.substring(1, s.length() - 1).trim();
+        }
+        if (s.startsWith("Selected:")) {
+            s = s.substring("Selected:".length()).trim();
+        }
+        if (s.contains("(") && (s.contains("(mToken") || s.contains("(CryptoID") || s.contains("(ProxKey") 
+                || s.contains("(Watchdata") || s.contains("(HYP") || s.contains("(ePass") 
+                || s.contains("(Feitian") || s.contains("(InnaIT") || s.contains("(USB") || s.contains("(SafeNet"))) {
+            s = s.substring(0, s.indexOf("(")).trim();
+        }
+        return s;
+    }
+
     public static String extractCommonName(String dn) {
         if (dn == null || dn.trim().isEmpty()) return "Client Certificate";
+        try {
+            java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?i)(?:^|[,+/])\\s*CN\\s*=\\s*(?:\"([^\"]*)\"|([^,+/]+))");
+            java.util.regex.Matcher m = p.matcher(dn);
+            if (m.find()) {
+                String val = m.group(1);
+                if (val == null || val.isEmpty()) {
+                    val = m.group(2);
+                }
+                if (val != null && !val.trim().isEmpty()) {
+                    return cleanClientName(val.trim());
+                }
+            }
+        } catch (Throwable ignored) {}
+
         for (String part : dn.split(",")) {
             String p = part.trim();
             if (p.toUpperCase().startsWith("CN=")) {
-                return p.substring(3).trim();
+                String val = p.substring(3).trim();
+                return cleanClientName(val);
             }
         }
-        return dn;
+        return cleanClientName(dn);
     }
 
     public static JSONArray listCertificatesJson(Context context, String password) {
@@ -272,7 +304,8 @@ public class CertificateManager {
         if (activePin.isEmpty() && context != null) {
             try {
                 android.content.SharedPreferences sp = context.getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
-                activePin = sp.getString("user_pin", "");
+                activePin = sp.getString("saved_pin", "");
+                if (activePin.isEmpty()) activePin = sp.getString("user_pin", "");
                 if (activePin.isEmpty()) activePin = sp.getString("token_pin", "");
             } catch (Throwable ignored) {}
         }
@@ -291,52 +324,68 @@ public class CertificateManager {
                     // Permission is granted! Safely connect
                     boolean connOk = UsbTokenManager.setupHardwareTokenConnection(context);
                     if (connOk) {
-                        // Strategy 1: Feitian Tokens (VID 0x096e) -> Use Feitian Native PKCS#11 Driver FIRST
-                        if (detected.vendorId == CcidTokenDriver.VID_FEITIAN) {
-                            try {
-                                P11Operation.resetSession();
-                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext(), detected.vendorId);
-                                if (initOk) {
-                                    if (0 == P11Operation.getSlotInfo()) {
-                                        P11Operation.openSession();
-                                        if (activePin != null && !activePin.isEmpty()) {
-                                            try {
-                                                P11Operation.loginUser(activePin);
-                                            } catch (Throwable t) {
-                                                Log.w(TAG, "P11 login notice: " + t.getMessage());
-                                            }
-                                        }
-                                        javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
-                                        if (tokenCerts != null && tokenCerts.length > 0) {
-                                            for (int i = 0; i < tokenCerts.length; i++) {
-                                                javax.security.cert.X509Certificate tc = tokenCerts[i];
-                                                if (!isClientCert(tc)) {
-                                                    // Skip Root CA / Sub CA
-                                                    continue;
-                                                }
-                                                String subjectDn = tc.getSubjectDN().getName();
-                                                String clientName = extractCommonName(subjectDn);
-                                                String issuerName = extractCommonName(tc.getIssuerDN().getName());
-                                                JSONObject obj = new JSONObject();
-                                                obj.put("alias", "USB_Token_Cert_" + i);
-                                                obj.put("subject", clientName);
-                                                obj.put("issuer", issuerName);
-                                                obj.put("source", detected.name);
-                                                obj.put("file_path", "PKCS11://token/cert/" + i);
-                                                obj.put("is_hardware_token", true);
-                                                obj.put("is_placeholder", false);
-                                                arr.put(obj);
-                                                tokenCertsFound = true;
-                                            }
+                        // Strategy 1: Native PKCS#11 Driver (Supports Feitian, mToken/CryptoID, Watchdata ProxKey, InnaIT)
+                        try {
+                            P11Operation.resetSession();
+                            boolean initOk = P11Operation.p11initialize(context.getApplicationContext(), detected.vendorId);
+                            if (initOk && 0 == P11Operation.getSlotInfo()) {
+                                P11Operation.openSession();
+                                if (activePin != null && !activePin.isEmpty()) {
+                                    try {
+                                        P11Operation.loginUser(activePin);
+                                    } catch (Throwable t) {
+                                        Log.w(TAG, "P11 login notice: " + t.getMessage());
+                                    }
+                                }
+
+                                // 1a. Try high-level certificate extraction (reads CKA_VALUE, CKA_SUBJECT, CKA_LABEL)
+                                List<String[]> p11CertInfos = P11Operation.getCertificateInfoList();
+                                if (p11CertInfos != null && !p11CertInfos.isEmpty()) {
+                                    for (int i = 0; i < p11CertInfos.size(); i++) {
+                                        String[] info = p11CertInfos.get(i);
+                                        String clientName = cleanClientName(info[1]);
+                                        String issuerName = cleanClientName(info[2]);
+                                        JSONObject obj = new JSONObject();
+                                        obj.put("alias", "USB_Token_Cert_" + i);
+                                        obj.put("subject", clientName);
+                                        obj.put("issuer", (!issuerName.isEmpty()) ? issuerName : detected.brand);
+                                        obj.put("source", detected.name);
+                                        obj.put("file_path", "PKCS11://token/cert/" + i);
+                                        obj.put("is_hardware_token", true);
+                                        obj.put("is_placeholder", false);
+                                        arr.put(obj);
+                                        tokenCertsFound = true;
+                                    }
+                                }
+
+                                // 1b. Fallback to getAllX509Certificate if info list was empty
+                                if (!tokenCertsFound) {
+                                    javax.security.cert.X509Certificate[] tokenCerts = P11Operation.getAllX509Certificate();
+                                    if (tokenCerts != null && tokenCerts.length > 0) {
+                                        for (int i = 0; i < tokenCerts.length; i++) {
+                                            javax.security.cert.X509Certificate tc = tokenCerts[i];
+                                            String subjectDn = tc.getSubjectDN().getName();
+                                            String clientName = extractCommonName(subjectDn);
+                                            String issuerName = extractCommonName(tc.getIssuerDN().getName());
+                                            JSONObject obj = new JSONObject();
+                                            obj.put("alias", "USB_Token_Cert_" + i);
+                                            obj.put("subject", clientName);
+                                            obj.put("issuer", issuerName);
+                                            obj.put("source", detected.name);
+                                            obj.put("file_path", "PKCS11://token/cert/" + i);
+                                            obj.put("is_hardware_token", true);
+                                            obj.put("is_placeholder", false);
+                                            arr.put(obj);
+                                            tokenCertsFound = true;
                                         }
                                     }
                                 }
-                            } catch (Throwable t) {
-                                Log.w(TAG, "Feitian PKCS11 notice: " + t.getMessage());
                             }
+                        } catch (Throwable t) {
+                            Log.w(TAG, "PKCS11 driver notice: " + t.getMessage());
                         }
 
-                        // Strategy 2: Universal CCID APDU reader (Primary for mToken / CryptoID, Watchdata ProxKey, SafeNet, and secondary for Feitian)
+                        // Strategy 2: Universal CCID APDU reader (for mToken / CryptoID, Watchdata ProxKey, SafeNet, and secondary for Feitian)
                         if (!tokenCertsFound) {
                             try {
                                 List<CcidTokenDriver.CcidCertInfo> ccidCerts = CcidTokenDriver.readCertificatesViaCcid(context, activePin);
@@ -344,9 +393,10 @@ public class CertificateManager {
                                     for (int i = 0; i < ccidCerts.size(); i++) {
                                         CcidTokenDriver.CcidCertInfo ci = ccidCerts.get(i);
                                         if (ci != null && ci.clientName != null && !ci.clientName.trim().isEmpty()) {
+                                            String cleanCn = extractCommonName(ci.clientName);
                                             JSONObject obj = new JSONObject();
                                             obj.put("alias", "CCID_Token_Cert_" + i);
-                                            obj.put("subject", ci.clientName.trim());
+                                            obj.put("subject", cleanCn);
                                             obj.put("issuer", (ci.issuerName != null && !ci.issuerName.trim().isEmpty()) ? ci.issuerName.trim() : detected.brand);
                                             obj.put("source", detected.name);
                                             obj.put("file_path", "CCID://token/cert/" + i);
@@ -359,39 +409,6 @@ public class CertificateManager {
                                 }
                             } catch (Throwable t) {
                                 Log.w(TAG, "CCID cert read notice: " + t.getMessage());
-                            }
-                        }
-
-                        // Strategy 3: InnaIT Precision Native PKCS#11 driver
-                        if (!tokenCertsFound && (detected.vendorId == CcidTokenDriver.VID_INNAIT_1 || detected.vendorId == CcidTokenDriver.VID_INNAIT_4)) {
-                            try {
-                                P11Operation.resetSession();
-                                boolean initOk = P11Operation.p11initialize(context.getApplicationContext(), detected.vendorId);
-                                if (initOk && 0 == P11Operation.getSlotInfo()) {
-                                    P11Operation.openSession();
-                                    javax.security.cert.X509Certificate[] inCerts = P11Operation.getAllX509Certificate();
-                                    if (inCerts != null && inCerts.length > 0) {
-                                        for (int i = 0; i < inCerts.length; i++) {
-                                            javax.security.cert.X509Certificate tc = inCerts[i];
-                                            if (!isClientCert(tc)) continue;
-                                            String subjectDn = tc.getSubjectDN().getName();
-                                            String clientName = extractCommonName(subjectDn);
-                                            String issuerName = extractCommonName(tc.getIssuerDN().getName());
-                                            JSONObject obj = new JSONObject();
-                                            obj.put("alias", "INNAIT_Token_Cert_" + i);
-                                            obj.put("subject", clientName);
-                                            obj.put("issuer", issuerName);
-                                            obj.put("source", detected.name);
-                                            obj.put("file_path", "PKCS11://innait/cert/" + i);
-                                            obj.put("is_hardware_token", true);
-                                            obj.put("is_placeholder", false);
-                                            arr.put(obj);
-                                            tokenCertsFound = true;
-                                        }
-                                    }
-                                }
-                            } catch (Throwable t) {
-                                Log.w(TAG, "InnaIT PKCS11 notice: " + t.getMessage());
                             }
                         }
                     }

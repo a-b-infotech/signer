@@ -397,8 +397,17 @@ public class CcidTokenDriver {
                     }
                 }
             } catch (Throwable t) {
-                // If this sequence wasn't a valid standalone X509 certificate (e.g. outer container),
-                // advance cursor by 1 so inner sequences are not skipped!
+                // Try direct ASN.1 Common Name extraction if CertificateFactory failed on wrapper
+                String extractedCn = extractCnFromDer(certBytes);
+                if (extractedCn != null && !extractedCn.isEmpty()) {
+                    CcidCertInfo ci = new CcidCertInfo();
+                    ci.clientName = extractedCn;
+                    ci.issuerName = "Hardware Token CA";
+                    ci.rawCertBytes = certBytes;
+                    results.add(ci);
+                    parsedOk = true;
+                    Log.d(TAG, "✅ Direct ASN.1 extracted client cert: CN=" + extractedCn);
+                }
             }
             cursor = parsedOk ? (start + certLen) : (start + 1);
         }
@@ -406,7 +415,88 @@ public class CcidTokenDriver {
         if (results.isEmpty() && !fallbackList.isEmpty()) {
             results.addAll(fallbackList);
         }
+
+        // Fallback: If no certificate found through sequence framing, scan entire raw data directly
+        if (results.isEmpty() && rawData != null && rawData.length > 50) {
+            String fallbackCn = extractCnFromDer(rawData);
+            if (fallbackCn != null && !fallbackCn.isEmpty()) {
+                CcidCertInfo ci = new CcidCertInfo();
+                ci.clientName = fallbackCn;
+                ci.issuerName = "Hardware Token CA";
+                ci.rawCertBytes = rawData;
+                results.add(ci);
+                Log.d(TAG, "✅ Raw data ASN.1 extracted client cert: CN=" + fallbackCn);
+            }
+        }
+
         return results;
+    }
+
+    public static String extractCnFromDer(byte[] der) {
+        if (der == null || der.length < 10) return null;
+        byte[] oid = new byte[]{0x06, 0x03, 0x55, 0x04, 0x03}; // 2.5.4.3 (id-at-commonName)
+        List<String> allCns = new ArrayList<>();
+
+        for (int i = 0; i <= der.length - 10; i++) {
+            boolean match = true;
+            for (int j = 0; j < 5; j++) {
+                if (der[i + j] != oid[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                int strTag = der[i + 5] & 0xFF;
+                int lenByte = der[i + 6] & 0xFF;
+                int vOffset = i + 7;
+                int len = lenByte;
+
+                if (lenByte == 0x81 && i + 7 < der.length) {
+                    len = der[i + 7] & 0xFF;
+                    vOffset = i + 8;
+                } else if (lenByte == 0x82 && i + 8 < der.length) {
+                    len = ((der[i + 7] & 0xFF) << 8) | (der[i + 8] & 0xFF);
+                    vOffset = i + 9;
+                }
+
+                if (len > 0 && vOffset + len <= der.length) {
+                    try {
+                        String s;
+                        if (strTag == 0x1E) { // BMPString (UTF-16BE)
+                            s = new String(der, vOffset, len, "UTF-16BE").trim();
+                        } else {
+                            s = new String(der, vOffset, len, "UTF-8").trim();
+                        }
+                        if (!s.isEmpty()) {
+                            allCns.add(s);
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
+        }
+
+        if (allCns.isEmpty()) return null;
+
+        // Filter out known CA / Sub-CA Common Names to isolate genuine client/subscriber CN
+        List<String> clientCandidates = new ArrayList<>();
+        for (String cn : allCns) {
+            String lower = cn.toLowerCase();
+            boolean isCa = lower.contains("sub ca") || lower.contains("sub-ca") || lower.contains("subca")
+                    || lower.contains("root ca") || lower.contains("root-ca") || lower.contains("rootca")
+                    || lower.contains("certifying authority") || lower.contains("certification authority")
+                    || lower.contains("cca india") || lower.contains("intermediate ca") || lower.contains("issuing ca")
+                    || lower.endsWith(" ca") || lower.startsWith("ca ") || lower.equals("ca");
+            if (!isCa) {
+                clientCandidates.add(cn);
+            }
+        }
+
+        if (!clientCandidates.isEmpty()) {
+            // Subject CN is always after Issuer CN in TBSCertificate, return the last client candidate
+            return clientCandidates.get(clientCandidates.size() - 1);
+        }
+
+        return allCns.get(allCns.size() - 1);
     }
 
     public static CcidCertInfo parseX509Der(byte[] rawData) {
@@ -585,18 +675,27 @@ public class CcidTokenDriver {
                     byte lo = (byte) (ef & 0xFF);
 
                     byte[] selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x00, 0x02, hi, lo}, seq++);
-                    if (selResp == null || selResp.length < 2) {
-                        selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x02, 0x00, 0x02, hi, lo}, seq++);
-                    }
-                    if (selResp == null || selResp.length < 2) {
+                    boolean selOk = (selResp != null && selResp.length >= 2 && 
+                            (selResp[selResp.length - 2] == (byte) 0x90 || selResp[selResp.length - 2] == (byte) 0x61 || selResp[selResp.length - 2] == (byte) 0x62));
+                    if (!selOk) {
                         selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x00, 0x04, 0x02, hi, lo}, seq++);
+                        selOk = (selResp != null && selResp.length >= 2 && 
+                                (selResp[selResp.length - 2] == (byte) 0x90 || selResp[selResp.length - 2] == (byte) 0x61 || selResp[selResp.length - 2] == (byte) 0x62));
+                    }
+                    if (!selOk) {
+                        selResp = execCcidApdu(conn, outEp, inEp, new byte[]{0x00, (byte) 0xA4, 0x02, 0x04, 0x02, hi, lo}, seq++);
+                        selOk = (selResp != null && selResp.length >= 2 && 
+                                (selResp[selResp.length - 2] == (byte) 0x90 || selResp[selResp.length - 2] == (byte) 0x61 || selResp[selResp.length - 2] == (byte) 0x62));
+                    }
+                    if (!selOk) {
+                        continue;
                     }
 
                     int[] seqHolder = new int[]{seq};
                     byte[] fullFile = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
                     seq = seqHolder[0];
 
-                    if (fullFile.length > 100) {
+                    if (fullFile != null && fullFile.length > 50) {
                         List<CcidCertInfo> cinfos = parseAllX509Der(fullFile);
                         if (!cinfos.isEmpty()) {
                             results.addAll(cinfos);
