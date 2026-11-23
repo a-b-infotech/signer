@@ -254,16 +254,18 @@ public class CertificateManager {
     public static String cleanClientName(String name) {
         if (name == null) return "";
         String s = name.trim();
-        if (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
+        while (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
             s = s.substring(1, s.length() - 1).trim();
         }
-        if (s.startsWith("Selected:")) {
-            s = s.substring("Selected:".length()).trim();
+        while (s.toLowerCase().startsWith("selected:")) {
+            s = s.substring("selected:".length()).trim();
         }
-        if (s.contains("(") && (s.contains("(mToken") || s.contains("(CryptoID") || s.contains("(ProxKey") 
-                || s.contains("(Watchdata") || s.contains("(HYP") || s.contains("(ePass") 
-                || s.contains("(Feitian") || s.contains("(InnaIT") || s.contains("(USB") || s.contains("(SafeNet"))) {
+        // Aggressively strip any trailing parenthetical token / driver notes like (mToken...), (USB...), (.p12), etc.
+        if (s.contains("(")) {
             s = s.substring(0, s.indexOf("(")).trim();
+        }
+        while (s.startsWith("\"") && s.endsWith("\"") && s.length() >= 2) {
+            s = s.substring(1, s.length() - 1).trim();
         }
         return s;
     }
@@ -311,8 +313,9 @@ public class CertificateManager {
         }
 
         // 1. Hardware USB Token Certificates (if connected)
+        CcidTokenDriver.DetectedToken detected = null;
         try {
-            CcidTokenDriver.DetectedToken detected = CcidTokenDriver.scanForToken(context);
+            detected = CcidTokenDriver.scanForToken(context);
             if (detected != null && detected.device != null) {
                 boolean hasPermission = UsbTokenManager.isPermissionGranted(context);
 
@@ -433,8 +436,8 @@ public class CertificateManager {
             String fname = f.getName().toLowerCase();
             boolean isDummyDefault = fname.equals("default_abinfo_dsc.p12") || fname.equals("last_cert.p12");
             
-            // Skip dummy certificates if hardware token is connected or user has imported certificates
-            if (isDummyDefault && (tokenCertsFound || hasUserCertFile)) {
+            // Skip dummy/cached certificates if hardware token is connected or user has imported certificates
+            if (isDummyDefault && (detected != null || tokenCertsFound || hasUserCertFile)) {
                 continue;
             }
 

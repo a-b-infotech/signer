@@ -55,6 +55,7 @@ public class CcidTokenDriver {
     public static final int VID_FEITIAN = 0x096e;      // Feitian Technologies (Old ePass2003)
     public static final int VID_HYPERSECU_1 = 0x2ccf;  // Hypersecu Information Systems (NEW HYP2003)
     public static final int VID_HYPERSECU_2 = 0x2ce3;  // Hypersecu secondary (HYP2003)
+    public static final int VID_HYPERSECU_3 = 0x2003;  // HYP2003 hardware variant
     public static final int PID_EPASS2003 = 0x0405;
     public static final int PID_HYP2003_1 = 0x0807;
     public static final int PID_HYP2003_2 = 0x2003;
@@ -73,10 +74,10 @@ public class CcidTokenDriver {
     public static final int VID_WATCHDATA_4 = 0x1059;
     public static final int VID_WATCHDATA_5 = 0x04b4;
 
-    // 4. InnaIT Precision (Precision Biometric India / eMudhra)
+    // 4. InnaIT Precision (Precision Biometric India)
     public static final int VID_INNAIT_1 = 0x338c; // Precision Biometric India Pvt. Ltd. (InnaIT Key)
     public static final int VID_INNAIT_2 = 0x2617; // Precision Biometrics
-    public static final int VID_INNAIT_3 = 0x2007; // eMudhra / InnaIT
+    public static final int VID_INNAIT_3 = 0x2007; // InnaIT variant
     public static final int VID_INNAIT_4 = 0x08c3; // Precise Biometrics / Precision
 
     // 5. SafeNet eToken (Gemalto / Thales)
@@ -84,7 +85,7 @@ public class CcidTokenDriver {
     public static final int VID_SAFENET_2 = 0x08e6;
 
     public static boolean isHyp2003(int vid) {
-        return vid == VID_FEITIAN || vid == VID_HYPERSECU_1 || vid == VID_HYPERSECU_2;
+        return vid == VID_FEITIAN || vid == VID_HYPERSECU_1 || vid == VID_HYPERSECU_2 || vid == VID_HYPERSECU_3;
     }
 
     public static boolean isMToken(int vid) {
@@ -122,8 +123,8 @@ public class CcidTokenDriver {
             }
 
             // CRITICAL: Hardware USB Vendor IDs have HIGHEST PRIORITY!
-            // 1. HYP2003 / ePass2003 (Feitian / Hypersecu - 0x096E, 0x2CCF, 0x2CE3)
-            if (isHyp2003(vid)) {
+            // 1. HYP2003 / ePass2003 (Feitian / Hypersecu - 0x096E, 0x2CCF, 0x2CE3, 0x2003)
+            if (isHyp2003(vid) || pid == PID_EPASS2003 || pid == PID_HYP2003_1 || pid == PID_HYP2003_2) {
                 return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
             }
             // 2. mToken / CryptoID (Century Longmai - 0x055C, 0x4C4D, 0x0925, 0x24A4)
@@ -136,7 +137,7 @@ public class CcidTokenDriver {
             }
             // 4. InnaIT Precision (0x338C, 0x2617, 0x2007, 0x08C3)
             if (isInnait(vid)) {
-                return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
+                return new DetectedToken("InnaIT Precision", "Precision Biometrics", vid, pid, dev, hasCcid);
             }
             // 5. SafeNet eToken (0x0529, 0x08E6)
             if (vid == VID_SAFENET_1 || vid == VID_SAFENET_2) {
@@ -154,24 +155,25 @@ public class CcidTokenDriver {
             } catch (Throwable ignored) {}
             String combined = (prodName + " " + mfgName).trim();
 
+            if (combined.contains("epass") || combined.contains("hyp2003") || combined.contains("hyp 2003")
+                    || combined.contains("feitian") || combined.contains("entersafe")
+                    || combined.contains("hyperpki") || combined.contains("hypersecu")) {
+                return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
+            }
             if (combined.contains("mtoken") || combined.contains("longmai") || combined.contains("cryptoid")) {
                 return new DetectedToken("mToken / CryptoID", "Century Longmai PKI", vid, pid, dev, hasCcid);
             }
-            if (combined.contains("epass") || combined.contains("hyp2003") || combined.contains("feitian")
-                    || combined.contains("entersafe") || combined.contains("hyperpki")) {
-                return new DetectedToken("HYP2003 / ePass2003", "HyperPKI Feitian", vid, pid, dev, hasCcid);
-            }
-            if (combined.contains("proxkey") || combined.contains("watchdata")) {
+            if (combined.contains("proxkey") || combined.contains("watchdata") || combined.contains("wdassist")) {
                 return new DetectedToken("Watchdata ProxKey", "Watchdata WDS", vid, pid, dev, hasCcid);
             }
-            if (combined.contains("innait") || combined.contains("precision") || combined.contains("emudhra")) {
-                return new DetectedToken("InnaIT Precision", "Precision / eMudhra", vid, pid, dev, hasCcid);
+            if (combined.contains("innait") || combined.contains("precision biometric") || combined.contains("precision key")) {
+                return new DetectedToken("InnaIT Precision", "Precision Biometrics", vid, pid, dev, hasCcid);
             }
             if ((combined.contains("safenet") || combined.contains("gemalto") || combined.contains("thales") || combined.contains("etoken"))
                     && !combined.contains("mtoken") && !combined.contains("longmai") && !combined.contains("cryptoid")
                     && !combined.contains("hyp2003") && !combined.contains("feitian") && !combined.contains("epass")
                     && !combined.contains("proxkey") && !combined.contains("watchdata")
-                    && !combined.contains("innait") && !combined.contains("precision")) {
+                    && !combined.contains("innait")) {
                 return new DetectedToken("SafeNet eToken", "Gemalto / Thales", vid, pid, dev, hasCcid);
             }
 
@@ -186,6 +188,12 @@ public class CcidTokenDriver {
     public static byte[] execRawCcidBlock(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, byte[] apdu, int seq) {
         if (conn == null || outEp == null || inEp == null || apdu == null) return null;
         try {
+            // Drain residual endpoint data to prevent desync
+            try {
+                byte[] drain = new byte[1024];
+                while (conn.bulkTransfer(inEp, drain, drain.length, 50) > 0) {}
+            } catch (Throwable ignored) {}
+
             UsbInterface activeIntf = UsbTokenManager.getActiveInterface();
             int intfClass = activeIntf != null ? activeIntf.getInterfaceClass() : 11;
             boolean isCcidClass = (intfClass == 11 || intfClass == UsbConstants.USB_CLASS_CSCID);
@@ -566,7 +574,8 @@ public class CcidTokenDriver {
                 if (dataLen <= 0) break;
                 stream.write(resp, 0, dataLen);
                 offset += dataLen;
-                if (preferredChunk != 0x00 && dataLen < (preferredChunk & 0xFF)) {
+                int expectedLen = (preferredChunk == 0x00) ? 256 : (preferredChunk & 0xFF);
+                if (dataLen < expectedLen) {
                     break;
                 }
             } else if (sw1 == 0x62 && (sw2 == 0x82 || sw2 == 0x00)) {
@@ -614,6 +623,12 @@ public class CcidTokenDriver {
         if (conn == null || inEp == null || outEp == null) return results;
 
         try {
+            // Drain residual endpoint data to prevent desync
+            try {
+                byte[] drain = new byte[1024];
+                while (conn.bulkTransfer(inEp, drain, drain.length, 50) > 0) {}
+            } catch (Throwable ignored) {}
+
             UsbInterface activeIntf = UsbTokenManager.getActiveInterface();
             int intfClass = activeIntf != null ? activeIntf.getInterfaceClass() : 11;
             boolean isCcidClass = (intfClass == 11 || intfClass == UsbConstants.USB_CLASS_CSCID);

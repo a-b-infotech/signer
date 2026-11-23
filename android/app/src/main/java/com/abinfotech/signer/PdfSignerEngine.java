@@ -127,6 +127,9 @@ public class PdfSignerEngine {
 
         @Override
         public byte[] sign(byte[] message) throws GeneralSecurityException {
+            if (privateKeyHandle <= 0) {
+                throw new GeneralSecurityException("Invalid PKCS11 private key handle");
+            }
             try {
                 byte[] prefix;
                 if (DigestAlgorithms.SHA1.equalsIgnoreCase(hashAlg)) {
@@ -465,10 +468,13 @@ public class PdfSignerEngine {
 
         // 1. Try Hardware USB Token if attached or requested
         if (tokenConnected || isTokenAlias) {
-            // 1a. Try PKCS#11 (Feitian / InnaIT)
+            UsbTokenManager.setupHardwareTokenConnection(context);
+            CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(context);
+            int vid = (dt != null) ? dt.vendorId : 0;
+            String tokenName = (dt != null && dt.name != null) ? dt.name : "USB Token";
+
+            // 1a. Try PKCS#11 (Feitian / HYP2003 / InnaIT / ProxKey / mToken)
             try {
-                CcidTokenDriver.DetectedToken dt = CcidTokenDriver.scanForToken(context);
-                int vid = (dt != null) ? dt.vendorId : 0;
                 boolean initOk = P11Operation.p11initialize(context, vid);
                 if (initOk) {
                     try {
@@ -477,19 +483,37 @@ public class PdfSignerEngine {
                         }
                     } catch (Throwable ignored) {}
                     if (pin != null && !pin.isEmpty()) {
-                        try { P11Operation.loginUser(pin); } catch (Throwable ignored) {}
+                        try {
+                            P11Operation.loginUser(pin);
+                        } catch (Throwable pe) {
+                            String pMsg = pe.getMessage() != null ? pe.getMessage().toLowerCase() : "";
+                            if (pMsg.contains("pin_incorrect") || pMsg.contains("pin incorrect")) {
+                                throw new Exception("Token PIN is incorrect. Please check the PIN entered in the box and try again.");
+                            } else if (pMsg.contains("pin_locked") || pMsg.contains("locked")) {
+                                throw new Exception("Token is LOCKED due to too many incorrect PIN attempts.");
+                            }
+                        }
                     }
                     javax.security.cert.X509Certificate[] p11Certs = P11Operation.getAllX509Certificate();
+                    javax.security.cert.X509Certificate targetCert = null;
                     if (p11Certs != null && p11Certs.length > 0) {
-                        javax.security.cert.X509Certificate targetCert = p11Certs[0];
+                        targetCert = p11Certs[0];
                         for (javax.security.cert.X509Certificate tc : p11Certs) {
                             if (CertificateManager.isClientCert(tc)) {
                                 targetCert = tc;
                                 break;
                             }
                         }
-                        long[] keyHandle = P11Operation.getCertificateKeyHandle(targetCert);
-                        if (keyHandle != null && keyHandle.length >= 2) {
+                    }
+                    long[] keyHandle = (targetCert != null) ? P11Operation.getCertificateKeyHandle(targetCert) : null;
+                    if (keyHandle == null || keyHandle.length < 2 || keyHandle[1] <= 0) {
+                        keyHandle = P11Operation.getCertificateKeyHandle();
+                    }
+                    if (keyHandle != null && keyHandle.length >= 2 && keyHandle[1] > 0) {
+                        if (targetCert == null && p11Certs != null && p11Certs.length > 0) {
+                            targetCert = p11Certs[0];
+                        }
+                        if (targetCert != null) {
                             X509Certificate stdCert = convertToX509Certificate(targetCert);
                             Certificate[] chain = new Certificate[]{stdCert};
                             ExternalSignature sig = new PKCS11ExternalSignature(keyHandle[1], DigestAlgorithms.SHA256);
@@ -500,6 +524,9 @@ public class PdfSignerEngine {
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "PKCS11 token sign notice: " + t.getMessage());
+                if (t.getMessage() != null && (t.getMessage().contains("PIN is incorrect") || t.getMessage().contains("LOCKED"))) {
+                    throw (Exception) t;
+                }
             }
 
             // 1b. Try Direct CCID APDU signing (mToken / ProxKey / SafeNet / CCID)
@@ -516,6 +543,11 @@ public class PdfSignerEngine {
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "CCID token sign notice: " + t.getMessage());
+            }
+
+            // If a hardware token is plugged in, report a clear error instead of falling back to unrelated .p12
+            if (tokenConnected) {
+                throw new Exception("Unable to sign with connected " + tokenName + ". Please verify that your Hardware Token PIN is entered correctly (default is usually 12345678) and the token is securely connected.");
             }
         }
 

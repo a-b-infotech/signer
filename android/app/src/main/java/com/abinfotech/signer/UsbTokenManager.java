@@ -239,7 +239,8 @@ public class UsbTokenManager {
         if (device == null || conn == null) return;
         // Wire endpoints into Feitian PKCS#11 SDK (libOTGPass2003_India.so) for Feitian/ePass/HYP tokens (0x096e, 0x2ccf, 0x2ce3)
         int vid = device.getVendorId();
-        if (CcidTokenDriver.isHyp2003(vid) || vid == CcidTokenDriver.VID_FEITIAN || vid == 0x096e || vid == 0x2ccf || vid == 0x2ce3) {
+        int pid = device.getProductId();
+        if (CcidTokenDriver.isHyp2003(vid) || vid == CcidTokenDriver.VID_FEITIAN || vid == 0x096e || vid == 0x2ccf || vid == 0x2ce3 || vid == 0x2003 || pid == CcidTokenDriver.PID_EPASS2003 || pid == CcidTokenDriver.PID_HYP2003_1 || pid == CcidTokenDriver.PID_HYP2003_2) {
             try {
                 com.ftsafe.monitor.MyApplication myApp = com.ftsafe.monitor.MyApplication.getInstance();
                 if (myApp != null) {
@@ -250,9 +251,11 @@ public class UsbTokenManager {
                 }
                 com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
                 if (cb != null) {
-                    cb.setidVendor(device.getVendorId());
-                    cb.setidProduct(device.getProductId());
-                    Log.d(TAG, "JniCallBack VID/PID set: " + device.getVendorId() + " / " + device.getProductId());
+                    // CRITICAL: Always set 0x096e / 0x0405 so libOTGPass2003_India.so native C code accepts
+                    // BOTH Old ePass2003 (0x096e) and NEW HYP2003 (0x2ccf / 0x2ce3) seamlessly!
+                    cb.setidVendor(0x096e);
+                    cb.setidProduct(0x0405);
+                    Log.d(TAG, "JniCallBack VID/PID set to Feitian standard: 0x096e / 0x0405");
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "JniCallBack setup notice: " + t.getMessage());

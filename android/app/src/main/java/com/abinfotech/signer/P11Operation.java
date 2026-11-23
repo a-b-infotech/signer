@@ -107,19 +107,23 @@ public class P11Operation {
 			candidateList.add("libep2003.so");
 		} else if (vendorId == 0x338c || vendorId == 0x2617 || vendorId == 0x2007 || vendorId == 0x08c3) { // InnaIT Precision
 			candidateList.add("libInnaITPKCS11.so");
+			candidateList.add("lib_atick.so");
 			candidateList.add("libinnait_pkcs11.so");
 			candidateList.add("libinneit.so");
 		} else if (vendorId == 0x163c || vendorId == 0x24dc || vendorId == 0x04b5 || vendorId == 0x1059 || vendorId == 0x04b4) { // Watchdata ProxKey
+			candidateList.add("lib_atick.so");
 			candidateList.add("libWatchdataPKCS11.so");
 			candidateList.add("libproxkey.so");
 			candidateList.add("libWDAssist.so");
 		} else if (vendorId == 0x055c || vendorId == 0x4c4d || vendorId == 0x0925 || vendorId == 0x24a4) { // Longmai mToken / CryptoID
+			candidateList.add("lib_atick.so");
 			candidateList.add("libcryptoid_pkcs11.so");
 			candidateList.add("libmtoken.so");
 			candidateList.add("libmTokenGM.so");
 		} else if (vendorId == 0) {
-			// Unknown vendor, try standard Feitian / HYP2003
+			// Unknown vendor, try standard Feitian / HYP2003 then generic
 			candidateList.add("libOTGPass2003_India.so");
+			candidateList.add("lib_atick.so");
 		} else {
 			// Other tokens (SafeNet, etc.) handled directly via CCID
 			return false;
@@ -248,15 +252,16 @@ public class P11Operation {
 
 	public static void loginUser(String password) throws PKCS11Exception {
 		try {
-			if (null == password)
+			if (null == password || password.trim().isEmpty())
 				return;
 
 			myPKCS11Module_.C_Login(session_, PKCS11Constants.CKU_USER,
-					password.toCharArray());
+					password.trim().toCharArray());
 		} catch (PKCS11Exception e) {
 			if (e.getErrorCode() == PKCS11Constants.CKR_USER_ALREADY_LOGGED_IN) {
-				logout();
-				loginUser(password);
+				// User is ALREADY logged in on the hardware token! Do NOT log out and reset session!
+				Log.d("P11Operation", "User is already logged in on hardware token, preserving active session.");
+				return;
 			} else if (e.getErrorCode() == PKCS11Constants.CKR_PIN_INCORRECT) {
 				throw e;
 			} else {
@@ -444,19 +449,23 @@ public class P11Operation {
 		//byte[] data = signData.getBytes();
 
 
+		if (myPKCS11Module_ == null || session_ <= 0 || privateKeyHandle_ <= 0) {
+			Log.w("P11Operation", "Cannot sign: invalid module=" + myPKCS11Module_ + ", session=" + session_ + ", key=" + privateKeyHandle_);
+			throw new PKCS11Exception(PKCS11Constants.CKR_SESSION_HANDLE_INVALID);
+		}
+
 		CK_MECHANISM signatureMechanism_ = new CK_MECHANISM();
 		signatureMechanism_.mechanism = mechanism;
 		signatureMechanism_.pParameter = null;
 
-		myPKCS11Module_.C_SignInit(session_, signatureMechanism_,
-				privateKeyHandle_);
-
-		byte[] signature_ = myPKCS11Module_.C_Sign(session_, signData);
-
-		//myTextView.append("signature: \n" + byteArrayToString(signature_)
-		//		+ "\nlen:" + Integer.toString(signature_.length) + "\n");
-		//myTextView.append("FINISHED\n");
-		return signature_;
+		try {
+			myPKCS11Module_.C_SignInit(session_, signatureMechanism_,
+					privateKeyHandle_);
+			return myPKCS11Module_.C_Sign(session_, signData);
+		} catch (PKCS11Exception e) {
+			Log.e("P11Operation", "Native PKCS11 C_Sign failed: " + e.getMessage());
+			throw e;
+		}
 	}
 
 	public static void verifySignature(byte[] signData, byte[] signature_, long publicKeyHandle_, long mechanism) throws PKCS11Exception {
