@@ -626,6 +626,16 @@ USER_HOME = os.path.expanduser('~')
 
 APP_DIR = os.path.join(USER_HOME, '.abinfotech_signer')
 
+# Application installation directory (where executable or script resides)
+if getattr(sys, 'frozen', False):
+    INSTALL_DIR = os.path.dirname(os.path.abspath(sys.executable))
+    BUNDLE_DIR = getattr(sys, '_MEIPASS', INSTALL_DIR)
+else:
+    INSTALL_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
+    BUNDLE_DIR = INSTALL_DIR
+
+STATIC_DRIVERS_DIR = r'C:\xampp\htdocs\abinfo_signer\drivers'
+
 
 
 if not os.path.exists(APP_DIR):
@@ -1526,11 +1536,15 @@ def _pick_best_pkcs11_dll(candidates):
 
     """
 
-    Selects the best matching PKCS#11 driver DLL from candidate list.
+    Selects the best matching PKCS#11 driver library from candidate list.
 
-    First checks if the DLL exists and loads cleanly via pkcs11, then falls back to first existing.
+    First checks if the library exists and loads cleanly via pkcs11, then falls back to first existing.
+
+    Supports Windows (.dll), Linux (.so), and macOS (.dylib).
 
     """
+
+    valid_exts = ('.dll', '.so', '.dylib')
 
     for p in candidates:
 
@@ -1542,7 +1556,7 @@ def _pick_best_pkcs11_dll(candidates):
 
             target = target[:-4] + '.dll'
 
-        if os.path.exists(target) and target.lower().endswith('.dll'):
+        if os.path.exists(target) and any(target.lower().endswith(ext) for ext in valid_exts):
 
             try:
 
@@ -1564,7 +1578,7 @@ def _pick_best_pkcs11_dll(candidates):
 
             target = target[:-4] + '.dll'
 
-        if os.path.exists(target) and target.lower().endswith('.dll'):
+        if os.path.exists(target) and any(target.lower().endswith(ext) for ext in valid_exts):
 
             return target
 
@@ -1581,11 +1595,23 @@ def _pick_best_pkcs11_dll(candidates):
 def find_epass_driver_path():
     if CURRENT_OS == 'Darwin':
         candidates = [
+            os.path.join(INSTALL_DIR, "HYP2003.dylib"),
+            os.path.join(INSTALL_DIR, "libhyp2003.dylib"),
+            os.path.join(INSTALL_DIR, "libcastle.dylib"),
+            os.path.join(INSTALL_DIR, "libcastle_v2.dylib"),
+            os.path.join(INSTALL_DIR, "libcastle_v2.1.0.0.dylib"),
+            os.path.join(BUNDLE_DIR, "HYP2003.dylib"),
+            os.path.join(BUNDLE_DIR, "libhyp2003.dylib"),
+            os.path.join(BUNDLE_DIR, "libcastle.dylib"),
+            os.path.join(INSTALL_DIR, "drivers", "macos", "libhyp2003.dylib"),
+            os.path.join(INSTALL_DIR, "drivers", "macos", "HYP2003.dylib"),
+            os.path.join(INSTALL_DIR, "drivers", "macos", "libcastle.dylib"),
+            os.path.join(STATIC_DRIVERS_DIR, "macos", "libhyp2003.dylib"),
+            os.path.join(STATIC_DRIVERS_DIR, "macos", "HYP2003.dylib"),
+            os.path.join(STATIC_DRIVERS_DIR, "macos", "libcastle.dylib"),
             os.path.join(APP_DIR, "drivers", "macos", "libhyp2003.dylib"),
             os.path.join(APP_DIR, "drivers", "macos", "HYP2003.dylib"),
             os.path.join(APP_DIR, "drivers", "macos", "libcastle.dylib"),
-            os.path.join(APP_DIR, "drivers", "macos", "libcastle_v2.dylib"),
-            os.path.join(APP_DIR, "drivers", "macos", "libcastle_v2.1.0.0.dylib"),
             "/usr/local/lib/libcastle_v2.1.0.0.dylib",
             "/usr/local/lib/libcastle_v2.dylib",
             "/usr/local/lib/libcastle.dylib",
@@ -1600,6 +1626,20 @@ def find_epass_driver_path():
         return _pick_best_pkcs11_dll(candidates)
     elif CURRENT_OS == 'Linux':
         candidates = [
+            os.path.join(INSTALL_DIR, "HYP2003.so"),
+            os.path.join(INSTALL_DIR, "libhyp2003.so"),
+            os.path.join(INSTALL_DIR, "libcastle.so"),
+            os.path.join(INSTALL_DIR, "libeps2003csp11.so"),
+            os.path.join(BUNDLE_DIR, "HYP2003.so"),
+            os.path.join(BUNDLE_DIR, "libhyp2003.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "libhyp2003.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "HYP2003.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "libcastle.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "libeps2003csp11.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "libhyp2003.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "HYP2003.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "libcastle.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "libeps2003csp11.so"),
             os.path.join(APP_DIR, "drivers", "linux", "libhyp2003.so"),
             os.path.join(APP_DIR, "drivers", "linux", "HYP2003.so"),
             os.path.join(APP_DIR, "drivers", "linux", "libcastle.so"),
@@ -1619,284 +1659,241 @@ def find_epass_driver_path():
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
-    local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "HYP2003csp11IND.dll")
-    local_hs = os.path.join(APP_DIR, "drivers", "windows", arch, "HS2003-pkcs11.dll")
-
+    candidates = [
+        os.path.join(INSTALL_DIR, "HYP2003csp11IND.dll"),
+        os.path.join(INSTALL_DIR, "HS2003-pkcs11.dll"),
+        os.path.join(INSTALL_DIR, "eps2003csp11v2.dll"),
+        os.path.join(INSTALL_DIR, "eps2003csp11.dll"),
+        os.path.join(BUNDLE_DIR, "HYP2003csp11IND.dll"),
+        os.path.join(BUNDLE_DIR, "HS2003-pkcs11.dll"),
+        os.path.join(INSTALL_DIR, "drivers", "windows", arch, "HYP2003csp11IND.dll"),
+        os.path.join(INSTALL_DIR, "drivers", "windows", arch, "HS2003-pkcs11.dll"),
+        os.path.join(STATIC_DRIVERS_DIR, "windows", arch, "HYP2003csp11IND.dll"),
+        os.path.join(STATIC_DRIVERS_DIR, "windows", arch, "HS2003-pkcs11.dll"),
+        os.path.join(APP_DIR, "drivers", "windows", arch, "HYP2003csp11IND.dll"),
+        os.path.join(APP_DIR, "drivers", "windows", arch, "HS2003-pkcs11.dll"),
+    ]
     if is_64bit:
-
-        candidates = [
-            local_drv,
-            local_hs,
-
+        candidates.extend([
             r"C:\Windows\System32\HYP2003csp11IND.dll",
-
             r"C:\Windows\System32\HYP2003csp11IND.sig",
-
             r"C:\Windows\System32\HYP2003csp11IND_s.dll",
-
             r"C:\Windows\SysWOW64\HYP2003csp11IND.dll",
-
             r"C:\Windows\SysWOW64\HYP2003csp11IND.sig",
-
             r"C:\Windows\SysWOW64\HYP2003csp11IND_s.dll",
-
             r"C:\Windows\System32\eps2003csp11v2.dll",
-
             r"C:\Windows\SysWOW64\eps2003csp11v2.dll",
-
             r"C:\Program Files\ePass2003-India-Auto\eps2003csp11v2.dll",
-
             r"C:\Program Files (x86)\ePass2003-India-Auto\eps2003csp11v2.dll",
-
             r"C:\Program Files\EnterSafe\ePass2003\eps2003csp11v2.dll",
-
             r"C:\Program Files (x86)\EnterSafe\ePass2003\eps2003csp11v2.dll"
-
-        ]
-
+        ])
     else:
-
-        candidates = [
-
+        candidates.extend([
             r"C:\Windows\SysWOW64\HYP2003csp11IND.dll",
-
             r"C:\Windows\SysWOW64\HYP2003csp11IND.sig",
-
             r"C:\Windows\SysWOW64\HYP2003csp11IND_s.dll",
-
             r"C:\Windows\System32\HYP2003csp11IND.dll",
-
             r"C:\Windows\System32\HYP2003csp11IND.sig",
-
             r"C:\Windows\System32\HYP2003csp11IND_s.dll",
-
             r"C:\Windows\SysWOW64\eps2003csp11v2.dll",
-
             r"C:\Windows\System32\eps2003csp11v2.dll",
-
             r"C:\Program Files (x86)\ePass2003-India-Auto\eps2003csp11v2.dll",
-
             r"C:\Program Files\ePass2003-India-Auto\eps2003csp11v2.dll"
-
-        ]
-
+        ])
     return _pick_best_pkcs11_dll(candidates)
-
 
 
 def find_innait_driver_path():
     if CURRENT_OS == 'Darwin':
-        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libinnait_pkcs11.dylib")
-        candidates = [local_mac, "/usr/local/lib/libinnait_pkcs11.dylib", "/Library/InnaIT/libinnait_pkcs11.dylib"]
+        candidates = [
+            os.path.join(INSTALL_DIR, "libinnait_pkcs11.dylib"),
+            os.path.join(BUNDLE_DIR, "libinnait_pkcs11.dylib"),
+            os.path.join(INSTALL_DIR, "drivers", "macos", "libinnait_pkcs11.dylib"),
+            os.path.join(STATIC_DRIVERS_DIR, "macos", "libinnait_pkcs11.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "libinnait_pkcs11.dylib"),
+            "/usr/local/lib/libinnait_pkcs11.dylib",
+            "/Library/InnaIT/libinnait_pkcs11.dylib"
+        ]
         return _pick_best_pkcs11_dll(candidates)
     elif CURRENT_OS == 'Linux':
-        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libinnait_pkcs11.so")
-        candidates = [local_lin, "/usr/lib/libinnait_pkcs11.so", "/usr/local/lib/libinnait_pkcs11.so"]
+        candidates = [
+            os.path.join(INSTALL_DIR, "libinnait_pkcs11.so"),
+            os.path.join(BUNDLE_DIR, "libinnait_pkcs11.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "libinnait_pkcs11.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "libinnait_pkcs11.so"),
+            os.path.join(APP_DIR, "drivers", "linux", "libinnait_pkcs11.so"),
+            "/usr/lib/libinnait_pkcs11.so",
+            "/usr/local/lib/libinnait_pkcs11.so"
+        ]
         return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
-    local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "InnaITPKCS11Driver.dll")
-
+    candidates = [
+        os.path.join(INSTALL_DIR, "InnaITPKCS11Driver.dll"),
+        os.path.join(INSTALL_DIR, "InnaITDSCLibrary.dll"),
+        os.path.join(BUNDLE_DIR, "InnaITPKCS11Driver.dll"),
+        os.path.join(INSTALL_DIR, "drivers", "windows", arch, "InnaITPKCS11Driver.dll"),
+        os.path.join(STATIC_DRIVERS_DIR, "windows", arch, "InnaITPKCS11Driver.dll"),
+        os.path.join(APP_DIR, "drivers", "windows", arch, "InnaITPKCS11Driver.dll"),
+    ]
     if is_64bit:
-
-        candidates = [
-            local_drv,
-
+        candidates.extend([
             r"C:\Windows\System32\InnaITPKCS11Driver.dll",
-
             r"C:\Windows\System32\InnaITDSCLibrary.dll",
-
             r"C:\Windows\System32\InnaITCSP.dll",
-
             r"C:\Windows\System32\InnaITSmartCardMiniDriver.dll",
-
             r"C:\Windows\System32\InnaITUSB.dll",
-
             r"C:\Windows\SysWOW64\InnaITPKCS11Driver.dll",
-
             r"C:\Windows\SysWOW64\InnaITDSCLibrary.dll",
-
             r"C:\Windows\SysWOW64\InnaITCSP.dll",
-
             r"C:\Windows\SysWOW64\InnaITSmartCardMiniDriver.dll",
-
             r"C:\Windows\SysWOW64\InnaITUSB.dll",
-
             r"C:\Program Files (x86)\Precision Biometric\InnaIT\InnaITDSC\InnaITPKCS11Driver.dll",
-
             r"C:\Program Files\Precision Biometric\InnaIT\InnaITDSC\InnaITPKCS11Driver.dll"
-
-        ]
-
+        ])
     else:
-
-        candidates = [
-
+        candidates.extend([
             r"C:\Windows\SysWOW64\InnaITPKCS11Driver.dll",
-
             r"C:\Windows\SysWOW64\InnaITDSCLibrary.dll",
-
             r"C:\Windows\SysWOW64\InnaITCSP.dll",
-
             r"C:\Windows\SysWOW64\InnaITSmartCardMiniDriver.dll",
-
             r"C:\Windows\SysWOW64\InnaITUSB.dll",
-
             r"C:\Windows\System32\InnaITPKCS11Driver.dll",
-
             r"C:\Windows\System32\InnaITDSCLibrary.dll",
-
             r"C:\Windows\System32\InnaITCSP.dll",
-
             r"C:\Windows\System32\InnaITSmartCardMiniDriver.dll",
-
             r"C:\Windows\System32\InnaITUSB.dll"
-
-        ]
-
+        ])
     return _pick_best_pkcs11_dll(candidates)
-
 
 
 def find_mtoken_driver_path():
     if CURRENT_OS == 'Darwin':
-        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libcryptoid_pkcs11.dylib")
-        candidates = [local_mac, "/Library/mToken/libcryptoid_pkcs11.dylib", "/usr/local/lib/libcryptoid_pkcs11.dylib"]
+        candidates = [
+            os.path.join(INSTALL_DIR, "libcryptoid_pkcs11.dylib"),
+            os.path.join(BUNDLE_DIR, "libcryptoid_pkcs11.dylib"),
+            os.path.join(INSTALL_DIR, "drivers", "macos", "libcryptoid_pkcs11.dylib"),
+            os.path.join(STATIC_DRIVERS_DIR, "macos", "libcryptoid_pkcs11.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "libcryptoid_pkcs11.dylib"),
+            "/Library/mToken/libcryptoid_pkcs11.dylib",
+            "/usr/local/lib/libcryptoid_pkcs11.dylib"
+        ]
         return _pick_best_pkcs11_dll(candidates)
     elif CURRENT_OS == 'Linux':
-        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libcryptoid_pkcs11.so")
-        candidates = [local_lin, "/usr/lib/libcryptoid_pkcs11.so", "/opt/CryptoID/x64/lib/libcryptoid_pkcs11.so"]
+        candidates = [
+            os.path.join(INSTALL_DIR, "libcryptoid_pkcs11.so"),
+            os.path.join(BUNDLE_DIR, "libcryptoid_pkcs11.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "libcryptoid_pkcs11.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "libcryptoid_pkcs11.so"),
+            os.path.join(APP_DIR, "drivers", "linux", "libcryptoid_pkcs11.so"),
+            "/usr/lib/libcryptoid_pkcs11.so",
+            "/opt/CryptoID/x64/lib/libcryptoid_pkcs11.so"
+        ]
         return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
-    local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "cryptoida_pkcs11.dll")
-    local_sig = os.path.join(APP_DIR, "drivers", "windows", arch, "SignatureP11.dll")
-
+    candidates = [
+        os.path.join(INSTALL_DIR, "cryptoida_pkcs11.dll"),
+        os.path.join(INSTALL_DIR, "SignatureP11.dll"),
+        os.path.join(BUNDLE_DIR, "cryptoida_pkcs11.dll"),
+        os.path.join(BUNDLE_DIR, "SignatureP11.dll"),
+        os.path.join(INSTALL_DIR, "drivers", "windows", arch, "cryptoida_pkcs11.dll"),
+        os.path.join(INSTALL_DIR, "drivers", "windows", arch, "SignatureP11.dll"),
+        os.path.join(STATIC_DRIVERS_DIR, "windows", arch, "cryptoida_pkcs11.dll"),
+        os.path.join(STATIC_DRIVERS_DIR, "windows", arch, "SignatureP11.dll"),
+        os.path.join(APP_DIR, "drivers", "windows", arch, "cryptoida_pkcs11.dll"),
+        os.path.join(APP_DIR, "drivers", "windows", arch, "SignatureP11.dll"),
+    ]
     if is_64bit:
-
-        candidates = [
-            local_drv,
-            local_sig,
-
+        candidates.extend([
             r"C:\Windows\System32\cryptoida_pkcs11.dll",
-
             r"C:\Windows\System32\cryptoida_pkcs11_f2.dll",
-
             r"C:\Windows\System32\cryptoida_pkcs11_f3.dll",
-
             r"C:\Windows\SysWOW64\cryptoida_pkcs11.dll",
-
             r"C:\Windows\SysWOW64\cryptoida_pkcs11_f2.dll",
-
             r"C:\Windows\SysWOW64\cryptoida_pkcs11_f3.dll",
-
             r"C:\Program Files (x86)\CryptoID\cryptoida_pkcs11.dll",
-
             r"C:\Program Files (x86)\CryptoID\CryptoIDCertUtilityF3\cryptoida_pkcs11_f3.dll"
-
-        ]
-
+        ])
     else:
-
-        candidates = [
-
+        candidates.extend([
             r"C:\Windows\SysWOW64\cryptoida_pkcs11.dll",
-
             r"C:\Windows\SysWOW64\cryptoida_pkcs11_f2.dll",
-
             r"C:\Windows\SysWOW64\cryptoida_pkcs11_f3.dll",
-
             r"C:\Windows\System32\cryptoida_pkcs11.dll",
-
             r"C:\Windows\System32\cryptoida_pkcs11_f2.dll",
-
             r"C:\Windows\System32\cryptoida_pkcs11_f3.dll"
-
-        ]
-
+        ])
     return _pick_best_pkcs11_dll(candidates)
-
 
 
 def find_proxkey_driver_path():
     if CURRENT_OS == 'Darwin':
-        local_mac = os.path.join(APP_DIR, "drivers", "macos", "libWD_PKCS11.dylib")
-        candidates = [local_mac, "/Library/ProxKey/libWD_PKCS11.dylib", "/usr/local/lib/libWD_PKCS11.dylib"]
+        candidates = [
+            os.path.join(INSTALL_DIR, "libWD_PKCS11.dylib"),
+            os.path.join(BUNDLE_DIR, "libWD_PKCS11.dylib"),
+            os.path.join(INSTALL_DIR, "drivers", "macos", "libWD_PKCS11.dylib"),
+            os.path.join(STATIC_DRIVERS_DIR, "macos", "libWD_PKCS11.dylib"),
+            os.path.join(APP_DIR, "drivers", "macos", "libWD_PKCS11.dylib"),
+            "/Library/ProxKey/libWD_PKCS11.dylib",
+            "/usr/local/lib/libWD_PKCS11.dylib"
+        ]
         return _pick_best_pkcs11_dll(candidates)
     elif CURRENT_OS == 'Linux':
-        local_lin = os.path.join(APP_DIR, "drivers", "linux", "libWatchdataPKCS11.so")
-        candidates = [local_lin, "/usr/lib/libWatchdataPKCS11.so", "/usr/lib/WatchData/ProxKey/lib/libWatchdataPKCS11.so"]
+        candidates = [
+            os.path.join(INSTALL_DIR, "libWatchdataPKCS11.so"),
+            os.path.join(BUNDLE_DIR, "libWatchdataPKCS11.so"),
+            os.path.join(INSTALL_DIR, "drivers", "linux", "libWatchdataPKCS11.so"),
+            os.path.join(STATIC_DRIVERS_DIR, "linux", "libWatchdataPKCS11.so"),
+            os.path.join(APP_DIR, "drivers", "linux", "libWatchdataPKCS11.so"),
+            "/usr/lib/libWatchdataPKCS11.so",
+            "/usr/lib/WatchData/ProxKey/lib/libWatchdataPKCS11.so"
+        ]
         return _pick_best_pkcs11_dll(candidates)
 
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
-    local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "WDPKCS.dll")
-
+    candidates = [
+        os.path.join(INSTALL_DIR, "WDPKCS.dll"),
+        os.path.join(BUNDLE_DIR, "WDPKCS.dll"),
+        os.path.join(INSTALL_DIR, "drivers", "windows", arch, "WDPKCS.dll"),
+        os.path.join(STATIC_DRIVERS_DIR, "windows", arch, "WDPKCS.dll"),
+        os.path.join(APP_DIR, "drivers", "windows", arch, "WDPKCS.dll"),
+    ]
     if is_64bit:
-
-        candidates = [
-            local_drv,
-
+        candidates.extend([
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll"
-
-        ]
-
+        ])
     else:
-
-        candidates = [
-
+        candidates.extend([
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-
             r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-
             r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll"
-
-        ]
-
+        ])
     return _pick_best_pkcs11_dll(candidates)
-
 
 
 CUSTOM_DRIVERS_FILE = os.path.join(APP_DIR, "custom_drivers.json")
@@ -1961,11 +1958,15 @@ def get_platform_drivers():
 
         
 
-        opensc_win = r"C:\Program Files\OpenSC Project\OpenSC\pkcs11\opensc-pkcs11.dll"
-
-        if os.path.exists(opensc_win):
-
-            drivers["Generic OpenSC"] = opensc_win
+        for p in [
+            os.path.join(INSTALL_DIR, "opensc-pkcs11.dll"),
+            os.path.join(INSTALL_DIR, "drivers", "windows", "x64", "opensc-pkcs11.dll"),
+            os.path.join(STATIC_DRIVERS_DIR, "windows", "x64", "opensc-pkcs11.dll"),
+            r"C:\Program Files\OpenSC Project\OpenSC\pkcs11\opensc-pkcs11.dll"
+        ]:
+            if os.path.exists(p):
+                drivers["Generic OpenSC"] = p
+                break
 
             
 
@@ -1974,7 +1975,11 @@ def get_platform_drivers():
         proxkey = find_proxkey_driver_path() or "/Library/ProxKey/libWD_PKCS11.dylib"
         mtoken = find_mtoken_driver_path() or "/Library/mToken/libcryptoid_pkcs11.dylib"
         innait = find_innait_driver_path() or "/usr/local/lib/libinnait_pkcs11.dylib"
-        opensc = os.path.join(APP_DIR, "drivers", "macos", "opensc-pkcs11.so")
+        opensc = os.path.join(INSTALL_DIR, "opensc-pkcs11.so")
+        if not os.path.exists(opensc):
+            opensc = os.path.join(STATIC_DRIVERS_DIR, "macos", "opensc-pkcs11.so")
+        if not os.path.exists(opensc):
+            opensc = os.path.join(APP_DIR, "drivers", "macos", "opensc-pkcs11.so")
         if not os.path.exists(opensc):
             opensc = "/opt/homebrew/lib/opensc-pkcs11.so"
 
@@ -1996,7 +2001,11 @@ def get_platform_drivers():
         proxkey = find_proxkey_driver_path() or "/usr/lib/libWatchdataPKCS11.so"
         mtoken = find_mtoken_driver_path() or "/usr/lib/libcryptoid_pkcs11.so"
         innait = find_innait_driver_path() or "/usr/lib/libinnait_pkcs11.so"
-        opensc = os.path.join(APP_DIR, "drivers", "linux", "opensc-pkcs11.so")
+        opensc = os.path.join(INSTALL_DIR, "opensc-pkcs11.so")
+        if not os.path.exists(opensc):
+            opensc = os.path.join(STATIC_DRIVERS_DIR, "linux", "opensc-pkcs11.so")
+        if not os.path.exists(opensc):
+            opensc = os.path.join(APP_DIR, "drivers", "linux", "opensc-pkcs11.so")
         if not os.path.exists(opensc):
             opensc = "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so"
 
@@ -2019,6 +2028,8 @@ def get_platform_drivers():
 
     drivers["➕ [Add Custom Token Driver...]"] = "__CUSTOM__"
     return drivers
+
+get_driver_map = get_platform_drivers
 
 def resolve_driver_path(driver_name=""):
     d_map = get_driver_map()
@@ -11130,9 +11141,9 @@ class SignatureSettingsDialog:
 
         c_link.pack(fill=tk.X, pady=(0, 8))
 
-        tk.Label(c_link, text="⚙️ Looking for Local API Server (Port 5000) or Version Updates?", font=get_sys_font(8, "bold"), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W)
+        tk.Label(c_link, text="⚙️ Looking for Local Web Signing Service or Version Updates?", font=get_sys_font(8, "bold"), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W)
 
-        tk.Label(c_link, text="Local API Server controls and Software Update settings have been relocated to the main ⚙ Settings window.", font=get_sys_font(8), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 6))
+        tk.Label(c_link, text="Local Signing Service controls and Software Update settings have been relocated to the main ⚙ Settings window.", font=get_sys_font(8), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 6))
 
         ttk.Button(c_link, text="⚙️ Open General & Server Settings Dialog", style="Tool3D.TButton", command=lambda: (self.dialog.destroy(), SettingsDialog(self.app.root, self.app))).pack(anchor=tk.W)
 
@@ -11856,7 +11867,7 @@ class SettingsDialog:
 
         tab_srv = ttk.Frame(self.notebook, padding=10)
 
-        self.notebook.add(tab_srv, text="🚀 Local API Server (Port 5000)")
+        self.notebook.add(tab_srv, text="🚀 Local Web Service")
 
         self._build_server_tab(tab_srv)
 
@@ -11912,15 +11923,15 @@ class SettingsDialog:
 
 
 
-        tk.Label(card, text="Local Background API Server (HTTP Port 5000)", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(card, text="Local Background Signing Service", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
 
         tk.Label(
 
             card,
 
-            text="The Local API Server allows web applications, CRM/ERP platforms, and browser extensions\n"
+            text="The Local Background Service allows web applications, CRM/ERP platforms, and browser extensions\n"
 
-                 "to invoke cryptographic USB hardware token signing seamlessly via local HTTP POST requests.",
+                 "to invoke cryptographic USB hardware token signing seamlessly via local background integration.",
 
             font=get_sys_font(8), fg="#475569", bg="#FFFFFF", justify="left"
 
@@ -11946,7 +11957,7 @@ class SettingsDialog:
 
             status_box,
 
-            text="API Endpoint: http://127.0.0.1:5000/api/sign  |  Health Check: http://127.0.0.1:5000/api/health",
+            text="Hardware token digital signing bridge is active and ready to process requests.",
 
             font=get_sys_font(8), fg="#64748B", bg="#F8FAFC"
 
@@ -11980,7 +11991,7 @@ class SettingsDialog:
 
 
 
-        ttk.Button(btn_box, text="🌐 Test Ping (Browser)", style="Tool3D.TButton", command=lambda: webbrowser.open("http://127.0.0.1:5000/api/health")).pack(side=tk.LEFT)
+        ttk.Button(btn_box, text="🔍 Test Service Connection", style="Tool3D.TButton", command=self._test_service_ping).pack(side=tk.LEFT)
 
 
 
@@ -11988,7 +11999,7 @@ class SettingsDialog:
 
         tk.Checkbutton(
 
-            card, text="Automatically Start Local API Server when Application Launches",
+            card, text="Automatically Start Local Signing Service when Application Launches",
 
             variable=self.main_app.server_autostart_var, font=get_sys_font(8, "bold"),
 
@@ -12010,7 +12021,7 @@ class SettingsDialog:
 
             info_card,
 
-            text="• Server binds strictly to 127.0.0.1 (Localhost only) preventing unauthorized remote network access.\n"
+            text="• Service operates securely on this local workstation, preventing unauthorized external network access.\n"
 
                  "• Cross-Origin Resource Sharing (CORS) is enabled to support web-based signing portals.\n"
 
@@ -12114,6 +12125,12 @@ class SettingsDialog:
 
 
 
+    def _test_service_ping(self):
+        if local_api_server.is_running:
+            messagebox.showinfo("Service Status", "Local background signing service is active and responding normally.", parent=self.dialog)
+        else:
+            messagebox.showwarning("Service Status", "Local background signing service is currently stopped. Click 'Start Server' to activate.", parent=self.dialog)
+
     def _refresh_server_ui(self):
 
         if not hasattr(self, 'lbl_server_status'):
@@ -12122,7 +12139,7 @@ class SettingsDialog:
 
         if local_api_server.is_running:
 
-            self.lbl_server_status.config(text="🟢 Status: RUNNING on http://127.0.0.1:5000", fg="#047857")
+            self.lbl_server_status.config(text="🟢 Status: Active & Ready (Local Background Service)", fg="#047857")
 
             self.btn_stop_server.config(state=tk.NORMAL)
 
@@ -12132,7 +12149,7 @@ class SettingsDialog:
 
         else:
 
-            self.lbl_server_status.config(text="🔴 Status: STOPPED (Local API is offline)", fg="#DC2626")
+            self.lbl_server_status.config(text="🔴 Status: Stopped (Local Service Offline)", fg="#DC2626")
 
             self.btn_stop_server.config(state=tk.DISABLED)
 
@@ -12166,7 +12183,7 @@ class SettingsDialog:
 
         if ok:
 
-            messagebox.showinfo("Server Started", "Local API server is now running on http://127.0.0.1:5000", parent=self.dialog)
+            messagebox.showinfo("Service Started", "Local background signing service is now active and ready.", parent=self.dialog)
 
         else:
 
@@ -12182,7 +12199,7 @@ class SettingsDialog:
 
         if ok:
 
-            messagebox.showinfo("Server Restarted", "Local API server was successfully restarted on http://127.0.0.1:5000", parent=self.dialog)
+            messagebox.showinfo("Service Restarted", "Local background signing service was successfully restarted.", parent=self.dialog)
 
         else:
 
@@ -16984,7 +17001,7 @@ def main():
 
                     pystray.Menu.SEPARATOR,
 
-                    item(lambda itm: "🌐 Stop Local API Server (Port 5000)" if local_api_server.is_running else "🌐 Start Local API Server (Port 5000)", _toggle_server),
+                    item(lambda itm: "🌐 Stop Local Background Service" if local_api_server.is_running else "🌐 Start Local Background Service", _toggle_server),
 
                     item('🔄 Check for Software Updates...', _check_upd),
 

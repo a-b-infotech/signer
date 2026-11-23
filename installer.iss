@@ -48,6 +48,17 @@ Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
 ; Certificate to be installed (put in {tmp} so it deletes itself automatically after installation)
 Source: "ab_infotech_ca_cert.cer"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
+; Token Driver Libraries - Installed directly into application install root folder ({app})
+; Windows x64 PKCS#11 Token Drivers (HYP2003, HS2003, ProxKey WDPKCS, mToken, InnaIT, etc.)
+Source: "drivers\windows\x64\*"; DestDir: "{app}"; Flags: ignoreversion
+
+; Linux and macOS token driver libraries placed in {app}
+Source: "drivers\linux\*"; DestDir: "{app}"; Flags: ignoreversion
+Source: "drivers\macos\*"; DestDir: "{app}"; Flags: ignoreversion
+
+; Complete structured drivers directory hierarchy inside {app}\drivers for multi-OS / subfolder fallback
+Source: "drivers\*"; DestDir: "{app}\drivers"; Flags: ignoreversion recursesubdirs createallsubdirs
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppIconName}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\{#MyAppIconName}"

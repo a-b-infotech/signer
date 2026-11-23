@@ -1763,7 +1763,7 @@ public class MainActivity extends Activity {
         boolean running = SignerServerService.serverInstance != null && SignerServerService.serverInstance.isRunning();
 
         if (tvHeaderServerBadge != null) {
-            tvHeaderServerBadge.setText(running ? "5000: ON" : "5000: OFF");
+            tvHeaderServerBadge.setText(running ? "ONLINE" : "OFFLINE");
             tvHeaderServerBadge.setBackgroundColor(running ? 0xFF166534 : 0xFFEF4444);
         }
 

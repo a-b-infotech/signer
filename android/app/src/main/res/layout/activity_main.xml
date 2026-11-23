@@ -70,7 +70,7 @@
             android:background="#166534"
             android:paddingHorizontal="8dp"
             android:paddingVertical="4dp"
-            android:text="5000: ON"
+            android:text="ONLINE"
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:textStyle="bold" />
