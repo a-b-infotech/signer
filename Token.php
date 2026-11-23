@@ -31,12 +31,151 @@ function format_local_api_base($raw_ip) {
     }
     $clean = rtrim($raw_ip, '/');
     if (strpos($clean, ':') !== false) {
-        return "https://{$clean}";
+        return "http://{$clean}";
     }
-    return "https://{$clean}:5000";
+    return "http://{$clean}:5000";
 }
 
 $LOCAL_API_BASE = format_local_api_base($server_raw);
+
+// ====================================================================
+// WEB SERVER CLOUD TUNNEL & RELAY (No Global IP / Port Forwarding Required)
+// ====================================================================
+$TUNNEL_BASE_DIR = __DIR__ . '/tunnel_queue';
+
+// 1. Signer Heartbeat & Job Polling (Used by Android App and server2.py)
+if (isset($_GET['action']) && $_GET['action'] === 'tunnel_poll') {
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    $tunnel_id = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_GET['tunnel_id'] ?? 'default');
+    $dir = $TUNNEL_BASE_DIR . '/' . $tunnel_id;
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    
+    // Update heartbeat timestamp
+    file_put_contents($dir . '/heartbeat.txt', (string)time());
+
+    // Check for pending jobs in queue
+    $files = glob($dir . '/req_*.json');
+    if (!empty($files)) {
+        sort($files);
+        $reqFile = $files[0];
+        $job = json_decode(file_get_contents($reqFile), true);
+        echo json_encode(['status' => 'job_available', 'job' => $job]);
+        exit;
+    }
+    echo json_encode(['status' => 'idle', 'timestamp' => time()]);
+    exit;
+}
+
+// 2. Signer Job Response (Used by Android App or server2.py when sign/cert job completes)
+if (isset($_GET['action']) && $_GET['action'] === 'tunnel_respond') {
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    $tunnel_id = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_GET['tunnel_id'] ?? 'default');
+    $job_id = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_REQUEST['job_id'] ?? '');
+    $dir = $TUNNEL_BASE_DIR . '/' . $tunnel_id;
+
+    if (!empty($job_id) && is_dir($dir)) {
+        if (!empty($_FILES['signed_pdf']['tmp_name']) && file_exists($_FILES['signed_pdf']['tmp_name'])) {
+            move_uploaded_file($_FILES['signed_pdf']['tmp_name'], $dir . '/resp_' . $job_id . '.bin');
+            file_put_contents($dir . '/resp_' . $job_id . '.json', json_encode(['status' => 'success', 'has_binary' => true]));
+        } else {
+            $raw = file_get_contents('php://input');
+            if (empty($raw) && !empty($_POST)) $raw = json_encode($_POST);
+            file_put_contents($dir . '/resp_' . $job_id . '.json', $raw);
+        }
+        @unlink($dir . '/req_' . $job_id . '.json');
+        echo json_encode(['status' => 'success', 'message' => 'Job response registered']);
+        exit;
+    }
+    echo json_encode(['status' => 'error', 'message' => 'Missing job_id or invalid tunnel directory']);
+    exit;
+}
+
+// 3. Web Client Tunnel Push (Used by browser to execute sign/cert request through Web Server Tunnel)
+if (isset($_GET['action']) && $_GET['action'] === 'tunnel_push') {
+    header('Access-Control-Allow-Origin: *');
+    $tunnel_id = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_GET['tunnel_id'] ?? 'default');
+    $endpoint = isset($_GET['endpoint']) ? '/' . ltrim($_GET['endpoint'], '/') : '/api/health';
+    $dir = $TUNNEL_BASE_DIR . '/' . $tunnel_id;
+    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+
+    $job_id = uniqid('job_', true);
+    $jobData = [
+        'job_id' => $job_id,
+        'endpoint' => $endpoint,
+        'method' => $_SERVER['REQUEST_METHOD'],
+        'params' => $_GET,
+        'post' => $_POST,
+        'created_at' => time()
+    ];
+    if (!empty($_FILES['pdf_file']) && file_exists($_FILES['pdf_file']['tmp_name'])) {
+        $jobData['pdf_base64'] = base64_encode(file_get_contents($_FILES['pdf_file']['tmp_name']));
+        $jobData['pdf_name'] = $_FILES['pdf_file']['name'];
+    }
+    if (!empty($_FILES['custom_logo']) && file_exists($_FILES['custom_logo']['tmp_name'])) {
+        $jobData['logo_base64'] = base64_encode(file_get_contents($_FILES['custom_logo']['tmp_name']));
+    }
+
+    file_put_contents($dir . '/req_' . $job_id . '.json', json_encode($jobData));
+
+    // Wait up to 35 seconds for connected hardware token signer to respond
+    $respJsonFile = $dir . '/resp_' . $job_id . '.json';
+    $respBinFile = $dir . '/resp_' . $job_id . '.bin';
+    $waited = 0;
+    while ($waited < 350) {
+        if (file_exists($respJsonFile)) {
+            $respData = json_decode(file_get_contents($respJsonFile), true);
+            if (!empty($respData['has_binary']) && file_exists($respBinFile)) {
+                header('Content-Type: application/pdf');
+                header('Content-Disposition: attachment; filename="signed.pdf"');
+                readfile($respBinFile);
+                @unlink($respBinFile);
+                @unlink($respJsonFile);
+                exit;
+            } else {
+                header('Content-Type: application/json');
+                readfile($respJsonFile);
+                @unlink($respJsonFile);
+                exit;
+            }
+        }
+        usleep(100000);
+        $waited++;
+    }
+
+    @unlink($dir . '/req_' . $job_id . '.json');
+    http_response_code(504);
+    header('Content-Type: application/json');
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Cloud Tunnel Timeout: The connected USB token did not respond in 35 seconds. Please ensure your Android App or server2.py is running with Cloud Tunnel enabled.'
+    ]);
+    exit;
+}
+
+// 4. Web Client Tunnel Status Check
+if (isset($_GET['action']) && $_GET['action'] === 'tunnel_status') {
+    header('Content-Type: application/json');
+    header('Access-Control-Allow-Origin: *');
+    $tunnel_id = preg_replace('/[^a-zA-Z0-9_\-]/', '', $_GET['tunnel_id'] ?? 'default');
+    $hbFile = $TUNNEL_BASE_DIR . '/' . $tunnel_id . '/heartbeat.txt';
+    $online = false;
+    $lastSeen = 0;
+    if (file_exists($hbFile)) {
+        $lastSeen = intval(trim(file_get_contents($hbFile)));
+        if ((time() - $lastSeen) < 20) {
+            $online = true;
+        }
+    }
+    echo json_encode([
+        'status' => 'success',
+        'online' => $online,
+        'tunnel_id' => $tunnel_id,
+        'last_seen_seconds_ago' => max(0, time() - $lastSeen)
+    ]);
+    exit;
+}
 
 // API action handlers for setting/getting Global IP & proxying calls to local server
 if (isset($_GET['action']) && $_GET['action'] === 'set_server_ip') {
@@ -81,18 +220,34 @@ if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
 
+    $postPayload = null;
+    $isMultipart = false;
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         curl_setopt($ch, CURLOPT_POST, true);
-        $body = file_get_contents('php://input');
-        if (!empty($body)) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
-        } elseif (!empty($_POST)) {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($_POST));
+        if (!empty($_FILES)) {
+            $isMultipart = true;
+            $postPayload = $_POST;
+            foreach ($_FILES as $fKey => $fVal) {
+                if (!empty($fVal['tmp_name']) && file_exists($fVal['tmp_name'])) {
+                    $mime = $fVal['type'] ?: 'application/octet-stream';
+                    $postPayload[$fKey] = new CURLFile($fVal['tmp_name'], $mime, $fVal['name']);
+                }
+            }
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $postPayload);
+        } else {
+            $body = file_get_contents('php://input');
+            if (!empty($body)) {
+                $postPayload = $body;
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+            } elseif (!empty($_POST)) {
+                $postPayload = http_build_query($_POST);
+                curl_setopt($ch, CURLOPT_POSTFIELDS, $postPayload);
+            }
         }
     }
 
     $headers = [];
-    if (isset($_SERVER['CONTENT_TYPE'])) {
+    if (isset($_SERVER['CONTENT_TYPE']) && !$isMultipart) {
         $headers[] = 'Content-Type: ' . $_SERVER['CONTENT_TYPE'];
     }
     if (!empty($headers)) {
@@ -114,10 +269,8 @@ if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
             curl_setopt($chFallback, CURLOPT_FOLLOWLOCATION, true);
             if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 curl_setopt($chFallback, CURLOPT_POST, true);
-                if (!empty($body)) {
-                    curl_setopt($chFallback, CURLOPT_POSTFIELDS, $body);
-                } elseif (!empty($_POST)) {
-                    curl_setopt($chFallback, CURLOPT_POSTFIELDS, http_build_query($_POST));
+                if (!empty($postPayload)) {
+                    curl_setopt($chFallback, CURLOPT_POSTFIELDS, $postPayload);
                 }
             }
             if (!empty($headers)) {
@@ -134,9 +287,21 @@ if (isset($_GET['action']) && $_GET['action'] === 'proxy_api') {
                 exit;
             }
         }
+
+        // Automatic fallback to Web Server Cloud Tunnel if a tunnel client is online
+        $tunnelHb = $TUNNEL_BASE_DIR . '/default/heartbeat.txt';
+        if (file_exists($tunnelHb) && (time() - intval(trim(file_get_contents($tunnelHb)))) < 60) {
+            // Forward through tunnel push internally
+            $_GET['endpoint'] = $endpoint;
+            $_GET['tunnel_id'] = 'default';
+            // The tunnel_push handler can process this request directly
+            header('Location: Token.php?' . http_build_query(array_merge($_GET, ['action' => 'tunnel_push'])));
+            exit;
+        }
+
         http_response_code(502);
         header('Content-Type: application/json');
-        echo json_encode(['status' => 'error', 'message' => "Could not reach Signing Server at {$LOCAL_API_BASE}. Please check server is running and port 5000 is open."]);
+        echo json_encode(['status' => 'error', 'message' => "Could not reach Signing Server at {$LOCAL_API_BASE}. Please check server is running and port 5000 is open, or use Cloud Tunnel."]);
         exit;
     }
 
@@ -1749,12 +1914,13 @@ function getLocalServerUrl() {
     return `https://${raw}:5000`;
 }
 
-// Resilient API caller supporting Localhost, Local Wi-Fi & WAN Global IP (Transparent Proxy Fallback)
+// Resilient API caller supporting Localhost, Local Wi-Fi & WAN Global IP (Transparent Proxy & Cloud Tunnel Fallbacks)
 async function callSignerApi(endpoint, options = {}) {
-    const directUrl = `${getLocalServerUrl()}${endpoint}`;
+    // 1. Try Direct Fetch (if on same machine or HTTP)
     try {
+        const directUrl = `${getLocalServerUrl()}${endpoint}`;
         const controller = new AbortController();
-        const timeoutMs = options.timeout || 4000;
+        const timeoutMs = options.timeout || 3000;
         const tid = setTimeout(() => controller.abort(), timeoutMs);
         const directOptions = Object.assign({}, options, { signal: controller.signal, mode: 'cors' });
         delete directOptions.timeout;
@@ -1762,17 +1928,26 @@ async function callSignerApi(endpoint, options = {}) {
         clearTimeout(tid);
         if (res.ok) return res;
     } catch (directErr) {
-        // Direct browser fetch failed (Mixed content HTTPS->HTTP, CORS, or WAN Global IP)
+        // Direct browser fetch failed (Mixed content HTTPS->HTTP, Self-Signed Cert, or Remote)
     }
 
-    // Transparent Server-Side Proxy Fallback (Guaranteed to reach Global IP without browser mixed-content blocks)
+    // 2. Transparent Server-Side Proxy Fallback (Bypasses browser SSL & CORS restrictions)
     try {
         const proxyUrl = `Token.php?action=proxy_api&endpoint=${encodeURIComponent(endpoint)}`;
         const proxyOptions = Object.assign({}, options);
         delete proxyOptions.timeout;
-        return await fetch(proxyUrl, proxyOptions);
-    } catch (proxyErr) {
-        throw proxyErr;
+        const res = await fetch(proxyUrl, proxyOptions);
+        if (res.ok) return res;
+    } catch (proxyErr) {}
+
+    // 3. Web Server Cloud Tunnel Fallback (Zero Port Forwarding / Remote Token Relay)
+    try {
+        const tunnelUrl = `Token.php?action=tunnel_push&endpoint=${encodeURIComponent(endpoint)}`;
+        const tunnelOptions = Object.assign({}, options);
+        delete tunnelOptions.timeout;
+        return await fetch(tunnelUrl, tunnelOptions);
+    } catch (tunnelErr) {
+        throw tunnelErr;
     }
 }
 

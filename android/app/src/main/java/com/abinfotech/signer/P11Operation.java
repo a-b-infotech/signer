@@ -35,22 +35,6 @@ public class P11Operation {
 	public static int isLoadlib = 0;
 	static{
 		try { System.loadLibrary("c++_shared"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("usb"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("pcsclite"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("_atick"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("WDAssist"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("proxkey"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("WatchdataPKCS11"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("mtoken"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("mTokenGM"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("cryptoid_pkcs11"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("hyp2003"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("castle"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("ep2003"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("innait_pkcs11"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("inneit"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("InnaITPKCS11"); } catch (Throwable ignored) {}
-		try { System.loadLibrary("OTGPass2003_India"); } catch (Throwable ignored) {}
 	}
 
 	public static String resolvePkcs11ModulePath(Context context, String moduleName) {
@@ -103,29 +87,13 @@ public class P11Operation {
 		List<String> candidateList = new ArrayList<>();
 		if (vendorId == 0x096e || vendorId == 0x2ccf || vendorId == 0x2ce3) { // Feitian / NEW HYP2003 / ePass2003
 			candidateList.add("libOTGPass2003_India.so");
-			candidateList.add("libhyp2003.so");
-			candidateList.add("libcastle.so");
-			candidateList.add("libep2003.so");
 		} else if (vendorId == 0x338c || vendorId == 0x2617 || vendorId == 0x2007 || vendorId == 0x08c3) { // InnaIT Precision
 			candidateList.add("libInnaITPKCS11.so");
-			candidateList.add("lib_atick.so");
-			candidateList.add("libinnait_pkcs11.so");
-			candidateList.add("libinneit.so");
-		} else if (vendorId == 0x163c || vendorId == 0x24dc || vendorId == 0x04b5 || vendorId == 0x1059 || vendorId == 0x04b4) { // Watchdata ProxKey
-			candidateList.add("lib_atick.so");
-			candidateList.add("libWatchdataPKCS11.so");
-			candidateList.add("libproxkey.so");
-			candidateList.add("libWDAssist.so");
-		} else if (vendorId == 0x055c || vendorId == 0x4c4d || vendorId == 0x0925 || vendorId == 0x24a4) { // Longmai mToken / CryptoID
-			candidateList.add("lib_atick.so");
-			candidateList.add("libcryptoid_pkcs11.so");
-			candidateList.add("libmtoken.so");
-			candidateList.add("libmTokenGM.so");
 		} else if (vendorId == 0) {
 			// Unknown vendor, try standard Feitian / HYP2003
 			candidateList.add("libOTGPass2003_India.so");
 		} else {
-			// Other tokens (SafeNet, etc.) handled directly via CCID
+			// ProxKey, mToken, SafeNet, etc. handled cleanly and safely directly via CCID
 			return false;
 		}
 

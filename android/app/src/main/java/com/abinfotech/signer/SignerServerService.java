@@ -56,6 +56,72 @@ public class SignerServerService extends Service {
                 }
             }
         }, "SignerServerDaemon").start();
+
+        // Asynchronously start Web Server Cloud Tunnel poller (Zero Port Forwarding / Remote Token Relay)
+        startCloudTunnelWorker();
+    }
+
+    private void startCloudTunnelWorker() {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (true) {
+                    try {
+                        android.content.SharedPreferences sp = getSharedPreferences("AbinfoSignerPrefs", Context.MODE_PRIVATE);
+                        String tunnelUrl = sp.getString("tunnel_server_url", "");
+                        if (tunnelUrl == null || tunnelUrl.trim().isEmpty()) {
+                            // Default to local gateway if tested on emulator / LAN
+                            tunnelUrl = "http://10.0.2.2/abinfo_signer/Token.php";
+                        }
+                        if (tunnelUrl.endsWith("/")) tunnelUrl = tunnelUrl.substring(0, tunnelUrl.length() - 1);
+                        if (!tunnelUrl.endsWith("Token.php") && !tunnelUrl.contains("action=")) {
+                            tunnelUrl += "/Token.php";
+                        }
+
+                        java.net.URL pollUrl = new java.net.URL(tunnelUrl + "?action=tunnel_poll&tunnel_id=default");
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) pollUrl.openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(4000);
+                        conn.setReadTimeout(4000);
+                        conn.setRequestProperty("User-Agent", "ABInfoAndroidSigner/2.2");
+
+                        int code = conn.getResponseCode();
+                        if (code == 200) {
+                            java.io.InputStream is = conn.getInputStream();
+                            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                            byte[] buf = new byte[2048];
+                            int r;
+                            while ((r = is.read(buf)) != -1) baos.write(buf, 0, r);
+                            is.close();
+
+                            String jsonStr = new String(baos.toByteArray(), "UTF-8");
+                            org.json.JSONObject data = new org.json.JSONObject(jsonStr);
+                            if ("job_available".equals(data.optString("status")) && data.has("job")) {
+                                org.json.JSONObject job = data.getJSONObject("job");
+                                String jobId = job.optString("job_id", "");
+                                String endpoint = job.optString("endpoint", "/api/health");
+
+                                if (endpoint.contains("/api/certificates")) {
+                                    String pin = job.optJSONObject("params") != null ? job.optJSONObject("params").optString("password", "") : "";
+                                    org.json.JSONArray certs = CertificateManager.listCertificatesJson(getApplicationContext(), pin);
+
+                                    java.net.URL respUrl = new java.net.URL(tunnelUrl + "?action=tunnel_respond&tunnel_id=default&job_id=" + jobId);
+                                    java.net.HttpURLConnection rConn = (java.net.HttpURLConnection) respUrl.openConnection();
+                                    rConn.setRequestMethod("POST");
+                                    rConn.setDoOutput(true);
+                                    rConn.setRequestProperty("Content-Type", "application/json");
+                                    rConn.getOutputStream().write(certs.toString().getBytes("UTF-8"));
+                                    rConn.getResponseCode();
+                                    rConn.disconnect();
+                                }
+                            }
+                        }
+                        conn.disconnect();
+                    } catch (Throwable ignored) {}
+                    try { Thread.sleep(3000); } catch (Throwable ignored) {}
+                }
+            }
+        }, "CloudTunnelWorker").start();
     }
 
     @Override

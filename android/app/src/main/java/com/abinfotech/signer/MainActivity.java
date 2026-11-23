@@ -532,6 +532,16 @@ public class MainActivity extends Activity {
             @Override
             public void uncaughtException(Thread t, Throwable e) {
                 Log.e(TAG, "Uncaught exception in thread " + t.getName(), e);
+                // If exception happened on UI Looper, keep Looper alive so app never terminates/closes
+                if (Looper.myLooper() != null && Looper.myLooper() == Looper.getMainLooper()) {
+                    while (true) {
+                        try {
+                            Looper.loop();
+                        } catch (Throwable inner) {
+                            Log.e(TAG, "Recovered from UI crash: ", inner);
+                        }
+                    }
+                }
             }
         });
 
@@ -570,6 +580,14 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {}
 
         restorePreferences();
+        if (tvSignSelectedCert != null) {
+            String txt = tvSignSelectedCert.getText().toString();
+            if (txt.contains("Selected:") || txt.contains("ABHISHEK") || txt.contains("mToken") || txt.contains("CryptoID") || txt.contains("HYP") || txt.contains("ProxKey")) {
+                mSelectedCertDisplayName = "";
+                mSelectedCertAlias = "";
+                tvSignSelectedCert.setText("-- Tap 'Find Certificates' or Load P12 --");
+            }
+        }
 
         // Register internal USB permission receiver (NOT_EXPORTED on API 33+)
         try {

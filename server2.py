@@ -5535,6 +5535,71 @@ class SoftwareUpdateManager:
 
 local_api_server = LocalApiServerManager(app, host="0.0.0.0", port=5000)
 
+# =====================================================================
+# ZERO-PORT-FORWARDING WEB SERVER CLOUD TUNNEL WORKER
+# Allows Token.php to securely reach this desktop token signer from any network
+# =====================================================================
+def start_web_server_tunnel_poller():
+    def _poll_loop():
+        import urllib.request, urllib.parse, base64
+        tunnel_urls = [
+            "http://127.0.0.1/abinfo_signer/Token.php",
+            "http://localhost/abinfo_signer/Token.php",
+            "http://127.0.0.1/Token.php"
+        ]
+        while True:
+            for t_url in tunnel_urls:
+                try:
+                    poll_url = f"{t_url}?action=tunnel_poll&tunnel_id=default"
+                    req = urllib.request.Request(poll_url, headers={'User-Agent': 'ABInfoSigner/2.2'})
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        res_str = resp.read().decode('utf-8', errors='ignore')
+                        data = json.loads(res_str) if res_str else {}
+                    if data.get('status') == 'job_available' and 'job' in data:
+                        job = data['job']
+                        job_id = job.get('job_id', '')
+                        endpoint = job.get('endpoint', '/api/health')
+                        with app.test_client() as client:
+                            if job.get('method') == 'POST':
+                                post_data = dict(job.get('post', {}))
+                                if 'pdf_base64' in job:
+                                    pdf_bytes = base64.b64decode(job['pdf_base64'])
+                                    post_data['file'] = (io.BytesIO(pdf_bytes), job.get('pdf_name', 'input.pdf'))
+                                if 'logo_base64' in job:
+                                    logo_bytes = base64.b64decode(job['logo_base64'])
+                                    post_data['custom_logo'] = (io.BytesIO(logo_bytes), 'logo.png')
+                                f_resp = client.post(endpoint, data=post_data, content_type='multipart/form-data')
+                            else:
+                                f_resp = client.get(endpoint, query_string=job.get('params', {}))
+
+                            respond_url = f"{t_url}?action=tunnel_respond&tunnel_id=default&job_id={job_id}"
+                            if 'pdf' in str(f_resp.content_type).lower():
+                                boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+                                body = bytearray()
+                                body.extend(f'--{boundary}\r\nContent-Disposition: form-data; name="signed_pdf"; filename="signed.pdf"\r\nContent-Type: application/pdf\r\n\r\n'.encode('latin1'))
+                                body.extend(f_resp.data)
+                                body.extend(f'\r\n--{boundary}--\r\n'.encode('latin1'))
+                                r_req = urllib.request.Request(respond_url, data=bytes(body), headers={
+                                    'Content-Type': f'multipart/form-data; boundary={boundary}',
+                                    'User-Agent': 'ABInfoSigner/2.2'
+                                })
+                                urllib.request.urlopen(r_req, timeout=30)
+                            else:
+                                r_req = urllib.request.Request(respond_url, data=f_resp.data, headers={
+                                    'Content-Type': 'application/json',
+                                    'User-Agent': 'ABInfoSigner/2.2'
+                                })
+                                urllib.request.urlopen(r_req, timeout=15)
+                        break
+                except Exception:
+                    pass
+            time.sleep(2)
+
+    t = threading.Thread(target=_poll_loop, daemon=True, name="WebCloudTunnelPoller")
+    t.start()
+
+start_web_server_tunnel_poller()
+
 
 
 CORS(app, origins=['*'])

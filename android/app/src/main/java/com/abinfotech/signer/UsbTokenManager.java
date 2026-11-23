@@ -250,15 +250,9 @@ public class UsbTokenManager {
                 }
                 com.ftsafe.monitor.JniCallBack cb = com.ftsafe.monitor.JniCallBack.getInstance();
                 if (cb != null) {
-                    // Feitian native driver checks idVendor == 0x096e. Ensure NEW HYP2003 (0x2ccf / 0x2ce3) passes this check!
-                    if (vid == 0x2ccf || vid == 0x2ce3 || vid == 0x096e) {
-                        cb.setidVendor(0x096e);
-                        cb.setidProduct(0x0405);
-                    } else {
-                        cb.setidVendor(device.getVendorId());
-                        cb.setidProduct(device.getProductId());
-                    }
-                    Log.d(TAG, "JniCallBack VID/PID configured: " + cb.getidVendor() + " / " + cb.getidProduct());
+                    cb.setidVendor(device.getVendorId());
+                    cb.setidProduct(device.getProductId());
+                    Log.d(TAG, "JniCallBack VID/PID configured: 0x" + Integer.toHexString(cb.getidVendor()) + " / 0x" + Integer.toHexString(cb.getidProduct()));
                 }
             } catch (Throwable t) {
                 Log.w(TAG, "JniCallBack setup notice: " + t.getMessage());

@@ -192,10 +192,10 @@ public class CcidTokenDriver {
 
             if (!isCcidClass) {
                 // Raw vendor bulk: send APDU directly without CCID wrapper!
-                int sent = conn.bulkTransfer(outEp, apdu, apdu.length, 3000);
+                int sent = conn.bulkTransfer(outEp, apdu, apdu.length, 800);
                 if (sent < 0) return null;
                 byte[] rawBuf = new byte[4096];
-                int read = conn.bulkTransfer(inEp, rawBuf, rawBuf.length, 3000);
+                int read = conn.bulkTransfer(inEp, rawBuf, rawBuf.length, 800);
                 if (read <= 0) return null;
                 byte[] res = new byte[read];
                 System.arraycopy(rawBuf, 0, res, 0, read);
@@ -217,16 +217,16 @@ public class CcidTokenDriver {
             ccidMsg[9] = 0x00;
             System.arraycopy(apdu, 0, ccidMsg, 10, apdu.length);
 
-            int sent = conn.bulkTransfer(outEp, ccidMsg, ccidMsg.length, 3000);
+            int sent = conn.bulkTransfer(outEp, ccidMsg, ccidMsg.length, 800);
             if (sent < 0) return null;
 
             byte[] respBuf = new byte[4096];
-            int read = conn.bulkTransfer(inEp, respBuf, respBuf.length, 3000);
+            int read = conn.bulkTransfer(inEp, respBuf, respBuf.length, 800);
 
             // Handle CCID time extension request (bmCommandStatus = 10b: 0x80 only)
             int waitLoop = 0;
-            while (read >= 10 && ((respBuf[7] & 0xC0) == 0x80) && waitLoop++ < 5) {
-                read = conn.bulkTransfer(inEp, respBuf, respBuf.length, 2000);
+            while (read >= 10 && ((respBuf[7] & 0xC0) == 0x80) && waitLoop++ < 3) {
+                read = conn.bulkTransfer(inEp, respBuf, respBuf.length, 800);
             }
 
             if (read >= 10 && respBuf[0] == (byte) 0x80) { // RDR_to_PC_DataBlock
@@ -240,7 +240,7 @@ public class CcidTokenDriver {
                     int received = firstChunk;
                     while (received < dwLength) {
                         byte[] chunk = new byte[Math.min(2048, dwLength - received)];
-                        int r = conn.bulkTransfer(inEp, chunk, chunk.length, 3000);
+                        int r = conn.bulkTransfer(inEp, chunk, chunk.length, 800);
                         if (r <= 0) break;
                         System.arraycopy(chunk, 0, apduResp, received, r);
                         received += r;
@@ -533,14 +533,12 @@ public class CcidTokenDriver {
     }
 
     public static boolean selectFileFlexible(UsbDeviceConnection conn, UsbEndpoint outEp, UsbEndpoint inEp, int fid, int[] seqHolder) {
-        int[] p2Options = new int[]{0x00, 0x0C, 0x04};
-        int[] p1Options = new int[]{0x00, 0x02, 0x01};
-        for (int p1 : p1Options) {
-            for (int p2 : p2Options) {
-                if (selectIsoFile(conn, outEp, inEp, p1, p2, fid, seqHolder)) {
-                    return true;
-                }
-            }
+        // Fast Probing: Probe standard P1=0x00, P2=0x00 first, then P1=0x02, P2=0x04
+        if (selectIsoFile(conn, outEp, inEp, 0x00, 0x00, fid, seqHolder)) {
+            return true;
+        }
+        if (selectIsoFile(conn, outEp, inEp, 0x02, 0x04, fid, seqHolder)) {
+            return true;
         }
         return false;
     }
@@ -614,35 +612,36 @@ public class CcidTokenDriver {
         if (conn == null || inEp == null || outEp == null) return results;
 
         try {
-            UsbInterface activeIntf = UsbTokenManager.getActiveInterface();
-            int intfClass = activeIntf != null ? activeIntf.getInterfaceClass() : 11;
-            boolean isCcidClass = (intfClass == 11 || intfClass == UsbConstants.USB_CLASS_CSCID);
-
-            // 1. Power On Card only if CCID Class (PC_to_RDR_IccPowerOn - 0x62)
-            if (isCcidClass) {
-                try {
-                    byte[] pwrOn = new byte[]{0x62, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-                    conn.bulkTransfer(outEp, pwrOn, pwrOn.length, 1000);
-                    byte[] atrBuf = new byte[512];
-                    conn.bulkTransfer(inEp, atrBuf, atrBuf.length, 1000);
-                } catch (Throwable ignored) {}
-            }
+            // 1. Power On Card (PC_to_RDR_IccPowerOn - 0x62)
+            try {
+                byte[] pwrOn = new byte[]{0x62, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                conn.bulkTransfer(outEp, pwrOn, pwrOn.length, 800);
+                byte[] atrBuf = new byte[512];
+                conn.bulkTransfer(inEp, atrBuf, atrBuf.length, 800);
+            } catch (Throwable ignored) {}
 
             int seq = 1;
             int[] seqHolder = new int[]{seq};
 
-            // 2. WATCHDATA PROXKEY SPECIALIZED SCAN (3F00 -> 3F18 -> 0040 / 7001 / 0001)
+            // 1b. DIRECT SELECT PATH FOR INDIAN DSC (3F00 -> 7001 / 7002)
             try {
-                selectFileFlexible(conn, outEp, inEp, 0x3F00, seqHolder);
-                if (selectFileFlexible(conn, outEp, inEp, 0x3F18, seqHolder)) {
-                    for (int wdef : new int[]{0x0040, 0x7001, 0x0001, 0x0002}) {
-                        if (selectFileFlexible(conn, outEp, inEp, wdef, seqHolder)) {
-                            byte[] wdData = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
-                            if (wdData != null && wdData.length > 50) {
-                                List<CcidCertInfo> wdInfos = parseAllX509Der(wdData);
-                                if (!wdInfos.isEmpty()) {
-                                    results.addAll(wdInfos);
-                                    Log.d(TAG, "✅ Watchdata ProxKey 3F18/0040 retrieved cert CN=" + wdInfos.get(0).clientName);
+                byte[][] directPathCmds = new byte[][]{
+                    new byte[]{0x00, (byte) 0xA4, 0x08, 0x00, 0x04, 0x3F, 0x00, 0x70, 0x01},
+                    new byte[]{0x00, (byte) 0xA4, 0x08, 0x00, 0x04, 0x3F, 0x00, 0x70, 0x02},
+                    new byte[]{0x00, (byte) 0xA4, 0x08, 0x00, 0x04, 0x3F, 0x18, 0x00, 0x40},
+                    new byte[]{0x00, (byte) 0xA4, 0x08, 0x00, 0x04, 0x3F, 0x00, (byte) 0xC0, 0x01}
+                };
+                for (byte[] pCmd : directPathCmds) {
+                    byte[] pResp = execCcidApdu(conn, outEp, inEp, pCmd, seqHolder[0]++);
+                    if (pResp != null && pResp.length >= 2) {
+                        int sw1 = pResp[pResp.length - 2] & 0xFF;
+                        if (sw1 == 0x90 || sw1 == 0x61 || sw1 == 0x62) {
+                            byte[] bin = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                            if (bin != null && bin.length > 50) {
+                                List<CcidCertInfo> infos = parseAllX509Der(bin);
+                                if (!infos.isEmpty()) {
+                                    results.addAll(infos);
+                                    Log.d(TAG, "✅ Direct path select retrieved cert CN=" + infos.get(0).clientName);
                                     break;
                                 }
                             }
@@ -650,7 +649,31 @@ public class CcidTokenDriver {
                     }
                 }
             } catch (Throwable t) {
-                Log.w(TAG, "Watchdata 3F18 scan notice: " + t.getMessage());
+                Log.w(TAG, "Direct path select notice: " + t.getMessage());
+            }
+
+            // 2. WATCHDATA PROXKEY SPECIALIZED SCAN (3F00 -> 3F18 -> 0040 / 7001 / 0001)
+            if (results.isEmpty()) {
+                try {
+                    selectFileFlexible(conn, outEp, inEp, 0x3F00, seqHolder);
+                    if (selectFileFlexible(conn, outEp, inEp, 0x3F18, seqHolder)) {
+                        for (int wdef : new int[]{0x0040, 0x7001, 0x0001, 0x0002}) {
+                            if (selectFileFlexible(conn, outEp, inEp, wdef, seqHolder)) {
+                                byte[] wdData = readEntireBinaryFile(conn, outEp, inEp, seqHolder);
+                                if (wdData != null && wdData.length > 50) {
+                                    List<CcidCertInfo> wdInfos = parseAllX509Der(wdData);
+                                    if (!wdInfos.isEmpty()) {
+                                        results.addAll(wdInfos);
+                                        Log.d(TAG, "✅ Watchdata ProxKey 3F18/0040 retrieved cert CN=" + wdInfos.get(0).clientName);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "Watchdata 3F18 scan notice: " + t.getMessage());
+                }
             }
 
             // 3. MTOKEN / LONGMAI SPECIALIZED SCAN (3F00 -> 1100 -> C001 / C002 / 7001 / 4545)
