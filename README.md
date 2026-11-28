@@ -10,15 +10,7 @@ Professional, cross-platform digital signature solution for PDF documents suppor
 - **Cross-Platform Compatibility**: Full feature parity across Windows, macOS, and Linux.
 - **Local Web API**: Built-in HTTP service allowing local web applications (PHP, React, Node.js) to trigger signing operations seamlessly.
 
-## Quick Start (Run from Source)
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Run the application:
-   ```bash
-   python server2.py
-   ```
+
 
 ## Automated Multi-OS Builds (GitHub Actions)
 This repository includes a GitHub Actions workflow (`.github/workflows/build.yml`) that automatically builds standalone release packages for:
