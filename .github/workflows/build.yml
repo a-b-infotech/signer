@@ -157,10 +157,11 @@ jobs:
           if-no-files-found: error
 
   # -------------------------------------------------------------
-  # 6. BUILD ANDROID APK
+  # 6. BUILD ANDROID APK (Temporarily disabled as requested)
   # -------------------------------------------------------------
   build-android:
     name: Build Android APK
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
@@ -193,23 +194,31 @@ jobs:
   # -------------------------------------------------------------
   release:
     name: Publish Public Direct Download Release
-    needs: [build, build-android]
+    needs: [build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           path: artifacts
 
       - name: Organize Release Files
         run: |
           mkdir -p release_assets
-          cp artifacts/Abinfo_Signer_Windows_Setup/Abinfo_Signer_Windows_Setup.exe release_assets/Abinfo_Signer_Windows_Setup.exe || true
-          cp artifacts/Abinfo_Signer_Linux_x64/Abinfo_Signer_Linux_x64.tar.gz release_assets/Abinfo_Signer_Linux.tar.gz || true
-          cp artifacts/Abinfo_Signer_macOS/Abinfo_Signer_macOS.zip release_assets/Abinfo_Signer_macOS.zip || true
-          cp artifacts/Abinfo_Signer_Android/Abinfo_Signer_Android.apk release_assets/Abinfo_Signer_Android.apk || true
+          cp artifacts/Abinfo_Signer_Windows_Setup/Abinfo_Signer_Windows_Setup.exe release_assets/Abinfo_Signer_Windows_Setup.exe 2>/dev/null || true
+          cp artifacts/Abinfo_Signer_Linux_x64/Abinfo_Signer_Linux_x64.tar.gz release_assets/Abinfo_Signer_Linux.tar.gz 2>/dev/null || true
+          cp artifacts/Abinfo_Signer_macOS/Abinfo_Signer_macOS.zip release_assets/Abinfo_Signer_macOS.zip 2>/dev/null || true
+          if [ -f "artifacts/Abinfo_Signer_Android/Abinfo_Signer_Android.apk" ]; then
+            cp artifacts/Abinfo_Signer_Android/Abinfo_Signer_Android.apk release_assets/Abinfo_Signer_Android.apk
+          elif [ -f "Abinfo_Signer_Android.apk" ]; then
+            cp Abinfo_Signer_Android.apk release_assets/Abinfo_Signer_Android.apk
+          fi
           ls -la release_assets
 
       - name: Publish or Update GitHub Release
