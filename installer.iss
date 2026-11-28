@@ -48,6 +48,21 @@ Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
 ; Certificate to be installed (put in {tmp} so it deletes itself automatically after installation)
 Source: "ab_infotech_ca_cert.cer"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
+; Token Driver Libraries - Windows DLLs only (no .so, no .dylib, no android)
+Source: "drivers\windows\x64\*.dll"; DestDir: "{app}\drivers\windows\x64"; Flags: ignoreversion
+Source: "drivers\windows\x86\*.dll"; DestDir: "{app}\drivers\windows\x86"; Flags: ignoreversion
+Source: "drivers\windows\x64\*.dll"; DestDir: "{app}\drivers"; Flags: ignoreversion
+
+[InstallDelete]
+; Clean up any previous non-Windows files mistakenly installed in {app} or {app}\drivers
+Type: files; Name: "{app}\*.dylib"
+Type: files; Name: "{app}\*.so"
+Type: filesandordirs; Name: "{app}\drivers\android"
+Type: filesandordirs; Name: "{app}\drivers\linux"
+Type: filesandordirs; Name: "{app}\drivers\macos"
+Type: files; Name: "{app}\drivers\*.dylib"
+Type: files; Name: "{app}\drivers\*.so"
+
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppIconName}"
 Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\{#MyAppIconName}"

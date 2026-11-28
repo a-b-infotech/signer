@@ -16,6 +16,21 @@ if [ -d "Abinfo_Signer_Offline.app" ]; then
   sudo cp -R "Abinfo_Signer_Offline.app" /Applications/
 fi
 
+# 3. Install macOS .dylib token drivers only (no .dll, no .so)
+if [ -d "drivers/macos" ]; then
+  echo "Installing token drivers..."
+  sudo mkdir -p "/Applications/Abinfo_Signer_Offline.app/Contents/MacOS/drivers/macos"
+  sudo cp -f drivers/macos/*.dylib "/Applications/Abinfo_Signer_Offline.app/Contents/MacOS/drivers/macos/" 2>/dev/null || true
+  sudo mkdir -p "/usr/local/lib"
+  sudo cp -f drivers/macos/*.dylib "/usr/local/lib/" 2>/dev/null || true
+elif [ -d "drivers" ]; then
+  echo "Installing token drivers..."
+  sudo mkdir -p "/Applications/Abinfo_Signer_Offline.app/Contents/MacOS/drivers/macos"
+  sudo cp -f drivers/*.dylib "/Applications/Abinfo_Signer_Offline.app/Contents/MacOS/drivers/macos/" 2>/dev/null || true
+  sudo mkdir -p "/usr/local/lib"
+  sudo cp -f drivers/*.dylib "/usr/local/lib/" 2>/dev/null || true
+fi
+
 # 3. Add to Login Items for autostart
 osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/Abinfo_Signer_Offline.app", hidden:true}' 2>/dev/null || true
 

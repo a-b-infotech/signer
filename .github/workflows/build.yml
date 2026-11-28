@@ -127,7 +127,9 @@ jobs:
           cp install_linux.sh dist/install.sh && chmod +x dist/install.sh
           cp ab_infotech_ca_cert.cer dist/
           cp app_icon.png dist/icon.png
-          cd dist && tar -czvf Abinfo_Signer_Linux_x64.tar.gz Abinfo_Signer_Offline install.sh ab_infotech_ca_cert.cer icon.png
+          mkdir -p dist/drivers/linux
+          cp drivers/linux/*.so dist/drivers/linux/ 2>/dev/null || true
+          cd dist && tar -czvf Abinfo_Signer_Linux_x64.tar.gz Abinfo_Signer_Offline install.sh ab_infotech_ca_cert.cer icon.png drivers
 
       - name: Upload Linux Artifact
         if: runner.os == 'Linux'
@@ -146,7 +148,9 @@ jobs:
           pyinstaller --onefile --windowed --icon=app_icon.png --collect-all fitz --collect-all pymupdf --exclude-module pymupdf4llm --exclude-module onnx --exclude-module onnxruntime --add-data "app_icon.png:." --name "Abinfo_Signer_Offline" server2.py
           cp install_mac.sh dist/install.sh && chmod +x dist/install.sh
           cp ab_infotech_ca_cert.cer dist/
-          cd dist && zip -r Abinfo_Signer_macOS.zip Abinfo_Signer_Offline.app install.sh ab_infotech_ca_cert.cer
+          mkdir -p dist/drivers/macos
+          cp drivers/macos/*.dylib dist/drivers/macos/ 2>/dev/null || true
+          cd dist && zip -r Abinfo_Signer_macOS.zip Abinfo_Signer_Offline.app install.sh ab_infotech_ca_cert.cer drivers
 
       - name: Upload macOS Artifact
         if: runner.os == 'macOS'

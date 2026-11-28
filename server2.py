@@ -595,16 +595,280 @@ try:
 
 
     # Patch 5: pyHanko suppress default text stamp style overlap
-
     try:
-
         from pyhanko.sign.signers import constants as _p_constants
-
         _p_constants.DEFAULT_SIGNING_STAMP_STYLE = StaticStampStyle(border_width=0, background=None)
-
     except Exception:
-
         pass
+
+    # Patch 6: Intelligent PKCS#11 Private Key discovery and resolution across all token models
+    def _resolve_pkcs11_private_key(session, cert_parsed=None, cert_id=None, cert_lbl=None):
+        """
+        Intelligently discovers and returns the private key object corresponding to
+        the selected certificate on a PKCS#11 hardware token.
+        Prevents NoSuchKey when CKA_LABEL and CKA_ID differ or when tokens use custom labels.
+        Applies RSA cryptographic modulus match, exact CKA_ID match, CKA_LABEL match,
+        single-key token detection, and safe fallback.
+        """
+        all_keys = []
+        try:
+            all_keys = list(session.get_objects({pkcs11.Attribute.CLASS: pkcs11.ObjectClass.PRIVATE_KEY}))
+        except Exception as e:
+            print(f"[PKCS11] Error querying private keys: {e}")
+
+        if not all_keys:
+            if cert_id:
+                try:
+                    return session.get_key(pkcs11.ObjectClass.PRIVATE_KEY, id=cert_id)
+                except Exception:
+                    pass
+            if cert_lbl:
+                try:
+                    return session.get_key(pkcs11.ObjectClass.PRIVATE_KEY, label=str(cert_lbl))
+                except Exception:
+                    pass
+            raise pkcs11.exceptions.NoSuchKey("No private key found on hardware token. Ensure user PIN is correct and token is unlocked.")
+
+        # If only 1 private key is present on token, it is unequivocally the signing key
+        if len(all_keys) == 1:
+            return all_keys[0]
+
+        # Strategy 1: Cryptographic RSA modulus matching (100% exact mathematical match)
+        if cert_parsed is not None:
+            try:
+                pub_key = cert_parsed.public_key()
+                if hasattr(pub_key, 'public_numbers'):
+                    pn = pub_key.public_numbers()
+                    if hasattr(pn, 'n'):
+                        modulus_int = pn.n
+                        mod_len = (modulus_int.bit_length() + 7) // 8
+                        cert_modulus = modulus_int.to_bytes(mod_len, byteorder='big').lstrip(b'\x00')
+                        for k in all_keys:
+                            try:
+                                k_mod = k[pkcs11.Attribute.MODULUS]
+                                if k_mod and bytes(k_mod).lstrip(b'\x00') == cert_modulus:
+                                    return k
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+        # Strategy 2: Match by exact CKA_ID
+        if cert_id is not None:
+            raw_cid = bytes(cert_id) if isinstance(cert_id, (bytes, bytearray)) else str(cert_id).encode('utf-8', errors='ignore')
+            for k in all_keys:
+                try:
+                    kid = k[pkcs11.Attribute.ID]
+                    if kid is not None:
+                        raw_kid = bytes(kid) if isinstance(kid, (bytes, bytearray)) else str(kid).encode('utf-8', errors='ignore')
+                        if raw_kid == raw_cid or raw_kid.strip() == raw_cid.strip():
+                            return k
+                except Exception:
+                    pass
+
+        # Strategy 3: Match by CKA_LABEL (exact or substring)
+        if cert_lbl:
+            lbl_target = str(cert_lbl).strip().lower()
+            for k in all_keys:
+                try:
+                    klbl = k[pkcs11.Attribute.LABEL]
+                    if klbl and str(klbl).strip().lower() == lbl_target:
+                        return k
+                except Exception:
+                    pass
+            for k in all_keys:
+                try:
+                    klbl = k[pkcs11.Attribute.LABEL]
+                    if klbl:
+                        k_str = str(klbl).strip().lower()
+                        if lbl_target in k_str or k_str in lbl_target:
+                            return k
+                except Exception:
+                    pass
+
+        # Strategy 4: Fallback to get_key with id only or label only
+        if cert_id:
+            try:
+                return session.get_key(pkcs11.ObjectClass.PRIVATE_KEY, id=cert_id)
+            except Exception:
+                pass
+        if cert_lbl:
+            try:
+                return session.get_key(pkcs11.ObjectClass.PRIVATE_KEY, label=str(cert_lbl))
+            except Exception:
+                pass
+
+        # Strategy 5: Return first available private key
+        return all_keys[0]
+
+    # Patch pyHanko PKCS11Signer._load_objects to prevent NoSuchKey
+    try:
+        from pyhanko.sign.pkcs11 import PKCS11Signer, _pull_cert
+        _orig_pkcs11_load_objects = PKCS11Signer._load_objects
+
+        def _patched_pkcs11_load_objects(self):
+            if self._loaded:
+                return
+            self._init_cert_registry()
+            if self._signing_cert is None:
+                try:
+                    self._signing_cert = _pull_cert(
+                        self.pkcs11_session, label=self.cert_label, cert_id=self.cert_id
+                    )
+                except Exception:
+                    pass
+            if getattr(self, '_key_handle', None) is None:
+                self._key_handle = _resolve_pkcs11_private_key(
+                    self.pkcs11_session,
+                    cert_parsed=getattr(self, '_py_cert_parsed', None),
+                    cert_id=getattr(self, 'key_id', None) or getattr(self, 'cert_id', None),
+                    cert_lbl=getattr(self, 'key_label', None) or getattr(self, 'cert_label', None)
+                )
+            self._loaded = True
+
+        PKCS11Signer._load_objects = _patched_pkcs11_load_objects
+    except Exception as e:
+        print(f"Warning: Failed to patch PKCS11Signer._load_objects: {e}")
+
+    def _find_token_cert(session, cert_alias=None):
+        """
+        Finds and returns (cert_obj, cert_parsed, cert_id, cert_lbl) from an open PKCS#11 session.
+        Matches by decimal/hex serial number, CN, or single user certificate fallback.
+        Ensures cert_id is never None/empty (preventing falsey checks on mToken / CryptoID).
+        """
+        user_certs = []
+        target_serial = str(cert_alias).strip().lower() if cert_alias else ""
+        target_hex_serial = target_serial.replace("0x", "")
+
+        for obj in session.get_objects({pkcs11.Attribute.CLASS: pkcs11.ObjectClass.CERTIFICATE}):
+            try:
+                val = obj[pkcs11.Attribute.VALUE]
+                if not val:
+                    continue
+                c = x509.load_der_x509_certificate(val)
+            except Exception:
+                continue
+
+            # Filter CA / Root certificates
+            is_ca = False
+            try:
+                is_ca = c.extensions.get_extension_for_oid(x509.ExtensionOID.BASIC_CONSTRAINTS).value.ca
+            except Exception:
+                pass
+            if is_ca or c.subject == c.issuer:
+                continue
+
+            # Check key usage if available
+            is_signing = True
+            try:
+                ku = c.extensions.get_extension_for_oid(x509.ExtensionOID.KEY_USAGE).value
+                is_signing = bool(ku.digital_signature or ku.content_commitment)
+            except Exception:
+                is_signing = True
+
+            cid = None
+            try:
+                cid = obj[pkcs11.Attribute.ID]
+            except Exception:
+                pass
+            # Guarantee cert_id is never empty/None (mToken often returns b'' or None)
+            if not cid:
+                cid = str(c.serial_number).encode('utf-8')
+
+            clbl = None
+            try:
+                clbl = obj[pkcs11.Attribute.LABEL]
+            except Exception:
+                pass
+
+            cert_item = {
+                'obj': obj,
+                'cert': c,
+                'id': cid,
+                'label': clbl,
+                'serial_dec': str(c.serial_number).strip().lower(),
+                'serial_hex': hex(c.serial_number).lower().replace("0x", ""),
+                'is_signing': is_signing
+            }
+            user_certs.append(cert_item)
+
+            # Match 1: Decimal or hex serial number match
+            if target_serial:
+                if cert_item['serial_dec'] == target_serial or cert_item['serial_hex'] == target_hex_serial:
+                    return obj, c, cid, clbl
+
+        # Match 2: Substring/contains match on serial number
+        if target_serial:
+            for item in user_certs:
+                if target_serial in item['serial_dec'] or target_hex_serial in item['serial_hex']:
+                    return item['obj'], item['cert'], item['id'], item['label']
+
+        # Match 3: Single certificate on token
+        if len(user_certs) == 1:
+            item = user_certs[0]
+            return item['obj'], item['cert'], item['id'], item['label']
+
+        # Match 4: Prefer signing certificates if multiple exist
+        signing_certs = [item for item in user_certs if item['is_signing']]
+        if signing_certs:
+            item = signing_certs[0]
+            return item['obj'], item['cert'], item['id'], item['label']
+
+        if user_certs:
+            item = user_certs[0]
+            return item['obj'], item['cert'], item['id'], item['label']
+
+        return None, None, None, None
+
+    def _open_token_session_for_cert(driver_path, pin, cert_alias=None):
+        """
+        Searches across ALL slots where a token is present, opens with PIN,
+        and returns (session, cert_obj, cert_parsed, cert_id, cert_lbl).
+        If the token is split across virtual/reader slots (as on mToken / CryptoID),
+        it tests all slots until the certificate and session are established.
+        """
+        lib = pkcs11.lib(driver_path)
+        slots = []
+        try:
+            slots = list(lib.get_slots(token_present=True))
+        except Exception as e:
+            print(f"[PKCS11] Error querying slots: {e}")
+
+        if not slots:
+            raise ValueError("Hardware token not detected. Ensure USB is inserted.")
+
+        for slot in slots:
+            try:
+                tok = slot.get_token()
+                s = tok.open(user_pin=pin)
+                obj, c, cid, clbl = _find_token_cert(s, cert_alias=cert_alias)
+                if c is not None:
+                    return s, obj, c, cid, clbl
+                else:
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
+        # If we couldn't match cert_alias directly, try grabbing any valid user/signing cert on available slots
+        for slot in slots:
+            try:
+                tok = slot.get_token()
+                s = tok.open(user_pin=pin)
+                obj, c, cid, clbl = _find_token_cert(s, cert_alias=None)
+                if c is not None:
+                    return s, obj, c, cid, clbl
+                else:
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+
+        raise ValueError("Certificate not found in token. Please check your token and PIN.")
 
 except ImportError:
 
@@ -1523,57 +1787,32 @@ class LicenseManager:
 # ==========================================
 
 def _pick_best_pkcs11_dll(candidates):
-
     """
-
-    Selects the best matching PKCS#11 driver DLL from candidate list.
-
-    First checks if the DLL exists and loads cleanly via pkcs11, then falls back to first existing.
-
+    Selects the best matching PKCS#11 driver from candidate list.
+    First checks if the driver exists and loads cleanly via pkcs11, then falls back to first existing.
     """
-
+    valid_exts = ('.dll', '.so', '.dylib')
     for p in candidates:
-
         if not p: continue
-
         target = p
-
         if target.lower().endswith('.sig'):
-
             target = target[:-4] + '.dll'
-
-        if os.path.exists(target) and target.lower().endswith('.dll'):
-
+        if os.path.exists(target) and target.lower().endswith(valid_exts):
             try:
-
                 pkcs11.lib(target)
-
                 return target
-
             except Exception:
-
                 pass
-
     for p in candidates:
-
         if not p: continue
-
         target = p
-
         if target.lower().endswith('.sig'):
-
             target = target[:-4] + '.dll'
-
-        if os.path.exists(target) and target.lower().endswith('.dll'):
-
+        if os.path.exists(target) and target.lower().endswith(valid_exts):
             return target
-
     for p in candidates:
-
         if p and os.path.exists(p):
-
             return p
-
     return candidates[0] if candidates else ""
 
 
@@ -1621,13 +1860,19 @@ def find_epass_driver_path():
     arch = "x64" if is_64bit else "x86"
     local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "HYP2003csp11IND.dll")
     local_hs = os.path.join(APP_DIR, "drivers", "windows", arch, "HS2003-pkcs11.dll")
+    local_drv_flat = os.path.join(APP_DIR, "drivers", "HYP2003csp11IND.dll")
+    local_hs_flat = os.path.join(APP_DIR, "drivers", "HS2003-pkcs11.dll")
+    local_drv_root = os.path.join(APP_DIR, "HYP2003csp11IND.dll")
+    local_hs_root = os.path.join(APP_DIR, "HS2003-pkcs11.dll")
 
     if is_64bit:
-
         candidates = [
             local_drv,
             local_hs,
-
+            local_drv_flat,
+            local_hs_flat,
+            local_drv_root,
+            local_hs_root,
             r"C:\Windows\System32\HYP2003csp11IND.dll",
 
             r"C:\Windows\System32\HYP2003csp11IND.sig",
@@ -1697,12 +1942,14 @@ def find_innait_driver_path():
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
     local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "InnaITPKCS11Driver.dll")
+    local_drv_flat = os.path.join(APP_DIR, "drivers", "InnaITPKCS11Driver.dll")
+    local_drv_root = os.path.join(APP_DIR, "InnaITPKCS11Driver.dll")
 
     if is_64bit:
-
         candidates = [
             local_drv,
-
+            local_drv_flat,
+            local_drv_root,
             r"C:\Windows\System32\InnaITPKCS11Driver.dll",
 
             r"C:\Windows\System32\InnaITDSCLibrary.dll",
@@ -1773,13 +2020,19 @@ def find_mtoken_driver_path():
     arch = "x64" if is_64bit else "x86"
     local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "cryptoida_pkcs11.dll")
     local_sig = os.path.join(APP_DIR, "drivers", "windows", arch, "SignatureP11.dll")
+    local_drv_flat = os.path.join(APP_DIR, "drivers", "cryptoida_pkcs11.dll")
+    local_sig_flat = os.path.join(APP_DIR, "drivers", "SignatureP11.dll")
+    local_drv_root = os.path.join(APP_DIR, "cryptoida_pkcs11.dll")
+    local_sig_root = os.path.join(APP_DIR, "SignatureP11.dll")
 
     if is_64bit:
-
         candidates = [
             local_drv,
             local_sig,
-
+            local_drv_flat,
+            local_sig_flat,
+            local_drv_root,
+            local_sig_root,
             r"C:\Windows\System32\cryptoida_pkcs11.dll",
 
             r"C:\Windows\System32\cryptoida_pkcs11_f2.dll",
@@ -1833,35 +2086,37 @@ def find_proxkey_driver_path():
     is_64bit = sys.maxsize > 2**32
     arch = "x64" if is_64bit else "x86"
     local_drv = os.path.join(APP_DIR, "drivers", "windows", arch, "WDPKCS.dll")
+    local_drv_flat = os.path.join(APP_DIR, "drivers", "WDPKCS.dll")
+    local_drv_root = os.path.join(APP_DIR, "WDPKCS.dll")
 
     if is_64bit:
-
         candidates = [
             local_drv,
+            local_drv_flat,
+            local_drv_root,
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\WDPKCS.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\TokenMgr.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\WDCtr.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\WDEvent.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\wdsafe3.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\wdkmgr.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\WDPKCS.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\TokenMgr.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\WDCtr.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\WDEvent.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\wdsafe3.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
-
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll"
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\wdkmgr.dll"
 
         ]
 
@@ -1869,29 +2124,29 @@ def find_proxkey_driver_path():
 
         candidates = [
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\WDPKCS.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\TokenMgr.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\WDCtr.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\WDEvent.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\wdsafe3.dll",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\wdkmgr.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDPKCS.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\WDPKCS.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\TokenMgr.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\TokenMgr.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDCtr.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\WDCtr.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\WDEvent.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\WDEvent.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdsafe3.dll",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\wdsafe3.dll",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdkmgr.dll"
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\wdkmgr.dll"
 
         ]
 
@@ -6100,139 +6355,66 @@ def sign_pdf():
 
         server_config['driver_path'] = resolve_driver_path(client_driver)
 
+        session, cert_obj, cert_parsed, cert_id, cert_lbl = _open_token_session_for_cert(
+            server_config['driver_path'], pin, cert_alias=serial_number
+        )
 
+        priv_key = _resolve_pkcs11_private_key(session, cert_parsed=cert_parsed, cert_id=cert_id, cert_lbl=cert_lbl)
+        asn1_cert = a509.Certificate.load(cert_parsed.public_bytes(Encoding.DER))
+        signer = PKCS11Signer(
+            pkcs11_session=session,
+            cert_id=cert_id,
+            signing_cert=asn1_cert,
+            other_certs_to_pull=(),
+            bulk_fetch=False
+        )
+        signer._key_handle = priv_key
+        signer._py_cert_parsed = cert_parsed
 
-        lib = pkcs11.lib(server_config['driver_path'])
+        visual_pdf_data = draw_reportlab_layer(
+            pdf_data, signature_areas, cert_parsed,
+            reason=reason_val, location=location_val,
+            logo_path=temp_logo_path
+        )
+        # In Web Demo / 4-Day Trial mode without active license, apply small demo watermark on every page
+        if is_demo:
+            visual_pdf_data = apply_demo_watermark(visual_pdf_data, text="ABINFO SIGN DEMO")
+        current_io = io.BytesIO(visual_pdf_data)
 
-        
+        base_reader = PdfReader(io.BytesIO(pdf_data))
+        tst_client = HTTPTimeStamper(TSA_URL)
 
-        token = None
+        for idx, area in enumerate(signature_areas):
+            field_name = f"WebSignature_{idx+1}"
+            p_idx = area['page']
+            page_meta = base_reader.pages[p_idx]
 
-        for slot in lib.get_slots(token_present=True):
+            offset_x = float(page_meta.mediabox.left if hasattr(page_meta.mediabox, 'left') else page_meta.mediaBox.getLowerLeft_x())
+            offset_y = float(page_meta.mediabox.bottom if hasattr(page_meta.mediabox, 'bottom') else page_meta.mediaBox.getLowerLeft_y())
 
-            try:
+            x1, y1 = int(area['x'] + offset_x), int(area['y'] + offset_y)
+            x2, y2 = int(area['x'] + area['width'] + offset_x), int(area['y'] + area['height'] + offset_y)
 
-                token = slot.get_token()
+            writer = IncrementalPdfFileWriter(current_io)
+            sanitize_acroform_field_names(writer)
+            append_signature_field(writer, SigFieldSpec(field_name, box=(x1, y1, x2, y2), on_page=p_idx))
 
-                break
+            tmp_io = io.BytesIO(); writer.write(tmp_io); tmp_io.seek(0)
+            final_writer = IncrementalPdfFileWriter(tmp_io)
+            sanitize_acroform_field_names(final_writer)
 
-            except Exception: continue
-
-        if not token: raise ValueError("Hardware Token not found.")
-
-
-
-        with token.open(user_pin=pin) as session:
-
-            cert_id, cert_parsed = None, None
-
-            for obj in session.get_objects({pkcs11.Attribute.CLASS: pkcs11.ObjectClass.CERTIFICATE}):
-
-                c = x509.load_der_x509_certificate(obj[pkcs11.Attribute.VALUE])
-
-                if str(c.serial_number) == str(serial_number):
-
-                    cert_id, cert_parsed = obj[pkcs11.Attribute.ID], c
-
-                    break
-
-            
-
-            if not cert_id: raise ValueError("Certificate not found. Check PIN.")
-
-            signer = PKCS11Signer(pkcs11_session=session, cert_id=cert_id)
-
-
-
-            visual_pdf_data = draw_reportlab_layer(
-
-                pdf_data, signature_areas, cert_parsed,
-
-                reason=reason_val, location=location_val,
-
-                logo_path=temp_logo_path
-
+            empty_stamp = StaticStampStyle(border_width=0, background=None)
+            pdf_signer = signers.PdfSigner(
+                signature_meta=signers.PdfSignatureMetadata(field_name=field_name),
+                signer=signer, 
+                timestamper=tst_client,
+                stamp_style=empty_stamp
             )
 
-            # In Web Demo / 4-Day Trial mode without active license, apply small demo watermark on every page
-
-            if is_demo:
-
-                visual_pdf_data = apply_demo_watermark(visual_pdf_data, text="ABINFO SIGN DEMO")
-
-            current_io = io.BytesIO(visual_pdf_data)
-
-
-
-            base_reader = PdfReader(io.BytesIO(pdf_data))
-
-            tst_client = HTTPTimeStamper(TSA_URL)
-
-            
-
-            for idx, area in enumerate(signature_areas):
-
-                field_name = f"WebSignature_{idx+1}"
-
-                p_idx = area['page']
-
-                page_meta = base_reader.pages[p_idx]
-
-                
-
-                offset_x = float(page_meta.mediabox.left if hasattr(page_meta.mediabox, 'left') else page_meta.mediaBox.getLowerLeft_x())
-
-                offset_y = float(page_meta.mediabox.bottom if hasattr(page_meta.mediabox, 'bottom') else page_meta.mediaBox.getLowerLeft_y())
-
-
-
-                x1, y1 = int(area['x'] + offset_x), int(area['y'] + offset_y)
-
-                x2, y2 = int(area['x'] + area['width'] + offset_x), int(area['y'] + area['height'] + offset_y)
-
-                
-
-                writer = IncrementalPdfFileWriter(current_io)
-
-                sanitize_acroform_field_names(writer)
-
-                append_signature_field(writer, SigFieldSpec(field_name, box=(x1, y1, x2, y2), on_page=p_idx))
-
-                
-
-                tmp_io = io.BytesIO(); writer.write(tmp_io); tmp_io.seek(0)
-
-                final_writer = IncrementalPdfFileWriter(tmp_io)
-
-                sanitize_acroform_field_names(final_writer)
-
-                
-
-                empty_stamp = StaticStampStyle(border_width=0, background=None)
-
-                pdf_signer = signers.PdfSigner(
-
-                    signature_meta=signers.PdfSignatureMetadata(field_name=field_name),
-
-                    signer=signer, 
-
-                    timestamper=tst_client,
-
-                    stamp_style=empty_stamp
-
-                )
-
-                
-
-                signed_out = io.BytesIO()
-
-                pdf_signer.sign_pdf(final_writer, in_place=False, output=signed_out)
-
-                signed_out.seek(0)
-
-                current_io = signed_out
-
-
+            signed_out = io.BytesIO()
+            pdf_signer.sign_pdf(final_writer, in_place=False, output=signed_out)
+            signed_out.seek(0)
+            current_io = signed_out
 
         return send_file(current_io, as_attachment=True, download_name="TokenSigned.pdf", mimetype='application/pdf')
 
@@ -6245,6 +6427,10 @@ def sign_pdf():
         return jsonify({"error": str(e)}), 500
 
     finally:
+
+        if 'session' in locals() and session:
+            try: session.close()
+            except Exception: pass
 
         if temp_logo_path and os.path.exists(temp_logo_path):
 
@@ -11130,7 +11316,7 @@ class SignatureSettingsDialog:
 
         c_link.pack(fill=tk.X, pady=(0, 8))
 
-        tk.Label(c_link, text="⚙️ Looking for Local API Server (Port 5000) or Version Updates?", font=get_sys_font(8, "bold"), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W)
+        tk.Label(c_link, text="⚙️ Looking for Local API Server or Version Updates?", font=get_sys_font(8, "bold"), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W)
 
         tk.Label(c_link, text="Local API Server controls and Software Update settings have been relocated to the main ⚙ Settings window.", font=get_sys_font(8), fg="#047857", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 6))
 
@@ -11514,9 +11700,9 @@ class TokenDriverShortcutsDialog:
 
             r"C:\Program Files\Watchdata\WD PROXKey\WDAdmintool.exe",
 
-            r"C:\Windows\System32\Watchdata\PROXKey CSP India V3.0\wdkmgr.exe",
+            r"C:\Windows\System32\Watchdata\PROXKey CSP India V4.0\wdkmgr.exe",
 
-            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V3.0\wdkmgr.exe",
+            r"C:\Windows\SysWOW64\Watchdata\PROXKey CSP India V4.0\wdkmgr.exe",
 
             r"C:\Program Files (x86)\Watchdata\PROXKey\wdkmgr.exe"
 
@@ -11853,11 +12039,8 @@ class SettingsDialog:
 
 
         # Tab 2: Local API Server
-
         tab_srv = ttk.Frame(self.notebook, padding=10)
-
-        self.notebook.add(tab_srv, text="🚀 Local API Server (Port 5000)")
-
+        self.notebook.add(tab_srv, text="🚀 Local API Server")
         self._build_server_tab(tab_srv)
 
 
@@ -11912,7 +12095,7 @@ class SettingsDialog:
 
 
 
-        tk.Label(card, text="Local Background API Server (HTTP Port 5000)", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
+        tk.Label(card, text="Local Background API Server", font=get_sys_font(11, "bold"), fg="#1E40AF", bg="#FFFFFF").pack(anchor=tk.W, pady=(0, 4))
 
         tk.Label(
 
@@ -11942,15 +12125,7 @@ class SettingsDialog:
 
 
 
-        tk.Label(
 
-            status_box,
-
-            text="API Endpoint: http://127.0.0.1:5000/api/sign  |  Health Check: http://127.0.0.1:5000/api/health",
-
-            font=get_sys_font(8), fg="#64748B", bg="#F8FAFC"
-
-        ).pack(anchor=tk.W, pady=(4, 0))
 
 
 
@@ -11980,7 +12155,7 @@ class SettingsDialog:
 
 
 
-        ttk.Button(btn_box, text="🌐 Test Ping (Browser)", style="Tool3D.TButton", command=lambda: webbrowser.open("http://127.0.0.1:5000/api/health")).pack(side=tk.LEFT)
+
 
 
 
@@ -12010,7 +12185,7 @@ class SettingsDialog:
 
             info_card,
 
-            text="• Server binds strictly to 127.0.0.1 (Localhost only) preventing unauthorized remote network access.\n"
+            text="• Server binds strictly to localhost only preventing unauthorized remote network access.\n"
 
                  "• Cross-Origin Resource Sharing (CORS) is enabled to support web-based signing portals.\n"
 
@@ -12062,7 +12237,7 @@ class SettingsDialog:
 
         tk.Label(ver_box, text=f"Build Channel: Official Windows 64-bit Stable Release  |  OS: {CURRENT_OS}", font=get_sys_font(8), fg="#065F46", bg="#F0FDF4").pack(anchor=tk.W, pady=(2, 0))
 
-        tk.Label(ver_box, text=f"Update Server: https://github.com/a-b-infotech/signer/blob/main/version.json", font=get_sys_font(7, "italic"), fg="#64748B", bg="#F0FDF4").pack(anchor=tk.W, pady=(4, 0))
+
 
 
 
@@ -12098,7 +12273,7 @@ class SettingsDialog:
 
             upd_btn_row, text="🌐 Visit Download Portal", style="Tool3D.TButton",
 
-            command=lambda: webbrowser.open("https://github.com/a-b-infotech/signer/releases")
+            command=lambda: webbrowser.open("https://a-b-infotech.github.io/signer/")
 
         ).pack(side=tk.LEFT, padx=(0, 6))
 
@@ -12122,7 +12297,7 @@ class SettingsDialog:
 
         if local_api_server.is_running:
 
-            self.lbl_server_status.config(text="🟢 Status: RUNNING on http://127.0.0.1:5000", fg="#047857")
+            self.lbl_server_status.config(text="🟢 Status: RUNNING", fg="#047857")
 
             self.btn_stop_server.config(state=tk.NORMAL)
 
@@ -12132,7 +12307,7 @@ class SettingsDialog:
 
         else:
 
-            self.lbl_server_status.config(text="🔴 Status: STOPPED (Local API is offline)", fg="#DC2626")
+            self.lbl_server_status.config(text="🔴 Status: STOPPED", fg="#DC2626")
 
             self.btn_stop_server.config(state=tk.DISABLED)
 
@@ -12166,7 +12341,7 @@ class SettingsDialog:
 
         if ok:
 
-            messagebox.showinfo("Server Started", "Local API server is now running on http://127.0.0.1:5000", parent=self.dialog)
+            messagebox.showinfo("Server Started", "Local API server is now running.", parent=self.dialog)
 
         else:
 
@@ -12182,7 +12357,7 @@ class SettingsDialog:
 
         if ok:
 
-            messagebox.showinfo("Server Restarted", "Local API server was successfully restarted on http://127.0.0.1:5000", parent=self.dialog)
+            messagebox.showinfo("Server Restarted", "Local API server was successfully restarted.", parent=self.dialog)
 
         else:
 
@@ -15709,10 +15884,13 @@ class VisualPdfSignerApp:
                     token = slot.get_token()
 
                     with token.open() as session:
-
                         for obj in session.get_objects({pkcs11.Attribute.CLASS: pkcs11.ObjectClass.CERTIFICATE}):
-
-                            c = x509.load_der_x509_certificate(obj[pkcs11.Attribute.VALUE])
+                            try:
+                                val = obj[pkcs11.Attribute.VALUE]
+                                if not val: continue
+                                c = x509.load_der_x509_certificate(val)
+                            except Exception:
+                                continue
 
                             # Filter CA / Root / Intermediate CA certificates
 
@@ -15764,9 +15942,15 @@ class VisualPdfSignerApp:
 
 
 
-                            cid = obj[pkcs11.Attribute.ID]
+                            cid = None
+                            try: cid = obj[pkcs11.Attribute.ID]
+                            except Exception: pass
+                            if not cid:
+                                cid = str(c.serial_number).encode('utf-8')
 
-                            lbl = obj[pkcs11.Attribute.LABEL]
+                            lbl = ""
+                            try: lbl = obj[pkcs11.Attribute.LABEL] or ""
+                            except Exception: pass
 
 
 
@@ -16078,89 +16262,40 @@ class VisualPdfSignerApp:
 
 
 
+            session = None
             if is_token:
-
-                lib = pkcs11.lib(driver_path)
-
-                token = None
-
-                for slot in lib.get_slots(token_present=True):
-
-                    try: token = slot.get_token(); break
-
-                    except Exception: continue
-
-                if not token: raise ValueError("Hardware token not detected. Ensure USB is inserted.")
-
-
-
-                with token.open(user_pin=pin) as session:
-
-                    cert_id, cert_parsed, cert_lbl = None, None, None
-
-                    for obj in session.get_objects({pkcs11.Attribute.CLASS: pkcs11.ObjectClass.CERTIFICATE}):
-
-                        c = x509.load_der_x509_certificate(obj[pkcs11.Attribute.VALUE])
-
-                        if str(c.serial_number) == str(cert_alias):
-
-                            cert_id = obj[pkcs11.Attribute.ID]
-
-                            cert_lbl = obj[pkcs11.Attribute.LABEL]
-
-                            cert_parsed = c
-
-                            break
-
-                    if not cert_id: raise ValueError("Certificate not found in token.")
-
+                session, cert_obj, cert_parsed, cert_id, cert_lbl = _open_token_session_for_cert(
+                    driver_path, pin, cert_alias=cert_alias
+                )
+                try:
+                    priv_key = _resolve_pkcs11_private_key(session, cert_parsed=cert_parsed, cert_id=cert_id, cert_lbl=cert_lbl)
                     asn1_cert = a509.Certificate.load(cert_parsed.public_bytes(Encoding.DER))
-
                     signer = PKCS11Signer(
-
                         pkcs11_session=session,
-
                         cert_id=cert_id,
-
-                        key_id=cert_id,
-
-                        key_label=cert_lbl,
-
                         signing_cert=asn1_cert,
-
                         other_certs_to_pull=(),
-
                         bulk_fetch=False
-
                     )
-
-
+                    signer._key_handle = priv_key
+                    signer._py_cert_parsed = cert_parsed
 
                     appearance_opts = {
-
                         'show_name': self.show_name_var.get(),
-
                         'show_org': self.show_org_var.get(),
-
                         'show_date': self.show_date_var.get(),
-
                         'show_reason': self.show_reason_var.get(),
-
                         'show_address': self.show_address_var.get(),
-
                         'show_issuer': self.show_issuer_var.get(),
-
                         'show_tick': self.show_tick_var.get(),
-
                         'show_border': self.show_border_var.get(),
-
                     }
 
-
-
                     visual_pdf = draw_reportlab_layer(pdf_data, areas, cert_parsed, reason, location, contact, logo_path=custom_logo, appearance_opts=appearance_opts)
-
                     self._pyhanko_sign_incremental(visual_pdf, out_p, signer, areas, tsa)
+                finally:
+                    try: session.close()
+                    except Exception: pass
 
             else:
 
@@ -16533,62 +16668,26 @@ class VisualPdfSignerApp:
 
 
                 if is_token:
-
-                    lib = pkcs11.lib(driver_path)
-
-                    token = None
-
-                    for slot in lib.get_slots(token_present=True):
-
-                        try: token = slot.get_token(); break
-
-                        except Exception: continue
-
-                    if not token: raise ValueError("Hardware token not detected. Ensure USB is inserted.")
-
-
-
-                    with token.open(user_pin=pin) as session:
-
-                        cert_id, cert_parsed, cert_lbl = None, None, None
-
-                        for obj in session.get_objects({pkcs11.Attribute.CLASS: pkcs11.ObjectClass.CERTIFICATE}):
-
-                            c = x509.load_der_x509_certificate(obj[pkcs11.Attribute.VALUE])
-
-                            if str(c.serial_number) == str(cert_alias):
-
-                                cert_id = obj[pkcs11.Attribute.ID]
-
-                                cert_lbl = obj[pkcs11.Attribute.LABEL]
-
-                                cert_parsed = c
-
-                                break
-
-                        if not cert_id: raise ValueError("Certificate not found on token.")
-
+                    session, cert_obj, cert_parsed, cert_id, cert_lbl = _open_token_session_for_cert(
+                        driver_path, pin, cert_alias=cert_alias
+                    )
+                    try:
+                        priv_key = _resolve_pkcs11_private_key(session, cert_parsed=cert_parsed, cert_id=cert_id, cert_lbl=cert_lbl)
                         asn1_cert = a509.Certificate.load(cert_parsed.public_bytes(Encoding.DER))
-
                         signer = PKCS11Signer(
-
                             pkcs11_session=session,
-
                             cert_id=cert_id,
-
-                            key_id=cert_id,
-
-                            key_label=cert_lbl,
-
                             signing_cert=asn1_cert,
-
                             other_certs_to_pull=(),
-
                             bulk_fetch=False
-
                         )
+                        signer._key_handle = priv_key
+                        signer._py_cert_parsed = cert_parsed
 
                         process_batch(signer, cert_parsed)
+                    finally:
+                        try: session.close()
+                        except Exception: pass
 
                 else:
 
@@ -16984,7 +17083,7 @@ def main():
 
                     pystray.Menu.SEPARATOR,
 
-                    item(lambda itm: "🌐 Stop Local API Server (Port 5000)" if local_api_server.is_running else "🌐 Start Local API Server (Port 5000)", _toggle_server),
+                    item(lambda itm: "🌐 Stop Local API Server" if local_api_server.is_running else "🌐 Start Local API Server", _toggle_server),
 
                     item('🔄 Check for Software Updates...', _check_upd),
 

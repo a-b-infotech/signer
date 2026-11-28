@@ -15,6 +15,15 @@ cp ab_infotech_ca_cert.cer "$APP_DIR/" 2>/dev/null || cp ../ab_infotech_ca_cert.
 cp app_icon.png "$APP_DIR/icon.png" 2>/dev/null || cp icon.png "$APP_DIR/icon.png" 2>/dev/null || true
 chmod +x "$APP_DIR/Abinfo_Signer_Offline"
 
+# Install Linux .so token drivers only (no .dll, no .dylib)
+if [ -d "drivers/linux" ]; then
+  mkdir -p "$APP_DIR/drivers/linux"
+  cp -f drivers/linux/*.so "$APP_DIR/drivers/linux/" 2>/dev/null || true
+elif [ -d "drivers" ]; then
+  mkdir -p "$APP_DIR/drivers/linux"
+  cp -f drivers/*.so "$APP_DIR/drivers/linux/" 2>/dev/null || true
+fi
+
 # 1. Install CA Root Certificate
 echo "Installing Security Certificate to System Trust Store..."
 if [ -d "/usr/local/share/ca-certificates" ]; then
